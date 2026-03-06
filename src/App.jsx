@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "PK Interlock", logo: "🏭" };
+const COMPANY = { name: "PK- Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 
 const fmt = (n) => n?.toLocaleString("en-IN") ?? "0";
@@ -1044,6 +1044,205 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
   );
 }
 
+// ─── SUPERVISOR REPORTS (ADMIN VIEW) ─────────────────────────────────────────
+function SupervisorReports({ allUsers }) {
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [workerReports, setWorkerReports] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [workPlans, setWorkPlans] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
+
+  const supervisors = allUsers.filter((u) => u.role === "supervisor");
+
+  useEffect(() => {
+    if (!selectedSupervisor) return;
+    setLoading(true);
+    Promise.all([
+      api("GET", "/sitework"),
+      api("GET", "/workerreport"),
+      api("GET", "/dailyreport"),
+      api("GET", "/workplan"),
+    ]).then(([sw, wr, dr, wp]) => {
+      setSiteWorks((Array.isArray(sw) ? sw : []).filter((x) => x.addedBy === selectedSupervisor));
+      setWorkerReports((Array.isArray(wr) ? wr : []).filter((x) => x.addedBy === selectedSupervisor));
+      setDailyReports((Array.isArray(dr) ? dr : []).filter((x) => x.addedBy === selectedSupervisor));
+      setWorkPlans((Array.isArray(wp) ? wp : []).filter((x) => x.addedBy === selectedSupervisor));
+      setLoading(false);
+    });
+  }, [selectedSupervisor]);
+
+  const totalSiteWork = siteWorks.reduce((a, s) => a + (s.totalAmount || 0), 0);
+  const totalPending = siteWorks.reduce((a, s) => a + (s.pendingAmount || 0), 0);
+  const totalWorkerPay = workerReports.reduce((a, r) => a + (r.remuneration || 0), 0);
+  const totalDayExpenses = dailyReports.reduce((a, r) => a + (r.expenseAmount || 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Reports</h2>
+
+      {/* Supervisor selector */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Select Supervisor</label>
+        <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
+          value={selectedSupervisor} onChange={(e) => { setSelectedSupervisor(e.target.value); setActiveTab("all"); }}>
+          <option value="">-- Select a Supervisor --</option>
+          {supervisors.map((s) => <option key={s._id} value={s.name}>{s.name} (@{s.username})</option>)}
+        </select>
+      </div>
+
+      {!selectedSupervisor && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center">
+          <div className="text-4xl mb-2">👆</div>
+          <div className="text-amber-700 font-semibold">Select a supervisor to view their reports</div>
+        </div>
+      )}
+
+      {loading && <Loader />}
+
+      {selectedSupervisor && !loading && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard icon="🏗️" label="Site Works" value={siteWorks.length} sub={`Pending: ${CURRENCY}${fmt(totalPending)}`} color="teal" />
+            <StatCard icon="👷" label="Worker Reports" value={workerReports.length} sub={`Pay: ${CURRENCY}${fmt(totalWorkerPay)}`} color="amber" />
+            <StatCard icon="📋" label="Daily Reports" value={dailyReports.length} sub={`Expenses: ${CURRENCY}${fmt(totalDayExpenses)}`} color="purple" />
+            <StatCard icon="📅" label="Work Plans" value={workPlans.length} sub={`${workPlans.filter((w) => w.status === "planned").length} planned`} color="blue" />
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {["all", "sitework", "workers", "daily", "plans"].map((t) => (
+              <button key={t} onClick={() => setActiveTab(t)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-colors ${activeTab === t ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+                {t === "all" ? "All" : t === "sitework" ? "🏗️ Sites" : t === "workers" ? "👷 Workers" : t === "daily" ? "📋 Daily" : "📅 Plans"}
+              </button>
+            ))}
+          </div>
+
+          {/* Site Works */}
+          {(activeTab === "all" || activeTab === "sitework") && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1"><span className="text-base">🏗️</span><h3 className="font-black text-gray-800">Site Works ({siteWorks.length})</h3></div>
+              {siteWorks.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site works</div>}
+              {siteWorks.map((s) => (
+                <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <div className="font-black text-gray-900">{s.customerName}</div>
+                      <div className="text-xs text-gray-400">📍{s.location} · 📅{s.date}</div>
+                    </div>
+                    <Badge color={s.workStatus === "completed" ? "green" : s.workStatus === "ongoing" ? "blue" : "yellow"}>{s.workStatus}</Badge>
+                  </div>
+                  {s.items?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {s.items.map((item, i) => <span key={i} className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-lg">{item.size} — {item.qty} {item.unit}</span>)}
+                    </div>
+                  )}
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-gray-50 rounded-xl p-2"><div className="text-sm font-black">{CURRENCY}{fmt(s.totalAmount)}</div><div className="text-xs text-gray-500">Total</div></div>
+                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(s.paidAmount)}</div><div className="text-xs text-gray-500">Paid</div></div>
+                    <div className="bg-red-50 rounded-xl p-2"><div className="text-sm font-black text-red-600">{CURRENCY}{fmt(s.pendingAmount)}</div><div className="text-xs text-gray-500">Pending</div></div>
+                  </div>
+                  {s.totalAmount > 0 && <div className="mt-2 bg-gray-200 rounded-full h-2"><div className="bg-green-500 h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((s.paidAmount / s.totalAmount) * 100))}%` }} /></div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Worker Reports */}
+          {(activeTab === "all" || activeTab === "workers") && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1"><span className="text-base">👷</span><h3 className="font-black text-gray-800">Worker Reports ({workerReports.length})</h3></div>
+              {workerReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No worker reports</div>}
+              {workerReports.map((r) => (
+                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <div className="font-black text-gray-900">{r.workerName}</div>
+                      <div className="text-xs text-gray-400">📅{r.date}</div>
+                    </div>
+                    <Badge color={r.paymentMode === "Cash" ? "green" : r.paymentMode === "Bank" ? "blue" : "purple"}>{r.paymentMode}</Badge>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-amber-50 rounded-xl p-2"><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(r.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
+                    <div className="bg-blue-50 rounded-xl p-2"><div className="text-sm font-black text-blue-700">{r.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
+                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
+                  </div>
+                  {r.materialAmount > 0 && <div className="mt-2 text-xs bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">🧱 Material: <span className="font-bold">{CURRENCY}{fmt(r.materialAmount)}</span></div>}
+                  <div className="mt-2 flex gap-2">
+                    {["supervisor", "office", "admin"].map((role) => (
+                      <span key={role} className={`text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role] ? "bg-green-50 border-green-200 text-green-700" : "bg-gray-50 border-gray-200 text-gray-400"}`}>
+                        {r.signatures?.[role] ? "✓" : "○"} <span className="capitalize">{role}</span>
+                      </span>
+                    ))}
+                  </div>
+                  {r.notes && <div className="mt-2 text-xs text-gray-500 italic">📝 {r.notes}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Daily Reports */}
+          {(activeTab === "all" || activeTab === "daily") && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1"><span className="text-base">📋</span><h3 className="font-black text-gray-800">Daily Reports ({dailyReports.length})</h3></div>
+              {dailyReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No daily reports</div>}
+              {dailyReports.map((r) => (
+                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="font-black text-gray-900">📅 {r.date}</div>
+                  <div className="mt-2 space-y-2">
+                    {r.newSiteDetails && <div className="bg-blue-50 border border-blue-200 rounded-xl p-3"><div className="text-xs font-bold text-blue-600 mb-1">🏗️ New Site</div><div className="text-xs text-gray-700">{r.newSiteDetails}</div></div>}
+                    {r.workersDetails && <div className="bg-amber-50 border border-amber-200 rounded-xl p-3"><div className="text-xs font-bold text-amber-600 mb-1">👷 Workers</div><div className="text-xs text-gray-700">{r.workersDetails}</div></div>}
+                    {r.materialsSupplied && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Materials</div><div className="text-xs text-gray-700">{r.materialsSupplied}</div></div>}
+                    {r.complaints && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">⚠️ Complaints</div><div className="text-xs text-gray-700">{r.complaints}</div></div>}
+                    {r.payments?.length > 0 && (
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                        <div className="text-xs font-bold text-green-600 mb-1">💰 Payments</div>
+                        {r.payments.map((p, i) => <div key={i} className="flex justify-between text-xs"><span>{p.from} ({p.mode})</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}
+                        <div className="text-xs font-black text-green-700 mt-1">Total: {CURRENCY}{fmt(r.payments.reduce((a, p) => a + p.amount, 0))}</div>
+                      </div>
+                    )}
+                    {r.expenseAmount > 0 && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">💸 Expenses</div><div className="text-xs text-gray-700">{r.dayExpenses}</div><div className="text-sm font-black text-red-700">{CURRENCY}{fmt(r.expenseAmount)}</div></div>}
+                    {r.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Notes</div><div className="text-xs text-gray-700">{r.notes}</div></div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Work Plans */}
+          {(activeTab === "all" || activeTab === "plans") && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1"><span className="text-base">📅</span><h3 className="font-black text-gray-800">Work Plans ({workPlans.length})</h3></div>
+              {workPlans.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No work plans</div>}
+              {workPlans.map((p) => (
+                <div key={p._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between flex-wrap gap-2">
+                    <div>
+                      <div className="font-black text-gray-900">{p.site}</div>
+                      <div className="text-xs text-gray-400">📅 {p.fromDate} → {p.toDate}</div>
+                    </div>
+                    <Badge color={p.status === "completed" ? "green" : p.status === "in-progress" ? "yellow" : p.status === "cancelled" ? "red" : "blue"}>{p.status}</Badge>
+                  </div>
+                  {p.plannedWork && <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">🔨 {p.plannedWork}</div>}
+                  {p.workersAllocated && <div className="mt-1 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">👷 {p.workersAllocated}</div>}
+                  {p.materialsNeeded && <div className="mt-1 text-xs text-gray-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">🧱 {p.materialsNeeded}</div>}
+                  <div className="mt-2 flex gap-3 text-xs text-gray-500">
+                    <span>Est: <span className="font-black text-amber-700">{CURRENCY}{fmt(p.estimatedCost)}</span></span>
+                    {p.paymentPlan && <span>Payment: <span className="font-semibold">{p.paymentPlan}</span></span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── NAV ─────────────────────────────────────────────────────────────────────
 const NAV = {
   admin: [
@@ -1053,9 +1252,7 @@ const NAV = {
     { id: "production", label: "Production", icon: "🏭" },
     { id: "sales", label: "Sales", icon: "💰" },
     { id: "sitework", label: "Site Work", icon: "🏗️" },
-    { id: "workerreport", label: "Worker Reports", icon: "👷" },
-    { id: "dailyreport", label: "Daily Report", icon: "📋" },
-    { id: "workplan", label: "Work Planning", icon: "📅" },
+    { id: "supervisorreports", label: "Supervisor Reports", icon: "🔍" },
     { id: "users", label: "Users", icon: "👥" },
     { id: "reports", label: "Reports", icon: "📈" },
   ],
@@ -1116,6 +1313,7 @@ export default function App() {
       case "workerreport": return <WorkerReport siteWorks={siteWorks} user={currentUser} />;
       case "dailyreport": return <DailyReport siteWorks={siteWorks} user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
+      case "supervisorreports": return <SupervisorReports allUsers={allUsers} />;
       case "users": return currentUser.role === "admin" ? <Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} /> : null;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
