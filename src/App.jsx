@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "Al-Noor Interlock", logo: "🏭" };
+const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 
 const fmt = (n) => n?.toLocaleString("en-IN") ?? "0";
