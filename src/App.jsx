@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "PK- Interlock", logo: "🏭" };
+const COMPANY = { name: "Al-Noor Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 
 const fmt = (n) => n?.toLocaleString("en-IN") ?? "0";
@@ -213,80 +213,76 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 }
 
 // ─── WORKER REPORT ────────────────────────────────────────────────────────────
+// ─── SITE REPORT (Worker Report) ─────────────────────────────────────────────
 function WorkerReport({ siteWorks, user }) {
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ date: today(), siteId: "", workerName: "", remuneration: "", workingArea: "", workAmount: "", paymentMode: "Cash", materialAmount: "", notes: "" });
-  const [signatures, setSignatures] = useState({ supervisor: false, office: false, admin: false });
+  const emptyForm = { startingDate: today(), siteId: "", workerName: "", workingCost: "", extraWork: "", extraMaterial: "", totalWorkingArea: "", totalAmount: "", paymentMode: "Cash", amountReceivedBy: "", materialSupply: "", notes: "", signatures: { supervisor: false, office: false, admin: false } };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
     api("GET", "/workerreport").then((d) => { setReports(Array.isArray(d) ? d : []); setLoading(false); });
   }, []);
 
   const save = async () => {
-    const data = { ...form, remuneration: +form.remuneration, workingArea: +form.workingArea, workAmount: +form.workAmount, materialAmount: +form.materialAmount, signatures: { supervisor: false, office: false, admin: false }, addedBy: user.name };
+    const data = { ...form, workingCost: +form.workingCost, extraWork: +form.extraWork, totalWorkingArea: +form.totalWorkingArea, totalAmount: +form.totalAmount, addedBy: user.name };
     const item = await api("POST", "/workerreport", data);
     setReports((p) => [item, ...p]);
     setModal(false);
-    setForm({ date: today(), siteId: "", workerName: "", remuneration: "", workingArea: "", workAmount: "", paymentMode: "Cash", materialAmount: "", notes: "" });
+    setForm(emptyForm);
   };
 
   const signReport = async (id, role) => {
     const report = reports.find((r) => r._id === id);
-    const updatedSigs = { ...report.signatures, [role]: true };
+    const updatedSigs = { ...(report.signatures || {}), [role]: true };
     await api("PUT", `/workerreport/${id}`, { signatures: updatedSigs });
     setReports((p) => p.map((r) => r._id === id ? { ...r, signatures: updatedSigs } : r));
     if (viewModal?._id === id) setViewModal((v) => ({ ...v, signatures: updatedSigs }));
   };
-
-  const paymentColors = { Cash: "green", Bank: "blue", GPay: "purple" };
 
   if (loading) return <Loader />;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        <h2 className="text-xl font-black text-gray-900">👷 Site Report</h2>
+        <button onClick={() => { setForm(emptyForm); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
       </div>
-
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-gray-900">{reports.length}</div><div className="text-xs text-gray-500">Total Reports</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a, r) => a + (r.workAmount || 0), 0))}</div><div className="text-xs text-gray-500">Total Work</div></div>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(reports.reduce((a, r) => a + (r.remuneration || 0), 0))}</div><div className="text-xs text-gray-500">Total Pay</div></div>
+        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{reports.length}</div><div className="text-xs text-gray-500">Total</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a, r) => a + (r.totalAmount || 0), 0))}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{reports.filter((r) => r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin).length}</div><div className="text-xs text-gray-500">Fully Signed</div></div>
       </div>
-
       <div className="space-y-3">
-        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No worker reports yet</div>}
+        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No site reports yet</div>}
         {reports.map((r) => {
           const allSigned = r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin;
+          const siteName = siteWorks.find((s) => s._id === r.siteId)?.customerName || "—";
           return (
             <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-black text-gray-900">{r.workerName}</h3>
-                    <Badge color={paymentColors[r.paymentMode] || "gray"}>{r.paymentMode}</Badge>
-                    {allSigned && <Badge color="green">✓ Fully Signed</Badge>}
+                    <Badge color={r.paymentMode === "Cash" ? "green" : r.paymentMode === "Bank" ? "blue" : "purple"}>{r.paymentMode}</Badge>
+                    {allSigned && <Badge color="green">✅ Fully Signed</Badge>}
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">📅 {r.date} · 📍 {siteWorks.find((s) => s._id === r.siteId)?.customerName || r.siteId}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">📅 {r.startingDate} · 🏗️ {siteName}</div>
                 </div>
                 <button onClick={() => setViewModal(r)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100">View</button>
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(r.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-blue-700">{r.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-blue-700">{r.totalWorkingArea} sqm</div><div className="text-xs text-gray-500">Total Area</div></div>
+                <div className="bg-green-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.totalAmount)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
               </div>
-              {r.materialAmount > 0 && <div className="mt-2 text-xs text-gray-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">🧱 Material Amount: <span className="font-bold">{CURRENCY}{fmt(r.materialAmount)}</span></div>}
               <div className="mt-3 flex gap-2 flex-wrap">
                 {["supervisor", "office", "admin"].map((role) => (
                   <div key={role} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role] ? "bg-green-50 border-green-200 text-green-700" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
                     {r.signatures?.[role] ? "✓" : "○"} <span className="capitalize font-semibold">{role}</span>
-                    {!r.signatures?.[role] && (user.role === role || (user.role === "admin")) && (
-                      <button onClick={() => signReport(r._id, role)} className="ml-1 bg-green-500 text-white px-1.5 rounded text-xs font-bold hover:bg-green-600">Sign</button>
+                    {!r.signatures?.[role] && (user.role === role || user.role === "admin") && (
+                      <button onClick={() => signReport(r._id, role)} className="ml-1 bg-green-500 text-white px-1.5 py-0.5 rounded text-xs font-bold hover:bg-green-600">Sign</button>
                     )}
                   </div>
                 ))}
@@ -297,50 +293,76 @@ function WorkerReport({ siteWorks, user }) {
       </div>
 
       {modal && (
-        <Modal title="Add Worker Report" onClose={() => setModal(false)}>
+        <Modal title="Add Site Report" onClose={() => setModal(false)}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              <Input label="Starting Date" type="date" value={form.startingDate} onChange={(e) => setForm({ ...form, startingDate: e.target.value })} />
               <Select label="Site" value={form.siteId} options={[{ value: "", label: "Select site..." }, ...siteWorks.map((s) => ({ value: s._id, label: s.customerName }))]} onChange={(e) => setForm({ ...form, siteId: e.target.value })} />
             </div>
-            <Input label="Worker Name" value={form.workerName} onChange={(e) => setForm({ ...form, workerName: e.target.value })} placeholder="Full name" />
+            <Input label="Worker Name" value={form.workerName} onChange={(e) => setForm({ ...form, workerName: e.target.value })} placeholder="Worker full name" />
             <div className="grid grid-cols-2 gap-3">
-              <Input label={`Daily Remuneration (${CURRENCY})`} type="number" value={form.remuneration} onChange={(e) => setForm({ ...form, remuneration: e.target.value })} />
+              <Input label={`Working Cost (${CURRENCY})`} type="number" value={form.workingCost} onChange={(e) => setForm({ ...form, workingCost: e.target.value })} />
+              <Input label="Total Working Area (sqm)" type="number" value={form.totalWorkingArea} onChange={(e) => setForm({ ...form, totalWorkingArea: e.target.value })} />
+            </div>
+
+            <div className="bg-orange-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="➕" title="Extra Work & Material" />
+              <Textarea label="Extra Work Details" value={form.extraWork} onChange={(e) => setForm({ ...form, extraWork: e.target.value })} placeholder="Any extra work done..." />
+              <Textarea label="Extra Material Using" value={form.extraMaterial} onChange={(e) => setForm({ ...form, extraMaterial: e.target.value })} placeholder="Extra materials used..." />
+            </div>
+
+            <div className="bg-green-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="💰" title="Payments" />
+              <Input label={`Total Amount (${CURRENCY})`} type="number" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} />
               <Select label="Payment Mode" value={form.paymentMode} options={["Cash", "Bank", "GPay"]} onChange={(e) => setForm({ ...form, paymentMode: e.target.value })} />
+              <Input label="Amount Received By" value={form.amountReceivedBy} onChange={(e) => setForm({ ...form, amountReceivedBy: e.target.value })} placeholder="Name of person who received" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Working Area (sqm)" type="number" value={form.workingArea} onChange={(e) => setForm({ ...form, workingArea: e.target.value })} />
-              <Input label={`Total Work Amount (${CURRENCY})`} type="number" value={form.workAmount} onChange={(e) => setForm({ ...form, workAmount: e.target.value })} />
+
+            <Textarea label="🧱 Material Supply" value={form.materialSupply} onChange={(e) => setForm({ ...form, materialSupply: e.target.value })} placeholder="Materials supplied to site..." />
+            <Textarea label="📝 Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any other notes..." />
+
+            <div className="bg-gray-50 rounded-xl p-3">
+              <SectionTitle icon="✍️" title="Work Finished — Signatures" />
+              <div className="space-y-2">
+                {["supervisor", "office", "admin"].map((role) => (
+                  <div key={role} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
+                    <span className="capitalize text-sm font-semibold text-gray-700">{role}</span>
+                    <span className="text-xs text-gray-400">Will sign after review</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <Input label={`Material Amount Received (${CURRENCY})`} type="number" value={form.materialAmount} onChange={(e) => setForm({ ...form, materialAmount: e.target.value })} placeholder="0" />
-            <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any remarks..." />
+
             <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
           </div>
         </Modal>
       )}
 
       {viewModal && (
-        <Modal title="Worker Report Details" onClose={() => setViewModal(null)}>
-          <div className="space-y-4">
+        <Modal title="Site Report Details" onClose={() => setViewModal(null)}>
+          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              {[["Worker", viewModal.workerName], ["Date", viewModal.date], ["Site", siteWorks.find((s) => s._id === viewModal.siteId)?.customerName || "-"], ["Payment Mode", viewModal.paymentMode]].map(([l, v]) => (
+              {[["Starting Date", viewModal.startingDate], ["Site", siteWorks.find((s) => s._id === viewModal.siteId)?.customerName || "—"], ["Worker Name", viewModal.workerName], ["Payment Mode", viewModal.paymentMode]].map(([l, v]) => (
                 <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-500">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
               ))}
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(viewModal.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.totalWorkingArea} sqm</div><div className="text-xs text-gray-500">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.workingCost)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(viewModal.totalAmount)}</div><div className="text-xs text-gray-500">Total Amt</div></div>
             </div>
-            {viewModal.materialAmount > 0 && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs text-gray-500">Material Amount</div><div className="font-black text-orange-700">{CURRENCY}{fmt(viewModal.materialAmount)}</div></div>}
-            {viewModal.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-500">Notes</div><div className="text-sm text-gray-700">{viewModal.notes}</div></div>}
+            {viewModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewModal.extraWork}</div></div>}
+            {viewModal.extraMaterial && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material</div><div className="text-sm text-gray-700">{viewModal.extraMaterial}</div></div>}
+            {viewModal.amountReceivedBy && <div className="bg-green-50 border border-green-200 rounded-xl p-3"><div className="text-xs font-bold text-green-600 mb-1">💰 Amount Received By</div><div className="text-sm font-bold text-gray-900">{viewModal.amountReceivedBy}</div></div>}
+            {viewModal.materialSupply && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">🧱 Material Supply</div><div className="text-sm text-gray-700">{viewModal.materialSupply}</div></div>}
+            {viewModal.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Notes</div><div className="text-sm text-gray-700">{viewModal.notes}</div></div>}
             <div>
-              <div className="text-xs font-bold text-gray-500 uppercase mb-2">Signatures</div>
+              <div className="text-xs font-bold text-gray-500 uppercase mb-2">✍️ Work Finished Signatures</div>
               <div className="space-y-2">
                 {["supervisor", "office", "admin"].map((role) => (
                   <div key={role} className={`flex items-center justify-between p-3 rounded-xl border ${viewModal.signatures?.[role] ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200"}`}>
                     <div className="flex items-center gap-2">
-                      <span className={viewModal.signatures?.[role] ? "text-green-600" : "text-gray-400"}>{viewModal.signatures?.[role] ? "✅" : "⭕"}</span>
+                      <span>{viewModal.signatures?.[role] ? "✅" : "⭕"}</span>
                       <span className="capitalize font-semibold text-sm text-gray-700">{role}</span>
                     </div>
                     {!viewModal.signatures?.[role] && (user.role === role || user.role === "admin") && (
@@ -364,11 +386,8 @@ function DailyReport({ siteWorks, user }) {
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({
-    date: today(), newSiteDetails: "", workersDetails: "", materialsSupplied: "",
-    complaints: "", paymentsReceived: "", dayExpenses: "", expenseAmount: "", notes: "",
-    payments: [],
-  });
+  const emptyForm = { date: today(), newSiteDetails: "", runningSiteDetails: "", workersDetails: "", materialSupply: "", complaints: "", payments: [], dayNote: "", expense: "", expenseAmount: "" };
+  const [form, setForm] = useState(emptyForm);
   const [newPayment, setNewPayment] = useState({ from: "", amount: "", mode: "Cash" });
 
   useEffect(() => {
@@ -386,7 +405,7 @@ function DailyReport({ siteWorks, user }) {
     const item = await api("POST", "/dailyreport", data);
     setReports((p) => [item, ...p]);
     setModal(false);
-    setForm({ date: today(), newSiteDetails: "", workersDetails: "", materialsSupplied: "", complaints: "", paymentsReceived: "", dayExpenses: "", expenseAmount: "", notes: "", payments: [] });
+    setForm(emptyForm);
   };
 
   if (loading) return <Loader />;
@@ -394,12 +413,11 @@ function DailyReport({ siteWorks, user }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        <h2 className="text-xl font-black text-gray-900">📋 Supervisor Report</h2>
+        <button onClick={() => { setForm(emptyForm); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
       </div>
-
       <div className="space-y-3">
-        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No daily reports yet</div>}
+        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No supervisor reports yet</div>}
         {reports.map((r) => (
           <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
@@ -408,6 +426,7 @@ function DailyReport({ siteWorks, user }) {
                 <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
                 <div className="flex gap-2 mt-2 flex-wrap">
                   {r.newSiteDetails && <Badge color="blue">🏗️ New Site</Badge>}
+                  {r.runningSiteDetails && <Badge color="teal">🔄 Running Site</Badge>}
                   {r.complaints && <Badge color="red">⚠️ Complaint</Badge>}
                   {r.payments?.length > 0 && <Badge color="green">💰 {r.payments.length} Payments</Badge>}
                   {r.expenseAmount > 0 && <Badge color="orange">💸 Expense</Badge>}
@@ -424,40 +443,42 @@ function DailyReport({ siteWorks, user }) {
       </div>
 
       {modal && (
-        <Modal title="Daily Supervisor Report" onClose={() => setModal(false)}>
+        <Modal title="Supervisor Daily Report" onClose={() => setModal(false)}>
           <div className="space-y-3">
             <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
 
             <div className="bg-blue-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="🏗️" title="New Site Details" />
-              <Textarea label="" value={form.newSiteDetails} onChange={(e) => setForm({ ...form, newSiteDetails: e.target.value })} placeholder="Any new site started today..." />
+              <SectionTitle icon="🆕" title="New Site Details" />
+              <Textarea label="" value={form.newSiteDetails} onChange={(e) => setForm({ ...form, newSiteDetails: e.target.value })} placeholder="New site started today..." />
+            </div>
+
+            <div className="bg-teal-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="🔄" title="Running Site Details" />
+              <Textarea label="" value={form.runningSiteDetails} onChange={(e) => setForm({ ...form, runningSiteDetails: e.target.value })} placeholder="Update on running sites..." />
             </div>
 
             <div className="bg-amber-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="👷" title="Workers Details" />
-              <Textarea label="" value={form.workersDetails} onChange={(e) => setForm({ ...form, workersDetails: e.target.value })} placeholder="Workers present, tasks assigned..." />
+              <SectionTitle icon="👷" title="Workers Detail" />
+              <Textarea label="" value={form.workersDetails} onChange={(e) => setForm({ ...form, workersDetails: e.target.value })} placeholder="Workers present, assigned tasks..." />
             </div>
 
             <div className="bg-orange-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="🧱" title="Materials Supplied" />
-              <Textarea label="" value={form.materialsSupplied} onChange={(e) => setForm({ ...form, materialsSupplied: e.target.value })} placeholder="Materials sent to sites..." />
+              <SectionTitle icon="🧱" title="Material Supply" />
+              <Textarea label="" value={form.materialSupply} onChange={(e) => setForm({ ...form, materialSupply: e.target.value })} placeholder="Materials sent to sites..." />
             </div>
 
             <div className="bg-green-50 rounded-xl p-3 space-y-2">
               <SectionTitle icon="💰" title="Payments Received" />
               {(form.payments || []).map((p) => (
                 <div key={p.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                  <span className="text-sm font-semibold text-gray-700">{p.from} — {CURRENCY}{fmt(p.amount)} ({p.mode})</span>
+                  <span className="text-sm font-semibold text-gray-700">{p.from} — {CURRENCY}{fmt(p.amount)} <Badge color={p.mode === "Cash" ? "green" : p.mode === "Bank" ? "blue" : "purple"}>{p.mode}</Badge></span>
                   <button onClick={() => setForm((f) => ({ ...f, payments: f.payments.filter((x) => x.id !== p.id) }))} className="text-red-400 hover:text-red-600 text-lg">×</button>
                 </div>
               ))}
               <div className="flex gap-2">
-                <input className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
-                  placeholder="From (customer/site)" value={newPayment.from} onChange={(e) => setNewPayment({ ...newPayment, from: e.target.value })} />
-                <input type="number" className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none"
-                  placeholder="Amount" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} />
-                <select className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white"
-                  value={newPayment.mode} onChange={(e) => setNewPayment({ ...newPayment, mode: e.target.value })}>
+                <input className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="From (site/customer)" value={newPayment.from} onChange={(e) => setNewPayment({ ...newPayment, from: e.target.value })} />
+                <input type="number" className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none" placeholder="Amount" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} />
+                <select className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white" value={newPayment.mode} onChange={(e) => setNewPayment({ ...newPayment, mode: e.target.value })}>
                   <option>Cash</option><option>Bank</option><option>GPay</option>
                 </select>
                 <button onClick={addPayment} className="bg-green-500 text-white px-3 py-2 rounded-lg font-bold hover:bg-green-600">+</button>
@@ -469,27 +490,32 @@ function DailyReport({ siteWorks, user }) {
               <Textarea label="" value={form.complaints} onChange={(e) => setForm({ ...form, complaints: e.target.value })} placeholder="Any complaints or issues..." />
             </div>
 
-            <div className="bg-purple-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="💸" title="Day Expenses" />
-              <Textarea label="Expense Details" value={form.dayExpenses} onChange={(e) => setForm({ ...form, dayExpenses: e.target.value })} placeholder="What was spent today..." />
-              <Input label={`Total Expense Amount (${CURRENCY})`} type="number" value={form.expenseAmount} onChange={(e) => setForm({ ...form, expenseAmount: e.target.value })} placeholder="0" />
+            <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="📝" title="Day Note" />
+              <Textarea label="" value={form.dayNote} onChange={(e) => setForm({ ...form, dayNote: e.target.value })} placeholder="General notes for the day..." />
             </div>
 
-            <Textarea label="📝 Day Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any other notes for the day..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Daily Report</button>
+            <div className="bg-purple-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="💸" title="Expense" />
+              <Textarea label="Expense Details" value={form.expense} onChange={(e) => setForm({ ...form, expense: e.target.value })} placeholder="What was spent today..." />
+              <Input label={`Total Expense (${CURRENCY})`} type="number" value={form.expenseAmount} onChange={(e) => setForm({ ...form, expenseAmount: e.target.value })} placeholder="0" />
+            </div>
+
+            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
           </div>
         </Modal>
       )}
 
       {viewModal && (
-        <Modal title={`Daily Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
+        <Modal title={`Supervisor Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
           <div className="space-y-3">
             {[
-              { icon: "🏗️", label: "New Site Details", value: viewModal.newSiteDetails, color: "bg-blue-50 border-blue-200" },
-              { icon: "👷", label: "Workers Details", value: viewModal.workersDetails, color: "bg-amber-50 border-amber-200" },
-              { icon: "🧱", label: "Materials Supplied", value: viewModal.materialsSupplied, color: "bg-orange-50 border-orange-200" },
+              { icon: "🆕", label: "New Site Details", value: viewModal.newSiteDetails, color: "bg-blue-50 border-blue-200" },
+              { icon: "🔄", label: "Running Site Details", value: viewModal.runningSiteDetails, color: "bg-teal-50 border-teal-200" },
+              { icon: "👷", label: "Workers Detail", value: viewModal.workersDetails, color: "bg-amber-50 border-amber-200" },
+              { icon: "🧱", label: "Material Supply", value: viewModal.materialSupply, color: "bg-orange-50 border-orange-200" },
               { icon: "⚠️", label: "Complaints", value: viewModal.complaints, color: "bg-red-50 border-red-200" },
-              { icon: "📝", label: "Day Notes", value: viewModal.notes, color: "bg-gray-50 border-gray-200" },
+              { icon: "📝", label: "Day Note", value: viewModal.dayNote, color: "bg-gray-50 border-gray-200" },
             ].filter((x) => x.value).map(({ icon, label, value, color }) => (
               <div key={label} className={`border rounded-xl p-3 ${color}`}>
                 <div className="text-xs font-bold text-gray-500 mb-1">{icon} {label}</div>
@@ -498,24 +524,24 @@ function DailyReport({ siteWorks, user }) {
             ))}
             {viewModal.payments?.length > 0 && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                <div className="text-xs font-bold text-gray-500 mb-2">💰 Payments Received</div>
+                <div className="text-xs font-bold text-green-700 mb-2">💰 Payments Received</div>
                 {viewModal.payments.map((p, i) => (
                   <div key={i} className="flex justify-between text-sm py-1 border-b border-green-100 last:border-0">
                     <span className="text-gray-700">{p.from} <Badge color={p.mode === "Cash" ? "green" : p.mode === "Bank" ? "blue" : "purple"}>{p.mode}</Badge></span>
                     <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
                   </div>
                 ))}
-                <div className="text-right mt-2 font-black text-green-800 text-sm">Total: {CURRENCY}{fmt(viewModal.payments.reduce((a, p) => a + p.amount, 0))}</div>
+                <div className="text-right mt-2 font-black text-green-800">Total: {CURRENCY}{fmt(viewModal.payments.reduce((a, p) => a + p.amount, 0))}</div>
               </div>
             )}
             {viewModal.expenseAmount > 0 && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                <div className="text-xs font-bold text-gray-500 mb-1">💸 Day Expenses</div>
-                <div className="text-sm text-gray-700">{viewModal.dayExpenses}</div>
-                <div className="text-lg font-black text-red-600 mt-1">{CURRENCY}{fmt(viewModal.expenseAmount)}</div>
+                <div className="text-xs font-bold text-red-600 mb-1">💸 Expense</div>
+                {viewModal.expense && <div className="text-sm text-gray-700 mb-1">{viewModal.expense}</div>}
+                <div className="text-lg font-black text-red-600">{CURRENCY}{fmt(viewModal.expenseAmount)}</div>
               </div>
             )}
-            <div className="text-xs text-gray-400">Added by: {viewModal.addedBy}</div>
+            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
           </div>
         </Modal>
       )}
@@ -529,18 +555,18 @@ function WorkPlanning({ siteWorks, user }) {
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ fromDate: today(), toDate: "", site: "", plannedWork: "", workersAllocated: "", materialsNeeded: "", estimatedCost: "", paymentPlan: "", notes: "" });
+  const emptyForm = { fromDate: today(), toDate: "", site: "", siteWork: "", materialsNeeded: "", payments: "", workersSettling: "", notes: "", status: "planned" };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
     api("GET", "/workplan").then((d) => { setPlans(Array.isArray(d) ? d : []); setLoading(false); });
   }, []);
 
   const save = async () => {
-    const data = { ...form, estimatedCost: +form.estimatedCost, addedBy: user.name, status: "planned" };
-    const item = await api("POST", "/workplan", data);
+    const item = await api("POST", "/workplan", { ...form, addedBy: user.name });
     setPlans((p) => [item, ...p]);
     setModal(false);
-    setForm({ fromDate: today(), toDate: "", site: "", plannedWork: "", workersAllocated: "", materialsNeeded: "", estimatedCost: "", paymentPlan: "", notes: "" });
+    setForm(emptyForm);
   };
 
   const updateStatus = async (id, status) => {
@@ -556,14 +582,16 @@ function WorkPlanning({ siteWorks, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Plan</button>
+        <button onClick={() => { setForm(emptyForm); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Plan</button>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {["planned", "in-progress", "completed", "cancelled"].map((s) => {
-          const count = plans.filter((p) => p.status === s).length;
-          return <div key={s} className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-xl font-black text-gray-900">{count}</div><div className="text-xs text-gray-500 capitalize">{s}</div></div>;
-        })}
+        {["planned", "in-progress", "completed", "cancelled"].map((s) => (
+          <div key={s} className="bg-white border rounded-xl p-3 text-center shadow-sm">
+            <div className="text-xl font-black text-gray-900">{plans.filter((p) => p.status === s).length}</div>
+            <div className="text-xs text-gray-500 capitalize">{s}</div>
+          </div>
+        ))}
       </div>
 
       <div className="space-y-3">
@@ -576,19 +604,17 @@ function WorkPlanning({ siteWorks, user }) {
                   <h3 className="font-black text-gray-900">{p.site}</h3>
                   <Badge color={statusColors[p.status]}>{p.status}</Badge>
                 </div>
-                <div className="text-xs text-gray-400 mt-0.5">📅 {p.fromDate} → {p.toDate}</div>
+                <div className="text-xs text-gray-400 mt-0.5">📅 {p.fromDate} → {p.toDate} (1 week)</div>
               </div>
               <button onClick={() => setViewModal(p)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100 shrink-0">View</button>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-500">Planned Work</div><div className="text-sm font-semibold text-gray-800 truncate">{p.plannedWork}</div></div>
-              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-500">Est. Cost</div><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(p.estimatedCost)}</div></div>
+              {p.siteWork && <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-500">Site Work</div><div className="text-sm font-semibold text-gray-800 truncate">{p.siteWork}</div></div>}
+              {p.workersSettling && <div className="bg-amber-50 rounded-xl p-2"><div className="text-xs text-gray-500">Workers Settling</div><div className="text-sm font-semibold text-amber-800 truncate">{p.workersSettling}</div></div>}
             </div>
-            {p.workersAllocated && <div className="mt-2 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">👷 Workers: <span className="font-semibold">{p.workersAllocated}</span></div>}
             <div className="mt-3 flex gap-2 flex-wrap">
               {["planned", "in-progress", "completed", "cancelled"].filter((s) => s !== p.status).map((s) => (
-                <button key={s} onClick={() => updateStatus(p._id, s)}
-                  className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-200 capitalize">→ {s}</button>
+                <button key={s} onClick={() => updateStatus(p._id, s)} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-200 capitalize">→ {s}</button>
               ))}
             </div>
           </div>
@@ -596,22 +622,36 @@ function WorkPlanning({ siteWorks, user }) {
       </div>
 
       {modal && (
-        <Modal title="New Work Plan" onClose={() => setModal(false)}>
+        <Modal title="New Work Plan (1 Week)" onClose={() => setModal(false)}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Input label="From Date" type="date" value={form.fromDate} onChange={(e) => setForm({ ...form, fromDate: e.target.value })} />
-              <Input label="To Date" type="date" value={form.toDate} onChange={(e) => setForm({ ...form, toDate: e.target.value })} />
+              <Input label="To Date (1 week)" type="date" value={form.toDate} onChange={(e) => setForm({ ...form, toDate: e.target.value })} />
             </div>
-            <Select label="Site" value={form.site} options={[{ value: "", label: "Select site..." }, ...siteWorks.map((s) => ({ value: s.customerName, label: s.customerName })), { value: "New Site", label: "New Site" }]} onChange={(e) => setForm({ ...form, site: e.target.value })} />
-            {form.site === "New Site" && <Input label="New Site Name" value={form.customSite || ""} onChange={(e) => setForm({ ...form, site: e.target.value, customSite: e.target.value })} placeholder="Enter site name" />}
-            <Textarea label="Planned Work" value={form.plannedWork} onChange={(e) => setForm({ ...form, plannedWork: e.target.value })} placeholder="What work is planned..." />
-            <Textarea label="👷 Workers Allocated" value={form.workersAllocated} onChange={(e) => setForm({ ...form, workersAllocated: e.target.value })} placeholder="Worker names and roles..." />
-            <Textarea label="🧱 Materials Needed" value={form.materialsNeeded} onChange={(e) => setForm({ ...form, materialsNeeded: e.target.value })} placeholder="Materials required for this work..." />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label={`Estimated Cost (${CURRENCY})`} type="number" value={form.estimatedCost} onChange={(e) => setForm({ ...form, estimatedCost: e.target.value })} placeholder="0" />
-              <Select label="Payment Plan" value={form.paymentPlan} options={["", "Advance", "On Completion", "Milestone", "Credit"]} onChange={(e) => setForm({ ...form, paymentPlan: e.target.value })} />
+            <Select label="Site" value={form.site} options={[{ value: "", label: "Select site..." }, ...siteWorks.map((s) => ({ value: s.customerName, label: s.customerName })), { value: "__new__", label: "+ New Site" }]} onChange={(e) => setForm({ ...form, site: e.target.value === "__new__" ? "" : e.target.value, isNewSite: e.target.value === "__new__" })} />
+            {form.isNewSite && <Input label="New Site Name" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} placeholder="Enter new site name" />}
+
+            <div className="bg-blue-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="🏗️" title="Site Work Plan" />
+              <Textarea label="" value={form.siteWork} onChange={(e) => setForm({ ...form, siteWork: e.target.value })} placeholder="What site work is planned this week..." />
             </div>
-            <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
+
+            <div className="bg-orange-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="🧱" title="Materials Needed" />
+              <Textarea label="" value={form.materialsNeeded} onChange={(e) => setForm({ ...form, materialsNeeded: e.target.value })} placeholder="Materials required this week..." />
+            </div>
+
+            <div className="bg-green-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="💰" title="Payments Plan" />
+              <Textarea label="" value={form.payments} onChange={(e) => setForm({ ...form, payments: e.target.value })} placeholder="Expected payments, amounts..." />
+            </div>
+
+            <div className="bg-amber-50 rounded-xl p-3 space-y-2">
+              <SectionTitle icon="👷" title="Workers Settling" />
+              <Textarea label="" value={form.workersSettling} onChange={(e) => setForm({ ...form, workersSettling: e.target.value })} placeholder="Worker allocation and settling plan..." />
+            </div>
+
+            <Textarea label="📝 Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
             <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Save Work Plan</button>
           </div>
         </Modal>
@@ -620,12 +660,18 @@ function WorkPlanning({ siteWorks, user }) {
       {viewModal && (
         <Modal title="Work Plan Details" onClose={() => setViewModal(null)}>
           <div className="space-y-3">
-            <div className="flex items-center gap-2"><h3 className="font-black text-gray-900 text-lg">{viewModal.site}</h3><Badge color={statusColors[viewModal.status]}>{viewModal.status}</Badge></div>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-sm font-bold text-blue-700">📅 {viewModal.fromDate} → {viewModal.toDate}</div></div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-black text-gray-900 text-lg">{viewModal.site}</h3>
+              <Badge color={statusColors[viewModal.status]}>{viewModal.status}</Badge>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+              <div className="text-sm font-bold text-blue-700">📅 {viewModal.fromDate} → {viewModal.toDate}</div>
+            </div>
             {[
-              { icon: "🔨", label: "Planned Work", value: viewModal.plannedWork, color: "bg-gray-50 border-gray-200" },
-              { icon: "👷", label: "Workers Allocated", value: viewModal.workersAllocated, color: "bg-amber-50 border-amber-200" },
+              { icon: "🏗️", label: "Site Work", value: viewModal.siteWork, color: "bg-blue-50 border-blue-200" },
               { icon: "🧱", label: "Materials Needed", value: viewModal.materialsNeeded, color: "bg-orange-50 border-orange-200" },
+              { icon: "💰", label: "Payments Plan", value: viewModal.payments, color: "bg-green-50 border-green-200" },
+              { icon: "👷", label: "Workers Settling", value: viewModal.workersSettling, color: "bg-amber-50 border-amber-200" },
               { icon: "📝", label: "Notes", value: viewModal.notes, color: "bg-gray-50 border-gray-200" },
             ].filter((x) => x.value).map(({ icon, label, value, color }) => (
               <div key={label} className={`border rounded-xl p-3 ${color}`}>
@@ -633,10 +679,6 @@ function WorkPlanning({ siteWorks, user }) {
                 <div className="text-sm text-gray-700 whitespace-pre-wrap">{value}</div>
               </div>
             ))}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.estimatedCost)}</div><div className="text-xs text-gray-500">Est. Cost</div></div>
-              {viewModal.paymentPlan && <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{viewModal.paymentPlan}</div><div className="text-xs text-gray-500">Payment Plan</div></div>}
-            </div>
             <div className="text-xs text-gray-400">Added by: {viewModal.addedBy}</div>
           </div>
         </Modal>
@@ -645,7 +687,6 @@ function WorkPlanning({ siteWorks, user }) {
   );
 }
 
-// ─── SITE WORK ────────────────────────────────────────────────────────────────
 function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [modal, setModal] = useState(null);
   const [viewModal, setViewModal] = useState(null);
