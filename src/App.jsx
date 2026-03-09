@@ -863,48 +863,6 @@ function WorkPlanning({ siteWorks, user }) {
     </div>
   );
 }
-
-            <div className="bg-amber-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="👷" title="Workers Settling" />
-              <Textarea label="" value={form.workersSettling} onChange={(e) => setForm({ ...form, workersSettling: e.target.value })} placeholder="Worker allocation and settling plan..." />
-            </div>
-
-            <Textarea label="📝 Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Save Work Plan</button>
-          </div>
-        </Modal>
-      )}
-
-      {viewModal && (
-        <Modal title="Work Plan Details" onClose={() => setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-black text-gray-900 text-lg">{viewModal.site}</h3>
-              <Badge color={statusColors[viewModal.status]}>{viewModal.status}</Badge>
-            </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
-              <div className="text-sm font-bold text-blue-700">📅 {viewModal.fromDate} → {viewModal.toDate}</div>
-            </div>
-            {[
-              { icon: "🏗️", label: "Site Work", value: viewModal.siteWork, color: "bg-blue-50 border-blue-200" },
-              { icon: "🧱", label: "Materials Needed", value: viewModal.materialsNeeded, color: "bg-orange-50 border-orange-200" },
-              { icon: "💰", label: "Payments Plan", value: viewModal.payments, color: "bg-green-50 border-green-200" },
-              { icon: "👷", label: "Workers Settling", value: viewModal.workersSettling, color: "bg-amber-50 border-amber-200" },
-              { icon: "📝", label: "Notes", value: viewModal.notes, color: "bg-gray-50 border-gray-200" },
-            ].filter((x) => x.value).map(({ icon, label, value, color }) => (
-              <div key={label} className={`border rounded-xl p-3 ${color}`}>
-                <div className="text-xs font-bold text-gray-500 mb-1">{icon} {label}</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap">{value}</div>
-              </div>
-            ))}
-            <div className="text-xs text-gray-400">Added by: {viewModal.addedBy}</div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
 function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [modal, setModal] = useState(null);
   const [viewModal, setViewModal] = useState(null);
