@@ -368,7 +368,7 @@ function DailyReport({ siteWorks, user }) {
   const [modal, setModal] = useState(false);
   const [selectedSite, setSelectedSite] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("planned");
+  const [activeTab, setActiveTab] = useState("running");
   const [activeSection, setActiveSection] = useState("newsite");
 
   const emptyWorker = () => ({ id: Date.now(), name: "", attendance: "Present" });
@@ -401,33 +401,35 @@ function DailyReport({ siteWorks, user }) {
     setModal(false); setForm(emptyForm); setActiveSection("newsite");
   };
 
-  // Collect all unique sites from reports grouped by type
+  // Collect all unique sites - NEW sites go straight to running
+  // Priority: completed > running > new(running)
   const allSites = {};
   reports.forEach((r) => {
     if (r.newSite?.siteName) {
       const key = r.newSite.siteName;
-      if (!allSites[key]) allSites[key] = { name: key, status: "planned", entries: [], latest: r };
-      allSites[key].entries.push(r);
+      if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], latest: r };
+      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
+      // Only update status if not already completed
+      if (allSites[key].status !== "completed") allSites[key].status = "running";
       allSites[key].latest = r;
     }
     if (r.runningSite?.siteName) {
       const key = r.runningSite.siteName;
       if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], latest: r };
-      allSites[key].entries.push(r);
-      allSites[key].status = "running";
+      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
+      if (allSites[key].status !== "completed") allSites[key].status = "running";
       allSites[key].latest = r;
     }
     if (r.completedSite?.siteName) {
       const key = r.completedSite.siteName;
       if (!allSites[key]) allSites[key] = { name: key, status: "completed", entries: [], latest: r };
-      allSites[key].entries.push(r);
-      allSites[key].status = "completed";
+      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
+      allSites[key].status = "completed"; // completed always wins
       allSites[key].latest = r;
     }
   });
 
   const siteList = Object.values(allSites);
-  const plannedSites = siteList.filter(s => s.status === "planned");
   const runningSites = siteList.filter(s => s.status === "running");
   const completedSites = siteList.filter(s => s.status === "completed");
 
@@ -626,47 +628,20 @@ function DailyReport({ siteWorks, user }) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-yellow-700">{plannedSites.length}</div><div className="text-xs text-gray-500">Planned</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{runningSites.length}</div><div className="text-xs text-gray-500">Running</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{completedSites.length}</div><div className="text-xs text-gray-500">Completed</div></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{runningSites.length}</div><div className="text-xs text-gray-500">Running Sites</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{completedSites.length}</div><div className="text-xs text-gray-500">Completed Sites</div></div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2">
-        {[["planned", "📋 Planned"], ["running", "🔄 Running"], ["completed", "✅ Completed"]].map(([id, label]) => (
+        {[["running", "🔄 Running"], ["completed", "✅ Completed"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === id ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
             {label}
           </button>
         ))}
       </div>
-
-      {/* PLANNED SITES */}
-      {activeTab === "planned" && (
-        <div className="space-y-3">
-          {plannedSites.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No planned sites</div>}
-          {plannedSites.map((site) => {
-            const info = site.entries.map(e => e.newSite).filter(s => s?.siteName).pop() || {};
-            return (
-              <div key={site.name} onClick={() => setSelectedSite(site.name)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2"><h3 className="font-black text-gray-900">{site.name}</h3><Badge color="yellow">Planned</Badge></div>
-                    <div className="text-xs text-gray-400 mt-0.5">📍 {info.location} · 👤 {info.clientName}</div>
-                  </div>
-                  <span className="text-gray-300 text-lg">›</span>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-gray-700">{info.startDate}</div><div className="text-gray-400">Start Date</div></div>
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-gray-700">{info.totalWorkArea || "—"} sqft</div><div className="text-gray-400">Total Area</div></div>
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-gray-700">{info.interlockType || "—"}</div><div className="text-gray-400">Interlock</div></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* RUNNING SITES */}
       {activeTab === "running" && (
@@ -766,8 +741,35 @@ function DailyReport({ siteWorks, user }) {
             {activeSection === "runningsite" && (
               <div className="bg-teal-50 rounded-xl p-3 space-y-2">
                 <SectionTitle icon="🔄" title="Running Site Details" />
+                <div className="mb-2">
+                  <Select label="Select Running Site (auto-fill)" value={form.runningSite.siteName}
+                    options={[{value:"",label:"-- Select site --"},...runningSites.map(s=>({value:s.name,label:s.name}))]}
+                    onChange={(e) => {
+                      const siteName = e.target.value;
+                      const site = allSites[siteName];
+                      if (site) {
+                        const latestInfo = site.entries.map(en => en.runningSite || en.newSite).filter(Boolean).pop() || {};
+                        setForm(f => ({...f, runningSite: {
+                          siteName,
+                          location: latestInfo.location || "",
+                          numWorkers: latestInfo.numWorkers || "",
+                          interlockType: latestInfo.interlockType || "",
+                          totalWorkArea: latestInfo.totalWorkArea || "",
+                          workCompletedToday: "",
+                          materialsUnloaded: "",
+                          equipmentAvailable: latestInfo.equipmentUnloaded || latestInfo.equipmentAvailable || "",
+                          amountReceived: latestInfo.amountReceived || "",
+                          totalCost: latestInfo.totalCost || "",
+                          pendingAmount: latestInfo.pendingAmount || "",
+                          progressStatus: "ongoing"
+                        }}));
+                      } else {
+                        setForm(f => ({...f, runningSite: {...f.runningSite, siteName}}));
+                      }
+                    }} />
+                </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <Input label="Site Name" value={form.runningSite.siteName} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,siteName:e.target.value}})} />
+                  <Input label="Site Name (or type new)" value={form.runningSite.siteName} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,siteName:e.target.value}})} />
                   <Input label="Location" value={form.runningSite.location} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,location:e.target.value}})} />
                   <Input label="No. of Workers" type="number" value={form.runningSite.numWorkers} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,numWorkers:e.target.value}})} />
                   <Input label="Interlock Type" value={form.runningSite.interlockType} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,interlockType:e.target.value}})} />
@@ -788,6 +790,30 @@ function DailyReport({ siteWorks, user }) {
             {activeSection === "completedsite" && (
               <div className="bg-green-50 rounded-xl p-3 space-y-2">
                 <SectionTitle icon="✅" title="Completed Site Details" />
+                <div className="mb-2">
+                  <Select label="Select Running Site to Complete" value={form.completedSite.siteName}
+                    options={[{value:"",label:"-- Select running site --"},...runningSites.map(s=>({value:s.name,label:s.name}))]}
+                    onChange={(e) => {
+                      const siteName = e.target.value;
+                      const site = allSites[siteName];
+                      if (site) {
+                        const latestInfo = site.entries.map(en => en.runningSite || en.newSite).filter(Boolean).pop() || {};
+                        setForm(f => ({...f, completedSite: {
+                          siteName,
+                          location: latestInfo.location || "",
+                          completionDate: today(),
+                          totalSqftCompleted: latestInfo.totalWorkArea || "",
+                          interlockTypeUsed: latestInfo.interlockType || "",
+                          totalWorkers: latestInfo.numWorkers || "",
+                          totalCost: latestInfo.totalCost || "",
+                          totalAmountReceived: latestInfo.amountReceived || "",
+                          finalPendingAmount: latestInfo.pendingAmount || ""
+                        }}));
+                      } else {
+                        setForm(f => ({...f, completedSite: {...f.completedSite, siteName}}));
+                      }
+                    }} />
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Site Name" value={form.completedSite.siteName} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,siteName:e.target.value}})} />
                   <Input label="Location" value={form.completedSite.location} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,location:e.target.value}})} />
