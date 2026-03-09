@@ -214,155 +214,376 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 
 // ─── WORKER REPORT ────────────────────────────────────────────────────────────
 // ─── SITE REPORT (Worker Report) ─────────────────────────────────────────────
-function WorkerReport({ siteWorks, user }) {
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const [reports, setReports] = useState([]);
+// ─── SITE REPORT ─────────────────────────────────────────────────────────────
+// Shows all sites from Supervisor Reports with full details
+function WorkerReport({ user }) {
+  const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const emptyForm = { startingDate: today(), siteId: "", workerName: "", workingCost: "", extraWork: "", extraMaterial: "", totalWorkingArea: "", totalAmount: "", paymentMode: "Cash", amountReceivedBy: "", materialSupply: "", notes: "", signatures: { supervisor: false, office: false, admin: false } };
-  const [form, setForm] = useState(emptyForm);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [activeTab, setActiveTab] = useState("all");
 
   useEffect(() => {
-    api("GET", "/workerreport").then((d) => { setReports(Array.isArray(d) ? d : []); setLoading(false); });
+    api("GET", "/dailyreport").then((d) => {
+      setDailyReports(Array.isArray(d) ? d : []);
+      setLoading(false);
+    });
   }, []);
 
-  const save = async () => {
-    const data = { ...form, workingCost: +form.workingCost, totalWorkingArea: +form.totalWorkingArea, totalAmount: +form.totalAmount, addedBy: user.name };
-    const item = await api("POST", "/workerreport", data);
-    setReports((p) => [item, ...p]);
-    setModal(false); setForm(emptyForm);
-  };
+  // Build site list from all daily reports
+  const allSites = {};
+  dailyReports.forEach((r) => {
+    const processNewSite = (ns) => {
+      if (!ns?.siteName) return;
+      const key = ns.siteName;
+      if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], lastUpdated: r.date };
+      if (!allSites[key].entries.find(e => e._id === r._id)) allSites[key].entries.push(r);
+      if (allSites[key].status !== "completed") allSites[key].status = "running";
+      allSites[key].lastUpdated = r.date;
+    };
+    if (r.newSite?.siteName) processNewSite(r.newSite);
+    if (r.runningSite?.siteName) {
+      const key = r.runningSite.siteName;
+      if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], lastUpdated: r.date };
+      if (!allSites[key].entries.find(e => e._id === r._id)) allSites[key].entries.push(r);
+      if (allSites[key].status !== "completed") allSites[key].status = "running";
+      allSites[key].lastUpdated = r.date;
+    }
+    if (r.completedSite?.siteName) {
+      const key = r.completedSite.siteName;
+      if (!allSites[key]) allSites[key] = { name: key, status: "completed", entries: [], lastUpdated: r.date };
+      if (!allSites[key].entries.find(e => e._id === r._id)) allSites[key].entries.push(r);
+      allSites[key].status = "completed";
+      allSites[key].lastUpdated = r.date;
+    }
+  });
 
-  const signReport = async (id, role) => {
-    const report = reports.find((r) => r._id === id);
-    const updatedSigs = { ...(report.signatures || {}), [role]: true };
-    await api("PUT", `/workerreport/${id}`, { signatures: updatedSigs });
-    setReports((p) => p.map((r) => r._id === id ? { ...r, signatures: updatedSigs } : r));
-    if (viewModal?._id === id) setViewModal((v) => ({ ...v, signatures: updatedSigs }));
-  };
+  // Sort by lastUpdated descending
+  const siteList = Object.values(allSites).sort((a, b) => (b.lastUpdated || "").localeCompare(a.lastUpdated || ""));
+  const filtered = activeTab === "all" ? siteList : siteList.filter(s => s.status === activeTab);
 
   if (loading) return <Loader />;
 
+  // ── SITE DETAIL VIEW ──
+  if (selectedSite) {
+    const site = allSites[selectedSite];
+    if (!site) { setSelectedSite(null); return null; }
+
+    const entries = site.entries;
+
+    // Latest site info
+    const latestNew = entries.map(e => e.newSite).filter(s => s?.siteName === selectedSite).pop();
+    const latestRunning = entries.map(e => e.runningSite).filter(s => s?.siteName === selectedSite).pop();
+    const latestCompleted = entries.map(e => e.completedSite).filter(s => s?.siteName === selectedSite).pop();
+    const latestInfo = latestCompleted || latestRunning || latestNew || {};
+
+    // Aggregate all workers
+    const allWorkers = entries.flatMap(e => (e.workers || []).map(w => ({ ...w, date: e.date, addedBy: e.addedBy })));
+
+    // Aggregate all materials
+    const allMaterials = entries.map(e => e.materialSupply).filter(m => m?.materialName && (!m.siteName || m.siteName === selectedSite))
+      .map((m, i) => ({ ...m, date: entries[i]?.date }));
+
+    // Aggregate all payments
+    const allPayments = entries.flatMap(e => (e.payments || []).filter(p => !p.siteName || p.siteName === selectedSite).map(p => ({ ...p, reportDate: e.date })));
+
+    // Aggregate all expenses
+    const allExpenses = entries.flatMap(e => (e.expenses || []).filter(ex => !ex.siteName || ex.siteName === selectedSite).map(ex => ({ ...ex, reportDate: e.date })));
+
+    // Aggregate complaints
+    const allComplaints = entries.flatMap(e => (e.complaints || []).filter(c => !c.siteName || c.siteName === selectedSite));
+
+    // Aggregate day notes
+    const allNotes = entries.map(e => ({ date: e.date, note: e.dayNotes, by: e.addedBy })).filter(n => n.note);
+
+    const totalPaid = allPayments.reduce((a, p) => a + (+p.amount || 0), 0);
+    const totalExpenses = allExpenses.reduce((a, e) => a + (+e.amount || 0), 0);
+    const totalCost = +(latestInfo.totalCost || latestCompleted?.totalCost || 0);
+    const pendingAmt = +(latestInfo.pendingAmount || latestCompleted?.finalPendingAmount || 0);
+
+    const [detailTab, setDetailTab] = useState("info");
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setSelectedSite(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-xl font-bold text-sm">← Back</button>
+          <h2 className="text-lg font-black text-gray-900 flex-1 truncate">{selectedSite}</h2>
+          <Badge color={site.status === "completed" ? "green" : "blue"}>{site.status}</Badge>
+        </div>
+
+        {/* Summary */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-gray-50 border rounded-xl p-2 text-center"><div className="text-sm font-black text-gray-800">{CURRENCY}{fmt(totalCost)}</div><div className="text-xs text-gray-500">Total Cost</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-500">Paid</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="text-sm font-black text-red-600">{CURRENCY}{fmt(pendingAmt)}</div><div className="text-xs text-gray-500">Pending</div></div>
+        </div>
+
+        {/* Detail Tabs */}
+        <div className="flex gap-1 flex-wrap">
+          {[["info","ℹ️ Info"],["workers","👷 Workers"],["materials","🧱 Materials"],["payments","💰 Payments"],["complaints","⚠️ Issues"],["notes","📝 Notes"],["expenses","💸 Expenses"]].map(([id, label]) => (
+            <button key={id} onClick={() => setDetailTab(id)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${detailTab === id ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* INFO TAB */}
+        {detailTab === "info" && (
+          <div className="space-y-3">
+            {latestNew && (
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+                <div className="text-xs font-bold text-blue-700 mb-2">🆕 Site Info</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["Client", latestNew.clientName], ["Location", latestNew.location], ["Start Date", latestNew.startDate], ["Interlock Type", latestNew.interlockType], ["Total Area", latestNew.totalWorkArea ? latestNew.totalWorkArea + " sqft" : ""], ["Workers", latestNew.numWorkers], ["Interlock Qty", latestNew.interlockQtyUnloaded]].filter(([,v]) => v).map(([l, v]) => (
+                    <div key={l} className="bg-white rounded-lg p-2"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-bold text-gray-900">{v}</div></div>
+                  ))}
+                </div>
+                {latestNew.materialsUnloaded && <div className="mt-2 bg-white rounded-lg p-2 text-xs"><span className="text-gray-400">Materials Unloaded: </span><span className="font-semibold">{latestNew.materialsUnloaded}</span></div>}
+                {latestNew.equipmentUnloaded && <div className="mt-1 bg-white rounded-lg p-2 text-xs"><span className="text-gray-400">Equipment: </span><span className="font-semibold">{latestNew.equipmentUnloaded}</span></div>}
+              </div>
+            )}
+            {latestRunning && (
+              <div className="bg-teal-50 border border-teal-200 rounded-2xl p-4">
+                <div className="text-xs font-bold text-teal-700 mb-2">🔄 Latest Running Update</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["Workers", latestRunning.numWorkers], ["Interlock", latestRunning.interlockType], ["Total Area", latestRunning.totalWorkArea ? latestRunning.totalWorkArea + " sqft" : ""], ["Completed Today", latestRunning.workCompletedToday ? latestRunning.workCompletedToday + " sqft" : ""], ["Progress", latestRunning.progressStatus]].filter(([,v]) => v).map(([l, v]) => (
+                    <div key={l} className="bg-white rounded-lg p-2"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-bold text-gray-900">{v}</div></div>
+                  ))}
+                </div>
+                {latestRunning.materialsUnloaded && <div className="mt-1 bg-white rounded-lg p-2 text-xs"><span className="text-gray-400">Materials: </span><span className="font-semibold">{latestRunning.materialsUnloaded}</span></div>}
+                {latestRunning.equipmentAvailable && <div className="mt-1 bg-white rounded-lg p-2 text-xs"><span className="text-gray-400">Equipment: </span><span className="font-semibold">{latestRunning.equipmentAvailable}</span></div>}
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {[["Received", latestRunning.amountReceived], ["Total Cost", latestRunning.totalCost], ["Pending", latestRunning.pendingAmount]].filter(([,v]) => v).map(([l, v]) => (
+                    <div key={l} className="bg-white rounded-lg p-2 text-center"><div className="text-sm font-black">{CURRENCY}{fmt(+v)}</div><div className="text-xs text-gray-400">{l}</div></div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {latestCompleted && (
+              <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+                <div className="text-xs font-bold text-green-700 mb-2">✅ Completed</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[["Location", latestCompleted.location], ["Completion Date", latestCompleted.completionDate], ["Total Sqft", latestCompleted.totalSqftCompleted ? latestCompleted.totalSqftCompleted + " sqft" : ""], ["Interlock Used", latestCompleted.interlockTypeUsed], ["Total Workers", latestCompleted.totalWorkers]].filter(([,v]) => v).map(([l, v]) => (
+                    <div key={l} className="bg-white rounded-lg p-2"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-bold text-gray-900">{v}</div></div>
+                  ))}
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {[["Total Cost", latestCompleted.totalCost], ["Received", latestCompleted.totalAmountReceived], ["Pending", latestCompleted.finalPendingAmount]].filter(([,v]) => v).map(([l, v]) => (
+                    <div key={l} className="bg-white rounded-lg p-2 text-center"><div className="text-sm font-black">{CURRENCY}{fmt(+v)}</div><div className="text-xs text-gray-400">{l}</div></div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {entries.length === 0 && <div className="text-center text-gray-400 py-8">No info available</div>}
+          </div>
+        )}
+
+        {/* WORKERS TAB */}
+        {detailTab === "workers" && (
+          <div className="space-y-2">
+            {allWorkers.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No workers recorded</div>}
+            {allWorkers.map((w, i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-gray-900">{w.name}</div>
+                  <div className="text-xs text-gray-400">📅 {w.date} · By {w.addedBy}</div>
+                </div>
+                <Badge color={w.attendance === "Present" ? "green" : w.attendance === "Absent" ? "red" : "yellow"}>{w.attendance}</Badge>
+              </div>
+            ))}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+              <div className="text-sm font-black text-amber-700">{allWorkers.filter(w => w.attendance === "Present").length} Present · {allWorkers.filter(w => w.attendance === "Absent").length} Absent</div>
+            </div>
+          </div>
+        )}
+
+        {/* MATERIALS TAB */}
+        {detailTab === "materials" && (
+          <div className="space-y-2">
+            {allMaterials.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No materials recorded</div>}
+            {allMaterials.map((m, i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-gray-900">{m.materialName}</div>
+                    <div className="text-xs text-gray-400">📅 {m.date} · Supplier: {m.supplier || "—"}</div>
+                  </div>
+                  <div className="text-sm font-black text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-2 py-1">{m.qty}</div>
+                </div>
+                {m.deliveryDetails && <div className="mt-1 text-xs text-gray-500">🚚 {m.deliveryDetails}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* PAYMENTS TAB */}
+        {detailTab === "payments" && (
+          <div className="space-y-2">
+            {allPayments.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No payments recorded</div>}
+            {allPayments.map((p, i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-gray-900">{p.paidTo}</div>
+                    <div className="text-xs text-gray-400">📅 {p.date || p.reportDate} · {p.type}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-black text-green-700">{CURRENCY}{fmt(+p.amount)}</div>
+                    <Badge color={p.mode === "Cash" ? "green" : p.mode === "Bank" ? "blue" : "purple"}>{p.mode}</Badge>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <div className="text-lg font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div>
+              <div className="text-xs text-gray-500">Total Paid</div>
+            </div>
+          </div>
+        )}
+
+        {/* COMPLAINTS TAB */}
+        {detailTab === "complaints" && (
+          <div className="space-y-2">
+            {allComplaints.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No complaints recorded</div>}
+            {allComplaints.map((c, i) => (
+              <div key={i} className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <div className="font-bold text-gray-900 text-sm">{c.description}</div>
+                <div className="text-xs text-gray-500 mt-1">By: {c.reportedBy}</div>
+                {c.actionTaken && <div className="text-xs text-green-700 mt-1">✅ Action: {c.actionTaken}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* NOTES TAB */}
+        {detailTab === "notes" && (
+          <div className="space-y-2">
+            {allNotes.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No notes recorded</div>}
+            {allNotes.map((n, i) => (
+              <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                <div className="text-xs text-gray-400 mb-1">📅 {n.date} · {n.by}</div>
+                <div className="text-sm text-gray-700">{n.note}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* EXPENSES TAB */}
+        {detailTab === "expenses" && (
+          <div className="space-y-2">
+            {allExpenses.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No expenses recorded</div>}
+            {allExpenses.map((e, i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-bold text-gray-900">{e.type}</div>
+                    <div className="text-xs text-gray-500">{e.description}</div>
+                    <div className="text-xs text-gray-400">📅 {e.date || e.reportDate}</div>
+                  </div>
+                  <div className="text-sm font-black text-purple-700">{CURRENCY}{fmt(+e.amount)}</div>
+                </div>
+              </div>
+            ))}
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+              <div className="text-lg font-black text-purple-700">{CURRENCY}{fmt(totalExpenses)}</div>
+              <div className="text-xs text-gray-500">Total Expenses</div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── SITE LIST VIEW ──
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">👷 Site Report</h2>
-        <button onClick={() => { setForm(emptyForm); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
-      </div>
+      <h2 className="text-xl font-black text-gray-900">🏗️ Site Report</h2>
+
+      {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{reports.length}</div><div className="text-xs text-gray-500">Total</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(r.totalAmount||0),0))}</div><div className="text-xs text-gray-500">Total Amount</div></div>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{reports.filter(r=>r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin).length}</div><div className="text-xs text-gray-500">Fully Signed</div></div>
+        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-xl font-black">{siteList.length}</div><div className="text-xs text-gray-500">All Sites</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center shadow-sm"><div className="text-xl font-black text-blue-700">{siteList.filter(s => s.status === "running").length}</div><div className="text-xs text-gray-500">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-xl font-black text-green-700">{siteList.filter(s => s.status === "completed").length}</div><div className="text-xs text-gray-500">Completed</div></div>
       </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-2">
+        {[["all", "All"], ["running", "🔄 Running"], ["completed", "✅ Completed"]].map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === id ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Site list */}
       <div className="space-y-3">
-        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No site reports yet</div>}
-        {reports.map((r) => {
-          const allSigned = r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin;
-          const siteName = siteWorks.find((s) => s._id === r.siteId)?.customerName || "—";
+        {filtered.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No sites found</div>}
+        {filtered.map((site) => {
+          const entries = site.entries;
+          const latestNew = entries.map(e => e.newSite).filter(s => s?.siteName === site.name).pop();
+          const latestRunning = entries.map(e => e.runningSite).filter(s => s?.siteName === site.name).pop();
+          const latestCompleted = entries.map(e => e.completedSite).filter(s => s?.siteName === site.name).pop();
+          const info = latestCompleted || latestRunning || latestNew || {};
+          const totalCostSite = +(info.totalCost || info.totalAmountReceived || 0);
+          const pendingSite = +(info.pendingAmount || info.finalPendingAmount || 0);
+          const allWorkerCount = entries.flatMap(e => e.workers || []).length;
+          const allPaymentTotal = entries.flatMap(e => e.payments || []).reduce((a, p) => a + (+p.amount || 0), 0);
+
           return (
-            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-start justify-between gap-2 flex-wrap">
-                <div>
+            <div key={site.name} onClick={() => setSelectedSite(site.name)}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-black text-gray-900">{r.workerName}</h3>
-                    <Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>
-                    {allSigned && <Badge color="green">✅ Fully Signed</Badge>}
+                    <h3 className="font-black text-gray-900 truncate">{site.name}</h3>
+                    <Badge color={site.status === "completed" ? "green" : "blue"}>{site.status}</Badge>
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">📅 {r.startingDate} · 🏗️ {siteName}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    📍 {info.location || "—"} · 📅 Last: {site.lastUpdated}
+                  </div>
                 </div>
-                <button onClick={() => setViewModal(r)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100">View</button>
+                <span className="text-gray-300 text-xl shrink-0">›</span>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-blue-700">{r.totalWorkingArea} sqm</div><div className="text-xs text-gray-500">Total Area</div></div>
-                <div className="bg-green-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.totalAmount)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+
+              <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+                <div className="bg-gray-50 rounded-lg p-2 text-center">
+                  <div className="font-black text-gray-800">{CURRENCY}{fmt(totalCostSite)}</div>
+                  <div className="text-gray-400">Total Cost</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-2 text-center">
+                  <div className="font-black text-green-700">{CURRENCY}{fmt(allPaymentTotal)}</div>
+                  <div className="text-gray-400">Paid</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-2 text-center">
+                  <div className="font-black text-red-600">{CURRENCY}{fmt(pendingSite)}</div>
+                  <div className="text-gray-400">Pending</div>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-2 text-center">
+                  <div className="font-black text-amber-700">{allWorkerCount}</div>
+                  <div className="text-gray-400">Workers</div>
+                </div>
               </div>
-              <div className="mt-3 flex gap-2 flex-wrap">
-                {["supervisor","office","admin"].map((role) => (
-                  <div key={role} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role]?"bg-green-50 border-green-200 text-green-700":"bg-gray-50 border-gray-200 text-gray-500"}`}>
-                    {r.signatures?.[role]?"✓":"○"} <span className="capitalize font-semibold">{role}</span>
-                    {!r.signatures?.[role] && (user.role===role||user.role==="admin") && (
-                      <button onClick={()=>signReport(r._id,role)} className="ml-1 bg-green-500 text-white px-1.5 py-0.5 rounded text-xs font-bold hover:bg-green-600">Sign</button>
-                    )}
+
+              {site.status === "running" && info.totalWorkArea && info.workCompletedToday && (
+                <div className="mt-2">
+                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <span>Progress</span>
+                    <span>{Math.min(100, Math.round((+info.workCompletedToday / +info.totalWorkArea) * 100))}%</span>
                   </div>
-                ))}
-              </div>
+                  <div className="bg-gray-100 rounded-full h-2">
+                    <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((+info.workCompletedToday / +info.totalWorkArea) * 100))}%` }} />
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-      {modal && (
-        <Modal title="Add Site Report" onClose={() => setModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Starting Date" type="date" value={form.startingDate} onChange={(e)=>setForm({...form,startingDate:e.target.value})} />
-              <Select label="Site" value={form.siteId} options={[{value:"",label:"Select site..."},...siteWorks.map(s=>({value:s._id,label:s.customerName}))]} onChange={(e)=>setForm({...form,siteId:e.target.value})} />
-            </div>
-            <Input label="Worker Name" value={form.workerName} onChange={(e)=>setForm({...form,workerName:e.target.value})} placeholder="Worker full name" />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label={`Working Cost (${CURRENCY})`} type="number" value={form.workingCost} onChange={(e)=>setForm({...form,workingCost:e.target.value})} />
-              <Input label="Total Working Area (sqm)" type="number" value={form.totalWorkingArea} onChange={(e)=>setForm({...form,totalWorkingArea:e.target.value})} />
-            </div>
-            <div className="bg-orange-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="➕" title="Extra Work & Material" />
-              <Textarea label="Extra Work" value={form.extraWork} onChange={(e)=>setForm({...form,extraWork:e.target.value})} placeholder="Any extra work done..." />
-              <Textarea label="Extra Material Using" value={form.extraMaterial} onChange={(e)=>setForm({...form,extraMaterial:e.target.value})} placeholder="Extra materials used..." />
-            </div>
-            <div className="bg-green-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="💰" title="Payments" />
-              <Input label={`Total Amount (${CURRENCY})`} type="number" value={form.totalAmount} onChange={(e)=>setForm({...form,totalAmount:e.target.value})} />
-              <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay"]} onChange={(e)=>setForm({...form,paymentMode:e.target.value})} />
-              <Input label="Amount Received By" value={form.amountReceivedBy} onChange={(e)=>setForm({...form,amountReceivedBy:e.target.value})} placeholder="Name of person" />
-            </div>
-            <Textarea label="🧱 Material Supply" value={form.materialSupply} onChange={(e)=>setForm({...form,materialSupply:e.target.value})} placeholder="Materials supplied..." />
-            <Textarea label="📝 Notes" value={form.notes} onChange={(e)=>setForm({...form,notes:e.target.value})} placeholder="Any other notes..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal && (
-        <Modal title="Site Report Details" onClose={() => setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              {[["Starting Date",viewModal.startingDate],["Site",siteWorks.find(s=>s._id===viewModal.siteId)?.customerName||"—"],["Worker",viewModal.workerName],["Payment",viewModal.paymentMode]].map(([l,v])=>(
-                <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-500">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.totalWorkingArea} sqm</div><div className="text-xs text-gray-500">Total Area</div></div>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.workingCost)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(viewModal.totalAmount)}</div><div className="text-xs text-gray-500">Total Amt</div></div>
-            </div>
-            {viewModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewModal.extraWork}</div></div>}
-            {viewModal.extraMaterial && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material</div><div className="text-sm text-gray-700">{viewModal.extraMaterial}</div></div>}
-            {viewModal.amountReceivedBy && <div className="bg-green-50 border border-green-200 rounded-xl p-3"><div className="text-xs font-bold text-green-600 mb-1">💰 Received By</div><div className="text-sm font-bold">{viewModal.amountReceivedBy}</div></div>}
-            {viewModal.materialSupply && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">🧱 Material Supply</div><div className="text-sm text-gray-700">{viewModal.materialSupply}</div></div>}
-            {viewModal.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Notes</div><div className="text-sm text-gray-700">{viewModal.notes}</div></div>}
-            <div>
-              <div className="text-xs font-bold text-gray-500 uppercase mb-2">✍️ Work Finished Signatures</div>
-              <div className="space-y-2">
-                {["supervisor","office","admin"].map((role) => (
-                  <div key={role} className={`flex items-center justify-between p-3 rounded-xl border ${viewModal.signatures?.[role]?"bg-green-50 border-green-200":"bg-gray-50 border-gray-200"}`}>
-                    <div className="flex items-center gap-2">
-                      <span>{viewModal.signatures?.[role]?"✅":"⭕"}</span>
-                      <span className="capitalize font-semibold text-sm text-gray-700">{role}</span>
-                    </div>
-                    {!viewModal.signatures?.[role] && (user.role===role||user.role==="admin") && (
-                      <button onClick={()=>signReport(viewModal._id,role)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-600">Sign Now</button>
-                    )}
-                    {viewModal.signatures?.[role] && <span className="text-xs text-green-600 font-semibold">Signed ✓</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
 
-// ─── DAILY SUPERVISOR REPORT ──────────────────────────────────────────────────
-// ─── DAILY SUPERVISOR REPORT ──────────────────────────────────────────────────
 function DailyReport({ siteWorks, user }) {
   const [reports, setReports] = useState([]);
   const [modal, setModal] = useState(false);
@@ -1690,7 +1911,7 @@ export default function App() {
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
       case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
-      case "workerreport": return <WorkerReport siteWorks={siteWorks} user={currentUser} />;
+      case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport siteWorks={siteWorks} user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={allUsers} />;
