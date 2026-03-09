@@ -221,6 +221,7 @@ function WorkerReport({ user }) {
   const [loading, setLoading] = useState(true);
   const [selectedSite, setSelectedSite] = useState(null);
   const [activeTab, setActiveTab] = useState("all");
+  const [detailTab, setDetailTab] = useState("info");
 
   useEffect(() => {
     api("GET", "/dailyreport").then((d) => {
@@ -299,8 +300,6 @@ function WorkerReport({ user }) {
     const totalExpenses = allExpenses.reduce((a, e) => a + (+e.amount || 0), 0);
     const totalCost = +(latestInfo.totalCost || latestCompleted?.totalCost || 0);
     const pendingAmt = +(latestInfo.pendingAmount || latestCompleted?.finalPendingAmount || 0);
-
-    const [detailTab, setDetailTab] = useState("info");
 
     return (
       <div className="space-y-4">
@@ -531,7 +530,7 @@ function WorkerReport({ user }) {
           const allPaymentTotal = entries.flatMap(e => e.payments || []).reduce((a, p) => a + (+p.amount || 0), 0);
 
           return (
-            <div key={site.name} onClick={() => setSelectedSite(site.name)}
+            <div key={site.name} onClick={() => setSelectedSite(site.name); setDetailTab("info");}
               className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
