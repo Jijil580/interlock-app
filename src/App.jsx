@@ -1418,9 +1418,14 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
+      if (currentUser.role === "supervisor") {
+        // Supervisor only needs siteworks
+        api("GET", "/sitework").then(sw => { setSiteWorks(Array.isArray(sw)?sw:[]); }).catch(()=>{});
+        return;
+      }
       setLoading(true);
       Promise.all([api("GET", "/stock"), api("GET", "/raw"), api("GET", "/production"), api("GET", "/sales"), api("GET", "/users"), api("GET", "/sitework")])
-        .then(([s, r, p, sa, u, sw]) => { setStock(s); setRaw(r); setProduction(p); setSales(sa); setAllUsers(u); setSiteWorks(Array.isArray(sw) ? sw : []); setLoading(false); });
+        .then(([s, r, p, sa, u, sw]) => { setStock(Array.isArray(s)?s:[]); setRaw(Array.isArray(r)?r:[]); setProduction(Array.isArray(p)?p:[]); setSales(Array.isArray(sa)?sa:[]); setAllUsers(Array.isArray(u)?u:[]); setSiteWorks(Array.isArray(sw)?sw:[]); setLoading(false); }).catch(()=>setLoading(false));
     }
   }, [currentUser]);
 
@@ -1441,7 +1446,7 @@ export default function App() {
       case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
-      case "supervisorreports": return <SupervisorReports allUsers={allUsers} />;
+      case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "users": return currentUser.role === "admin" ? <Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} /> : null;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
