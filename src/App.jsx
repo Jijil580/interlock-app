@@ -1159,12 +1159,15 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
 // ─── SUPERVISOR REPORTS (ADMIN VIEW) ─────────────────────────────────────────
 function SupervisorReports({ allUsers }) {
   const [selectedSupervisor, setSelectedSupervisor] = useState("");
-  const [siteWorks, setSiteWorks] = useState([]);
   const [workerReports, setWorkerReports] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
-  const [workPlans, setWorkPlans] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
+
+  // view states
+  const [activeTab, setActiveTab] = useState("supervisor"); // "supervisor" | "site"
+  const [viewDailyModal, setViewDailyModal] = useState(null);
+  const [viewSiteModal, setViewSiteModal] = useState(null);
+  const [signLoading, setSignLoading] = useState(false);
 
   const supervisors = allUsers.filter((u) => u.role === "supervisor");
 
@@ -1172,33 +1175,57 @@ function SupervisorReports({ allUsers }) {
     if (!selectedSupervisor) return;
     setLoading(true);
     Promise.all([
-      api("GET", "/sitework"),
       api("GET", "/workerreport"),
       api("GET", "/dailyreport"),
-      api("GET", "/workplan"),
-    ]).then(([sw, wr, dr, wp]) => {
-      setSiteWorks((Array.isArray(sw) ? sw : []).filter((x) => x.addedBy === selectedSupervisor));
-      setWorkerReports((Array.isArray(wr) ? wr : []).filter((x) => x.addedBy === selectedSupervisor));
-      setDailyReports((Array.isArray(dr) ? dr : []).filter((x) => x.addedBy === selectedSupervisor));
-      setWorkPlans((Array.isArray(wp) ? wp : []).filter((x) => x.addedBy === selectedSupervisor));
+    ]).then(([wr, dr]) => {
+      setWorkerReports((Array.isArray(wr) ? wr : []).filter((x) => x.addedBy === selectedSupervisor).sort((a,b)=>(b.startingDate||"").localeCompare(a.startingDate||"")));
+      setDailyReports((Array.isArray(dr) ? dr : []).filter((x) => x.addedBy === selectedSupervisor).sort((a,b)=>(b.date||"").localeCompare(a.date||"")));
       setLoading(false);
     });
   }, [selectedSupervisor]);
 
-  const totalSiteWork = siteWorks.reduce((a, s) => a + (s.totalAmount || 0), 0);
-  const totalPending = siteWorks.reduce((a, s) => a + (s.pendingAmount || 0), 0);
-  const totalWorkerPay = workerReports.reduce((a, r) => a + (r.remuneration || 0), 0);
-  const totalDayExpenses = dailyReports.reduce((a, r) => a + (r.expenseAmount || 0), 0);
+  const signSiteReport = async (id, role) => {
+    setSignLoading(true);
+    const report = workerReports.find((r) => r._id === id);
+    const updatedSigs = { ...(report.signatures || {}), [role]: true };
+    await api("PUT", `/workerreport/${id}`, { signatures: updatedSigs });
+    setWorkerReports((p) => p.map((r) => r._id === id ? { ...r, signatures: updatedSigs } : r));
+    if (viewSiteModal?._id === id) setViewSiteModal((v) => ({ ...v, signatures: updatedSigs }));
+    setSignLoading(false);
+  };
+
+  const dailySections = [
+    { key: "newSite",        icon: "🆕", label: "New Site Details",    color: "blue"   },
+    { key: "runningSite",    icon: "🔄", label: "Running Site Details", color: "teal"   },
+    { key: "workersDetail",  icon: "👷", label: "Workers Detail",       color: "amber"  },
+    { key: "materialSupply", icon: "🧱", label: "Material Supply",      color: "orange" },
+    { key: "complaints",     icon: "⚠️", label: "Complaints",           color: "red"    },
+    { key: "payments",       icon: "💰", label: "Payments",             color: "green"  },
+    { key: "dayNote",        icon: "📝", label: "Day Note",             color: "gray"   },
+    { key: "expenses",       icon: "💸", label: "Expenses",             color: "purple" },
+  ];
+
+  const colorMap = {
+    blue:   { bg: "bg-blue-50",   border: "border-blue-200",   label: "text-blue-700"   },
+    teal:   { bg: "bg-teal-50",   border: "border-teal-200",   label: "text-teal-700"   },
+    amber:  { bg: "bg-amber-50",  border: "border-amber-200",  label: "text-amber-700"  },
+    orange: { bg: "bg-orange-50", border: "border-orange-200", label: "text-orange-700" },
+    red:    { bg: "bg-red-50",    border: "border-red-200",    label: "text-red-700"    },
+    green:  { bg: "bg-green-50",  border: "border-green-200",  label: "text-green-700"  },
+    gray:   { bg: "bg-gray-50",   border: "border-gray-200",   label: "text-gray-600"   },
+    purple: { bg: "bg-purple-50", border: "border-purple-200", label: "text-purple-700" },
+  };
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Reports</h2>
+      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
 
       {/* Supervisor selector */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Select Supervisor</label>
         <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
-          value={selectedSupervisor} onChange={(e) => { setSelectedSupervisor(e.target.value); setActiveTab("all"); }}>
+          value={selectedSupervisor}
+          onChange={(e) => { setSelectedSupervisor(e.target.value); setActiveTab("supervisor"); setViewDailyModal(null); setViewSiteModal(null); }}>
           <option value="">-- Select a Supervisor --</option>
           {supervisors.map((s) => <option key={s._id} value={s.name}>{s.name} (@{s.username})</option>)}
         </select>
@@ -1215,172 +1242,166 @@ function SupervisorReports({ allUsers }) {
 
       {selectedSupervisor && !loading && (
         <>
-          {/* Summary cards */}
+          {/* Stats */}
           <div className="grid grid-cols-2 gap-3">
-            <StatCard icon="🏗️" label="Site Works" value={siteWorks.length} sub={`Pending: ${CURRENCY}${fmt(totalPending)}`} color="teal" />
-            <StatCard icon="👷" label="Worker Reports" value={workerReports.length} sub={`Pay: ${CURRENCY}${fmt(totalWorkerPay)}`} color="amber" />
-            <StatCard icon="📋" label="Daily Reports" value={dailyReports.length} sub={`Expenses: ${CURRENCY}${fmt(totalDayExpenses)}`} color="purple" />
-            <StatCard icon="📅" label="Work Plans" value={workPlans.length} sub={`${workPlans.filter((w) => w.status === "planned").length} planned`} color="blue" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{dailyReports.length}</div><div className="text-xs text-gray-500">Supervisor Reports</div></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{workerReports.length}</div><div className="text-xs text-gray-500">Site Reports</div></div>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 flex-wrap">
-            {["all", "sitework", "workers", "daily", "plans"].map((t) => (
-              <button key={t} onClick={() => setActiveTab(t)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-colors ${activeTab === t ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-                {t === "all" ? "All" : t === "sitework" ? "🏗️ Sites" : t === "workers" ? "👷 Workers" : t === "daily" ? "📋 Daily" : "📅 Plans"}
-              </button>
-            ))}
+          <div className="flex gap-2">
+            <button onClick={() => setActiveTab("supervisor")}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === "supervisor" ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              📋 Supervisor Report
+            </button>
+            <button onClick={() => setActiveTab("site")}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === "site" ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              🏗️ Site Report
+            </button>
           </div>
 
-          {/* Site Works */}
-          {(activeTab === "all" || activeTab === "sitework") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">🏗️</span><h3 className="font-black text-gray-800">Site Works ({siteWorks.length})</h3></div>
-              {siteWorks.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site works</div>}
-              {siteWorks.map((s) => (
-                <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{s.customerName}</div>
-                      <div className="text-xs text-gray-400">📍{s.location} · 📅{s.date}</div>
-                    </div>
-                    <Badge color={s.workStatus === "completed" ? "green" : s.workStatus === "ongoing" ? "blue" : "yellow"}>{s.workStatus}</Badge>
-                  </div>
-                  {s.items?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {s.items.map((item, i) => <span key={i} className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-lg">{item.size} — {item.qty} {item.unit}</span>)}
-                    </div>
-                  )}
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-gray-50 rounded-xl p-2"><div className="text-sm font-black">{CURRENCY}{fmt(s.totalAmount)}</div><div className="text-xs text-gray-500">Total</div></div>
-                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(s.paidAmount)}</div><div className="text-xs text-gray-500">Paid</div></div>
-                    <div className="bg-red-50 rounded-xl p-2"><div className="text-sm font-black text-red-600">{CURRENCY}{fmt(s.pendingAmount)}</div><div className="text-xs text-gray-500">Pending</div></div>
-                  </div>
-                  {s.totalAmount > 0 && <div className="mt-2 bg-gray-200 rounded-full h-2"><div className="bg-green-500 h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((s.paidAmount / s.totalAmount) * 100))}%` }} /></div>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Worker Reports */}
-          {(activeTab === "all" || activeTab === "workers") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">👷</span><h3 className="font-black text-gray-800">Worker Reports ({workerReports.length})</h3></div>
-              {workerReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No worker reports</div>}
-              {workerReports.map((r) => (
-                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{r.workerName}</div>
-                      <div className="text-xs text-gray-400">📅{r.date}</div>
-                    </div>
-                    <Badge color={r.paymentMode === "Cash" ? "green" : r.paymentMode === "Bank" ? "blue" : "purple"}>{r.paymentMode}</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-amber-50 rounded-xl p-2"><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(r.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-                    <div className="bg-blue-50 rounded-xl p-2"><div className="text-sm font-black text-blue-700">{r.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
-                  </div>
-                  {r.materialAmount > 0 && <div className="mt-2 text-xs bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">🧱 Material: <span className="font-bold">{CURRENCY}{fmt(r.materialAmount)}</span></div>}
-                  <div className="mt-2 flex gap-2">
-                    {["supervisor", "office", "admin"].map((role) => (
-                      <span key={role} className={`text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role] ? "bg-green-50 border-green-200 text-green-700" : "bg-gray-50 border-gray-200 text-gray-400"}`}>
-                        {r.signatures?.[role] ? "✓" : "○"} <span className="capitalize">{role}</span>
-                      </span>
-                    ))}
-                  </div>
-                  {r.notes && <div className="mt-2 text-xs text-gray-500 italic">📝 {r.notes}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Daily Reports */}
-          {(activeTab === "all" || activeTab === "daily") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">📋</span><h3 className="font-black text-gray-800">Daily Reports ({dailyReports.length})</h3></div>
-              {dailyReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No daily reports</div>}
-              {dailyReports.map((r) => (
-                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="font-black text-gray-900">📅 {r.date}</div>
-                  <div className="mt-2 space-y-2">
-                    {r.newSiteDetails && <div className="bg-blue-50 border border-blue-200 rounded-xl p-3"><div className="text-xs font-bold text-blue-600 mb-1">🏗️ New Site</div><div className="text-xs text-gray-700">{r.newSiteDetails}</div></div>}
-                    {r.workersDetails && <div className="bg-amber-50 border border-amber-200 rounded-xl p-3"><div className="text-xs font-bold text-amber-600 mb-1">👷 Workers</div><div className="text-xs text-gray-700">{r.workersDetails}</div></div>}
-                    {r.materialsSupplied && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Materials</div><div className="text-xs text-gray-700">{r.materialsSupplied}</div></div>}
-                    {r.complaints && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">⚠️ Complaints</div><div className="text-xs text-gray-700">{r.complaints}</div></div>}
-                    {r.payments?.length > 0 && (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                        <div className="text-xs font-bold text-green-600 mb-1">💰 Payments</div>
-                        {r.payments.map((p, i) => <div key={i} className="flex justify-between text-xs"><span>{p.from} ({p.mode})</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}
-                        <div className="text-xs font-black text-green-700 mt-1">Total: {CURRENCY}{fmt(r.payments.reduce((a, p) => a + p.amount, 0))}</div>
+          {/* ── SUPERVISOR REPORTS TAB ── */}
+          {activeTab === "supervisor" && (
+            <div className="space-y-3">
+              {dailyReports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No supervisor reports</div>}
+              {dailyReports.map((r) => {
+                const filled = dailySections.filter(s => r[s.key]);
+                return (
+                  <div key={r._id} onClick={() => setViewDailyModal(r)}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-black text-gray-900 text-base">📅 {r.date}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
                       </div>
-                    )}
-                    {r.expenseAmount > 0 && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">💸 Expenses</div><div className="text-xs text-gray-700">{r.dayExpenses}</div><div className="text-sm font-black text-red-700">{CURRENCY}{fmt(r.expenseAmount)}</div></div>}
-                    {r.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Notes</div><div className="text-xs text-gray-700">{r.notes}</div></div>}
+                      <span className="text-gray-300 text-xl">›</span>
+                    </div>
+                    <div className="mt-2 flex gap-1 flex-wrap">
+                      {filled.map(s => {
+                        const c = colorMap[s.color];
+                        return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;
+                      })}
+                      {filled.length === 0 && <span className="text-xs text-gray-400">No sections filled</span>}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
-          {/* Work Plans */}
-          {(activeTab === "all" || activeTab === "plans") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">📅</span><h3 className="font-black text-gray-800">Work Plans ({workPlans.length})</h3></div>
-              {workPlans.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No work plans</div>}
-              {workPlans.map((p) => (
-                <div key={p._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{p.site}</div>
-                      <div className="text-xs text-gray-400">📅 {p.fromDate} → {p.toDate}</div>
+          {/* ── SITE REPORTS TAB ── */}
+          {activeTab === "site" && (
+            <div className="space-y-3">
+              {workerReports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No site reports</div>}
+              {workerReports.map((r) => {
+                const allSigned = r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin;
+                return (
+                  <div key={r._id} onClick={() => setViewSiteModal(r)}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-gray-900">{r.workerName}</span>
+                          <Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode||"Cash"}</Badge>
+                          {allSigned && <Badge color="green">✅ Signed</Badge>}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
+                        <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}</div>
+                      </div>
+                      <span className="text-gray-300 text-xl shrink-0">›</span>
                     </div>
-                    <Badge color={p.status === "completed" ? "green" : p.status === "in-progress" ? "yellow" : p.status === "cancelled" ? "red" : "blue"}>{p.status}</Badge>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-black text-gray-800">{r.totalWorkingArea||"0"} sqft</div><div className="text-gray-400">Area</div></div>
+                      <div className="bg-amber-50 rounded-lg p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Cost</div></div>
+                      <div className="bg-green-50 rounded-lg p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total</div></div>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      {["supervisor","office","admin"].map((role) => (
+                        <div key={role} className={`flex-1 text-center py-1 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>
+                          {r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {p.plannedWork && <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">🔨 {p.plannedWork}</div>}
-                  {p.workersAllocated && <div className="mt-1 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">👷 {p.workersAllocated}</div>}
-                  {p.materialsNeeded && <div className="mt-1 text-xs text-gray-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">🧱 {p.materialsNeeded}</div>}
-                  <div className="mt-2 flex gap-3 text-xs text-gray-500">
-                    <span>Est: <span className="font-black text-amber-700">{CURRENCY}{fmt(p.estimatedCost)}</span></span>
-                    {p.paymentPlan && <span>Payment: <span className="font-semibold">{p.paymentPlan}</span></span>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>
       )}
+
+      {/* ── VIEW DAILY REPORT MODAL ── */}
+      {viewDailyModal && (
+        <Modal title={`Supervisor Report — ${viewDailyModal.date}`} onClose={() => setViewDailyModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewDailyModal.addedBy}</div>
+            {dailySections.filter(s => viewDailyModal[s.key]).map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
+                  <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewDailyModal[s.key]}</div>
+                </div>
+              );
+            })}
+            {dailySections.filter(s => viewDailyModal[s.key]).length === 0 && (
+              <div className="text-center text-gray-400 py-6">No content in this report</div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── VIEW SITE REPORT MODAL ── */}
+      {viewSiteModal && (
+        <Modal title="Site Report Details" onClose={() => setViewSiteModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewSiteModal.addedBy}</div>
+
+            {/* Info grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {[["Site Name",viewSiteModal.siteName],["Phone No",viewSiteModal.phoneNo],["Starting Date",viewSiteModal.startingDate],["Worker Name",viewSiteModal.workerName],["Payment Mode",viewSiteModal.paymentMode],["Received By",viewSiteModal.amountReceivedBy]].map(([l,v])=>(
+                <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-gray-900">{v||"—"}</div></div>
+              ))}
+            </div>
+
+            {/* Numbers */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewSiteModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(viewSiteModal.workingCost)||0)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-teal-700">{viewSiteModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Working Area</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(viewSiteModal.totalAmount)||0)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+            </div>
+
+            {viewSiteModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewSiteModal.extraWork}</div></div>}
+            {viewSiteModal.extraMaterial && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material Using</div><div className="text-sm text-gray-700">{viewSiteModal.extraMaterial}</div></div>}
+            {viewSiteModal.note && <div className="bg-gray-50 border border-gray-200 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm text-gray-700">{viewSiteModal.note}</div></div>}
+            {viewSiteModal.materialSupply && <div className="bg-teal-50 border border-teal-200 rounded-xl p-3"><div className="text-xs font-bold text-teal-600 mb-1">🧱 Material Supply</div><div className="text-sm text-gray-700">{viewSiteModal.materialSupply}</div></div>}
+
+            {/* Signatures — admin can sign */}
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div className="text-xs font-bold text-gray-600 uppercase mb-3">✍️ Work Finished Signatures</div>
+              <div className="grid grid-cols-3 gap-3">
+                {["supervisor","office","admin"].map((role) => (
+                  <div key={role} className={`rounded-xl border p-3 text-center ${viewSiteModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
+                    <div className="text-2xl mb-1">{viewSiteModal.signatures?.[role]?"✅":"⭕"}</div>
+                    <div className="text-xs font-bold text-gray-700 capitalize">{role}</div>
+                    {!viewSiteModal.signatures?.[role] && (
+                      <button onClick={() => signSiteReport(viewSiteModal._id, role)} disabled={signLoading}
+                        className="mt-2 bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-green-600 w-full disabled:opacity-50">
+                        Sign
+                      </button>
+                    )}
+                    {viewSiteModal.signatures?.[role] && <div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
-
-// ─── NAV ─────────────────────────────────────────────────────────────────────
-const NAV = {
-  admin: [
-    { id: "dashboard", label: "Dashboard", icon: "📊" },
-    { id: "stock", label: "Stock", icon: "📦" },
-    { id: "raw", label: "Raw Material", icon: "🧱" },
-    { id: "production", label: "Production", icon: "🏭" },
-    { id: "sales", label: "Sales", icon: "💰" },
-    { id: "sitework", label: "Site Work", icon: "🏗️" },
-    { id: "workerreport", label: "Site Report", icon: "👷" },
-    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
-    { id: "supervisorreports", label: "Supervisor Overview", icon: "🔍" },
-    { id: "users", label: "Users", icon: "👥" },
-    { id: "reports", label: "Reports", icon: "📈" },
-  ],
-  supervisor: [
-    { id: "workerreport", label: "Site Report", icon: "👷" },
-    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
-    { id: "workplan", label: "Work Planning", icon: "📅" },
-  ],
-  user: [
-    { id: "dashboard", label: "Dashboard", icon: "📊" },
-    { id: "production", label: "Log Production", icon: "🏭" },
-    { id: "stock", label: "View Stock", icon: "📦" },
-  ],
-};
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function App() {
