@@ -490,8 +490,10 @@ function DailyReport({ user }) {
     date: today(),
     newSite: "",
     runningSite: "",
+    workersDetail: "",
     materialSupply: "",
     complaints: "",
+    payments: "",
     dayNote: "",
     expenses: "",
   };
@@ -507,27 +509,59 @@ function DailyReport({ user }) {
   const save = async () => {
     if (!form.date) return;
     const item = await api("POST", "/dailyreport", { ...form, addedBy: user.name });
-    setReports((p) => [item, ...p].sort((a,b) => (b.date||"").localeCompare(a.date||"")));
+    setReports((p) => [item, ...p].sort((a, b) => (b.date || "").localeCompare(a.date || "")));
     setModal(false);
     setForm(emptyForm);
   };
 
   const sections = [
-    { key: "newSite",       icon: "🆕", label: "New Site Details",  color: "blue"   },
-    { key: "runningSite",   icon: "🔄", label: "Running Site Details", color: "teal" },
-    { key: "materialSupply",icon: "🧱", label: "Material Supply",   color: "orange" },
-    { key: "complaints",    icon: "⚠️", label: "Complaints",        color: "red"    },
-    { key: "dayNote",       icon: "📝", label: "Day Note",          color: "gray"   },
-    { key: "expenses",      icon: "💸", label: "Expenses",          color: "purple" },
+    { key: "newSite",        icon: "🆕", label: "New Site Details",     color: "blue"   },
+    { key: "runningSite",    icon: "🔄", label: "Running Site Details",  color: "teal"   },
+    { key: "workersDetail",  icon: "👷", label: "Workers Detail",        color: "amber"  },
+    { key: "materialSupply", icon: "🧱", label: "Material Supply",       color: "orange" },
+    { key: "complaints",     icon: "⚠️", label: "Complaints",            color: "red"    },
+    { key: "payments",       icon: "💰", label: "Payments",              color: "green"  },
+    { key: "dayNote",        icon: "📝", label: "Day Note",              color: "gray"   },
+    { key: "expenses",       icon: "💸", label: "Expenses",              color: "purple" },
   ];
 
   const colorMap = {
     blue:   { bg: "bg-blue-50",   border: "border-blue-200",   label: "text-blue-700"   },
     teal:   { bg: "bg-teal-50",   border: "border-teal-200",   label: "text-teal-700"   },
+    amber:  { bg: "bg-amber-50",  border: "border-amber-200",  label: "text-amber-700"  },
     orange: { bg: "bg-orange-50", border: "border-orange-200", label: "text-orange-700" },
     red:    { bg: "bg-red-50",    border: "border-red-200",    label: "text-red-700"    },
+    green:  { bg: "bg-green-50",  border: "border-green-200",  label: "text-green-700"  },
     gray:   { bg: "bg-gray-50",   border: "border-gray-200",   label: "text-gray-600"   },
     purple: { bg: "bg-purple-50", border: "border-purple-200", label: "text-purple-700" },
+  };
+
+  const downloadReport = (r) => {
+    const filled = sections.filter(s => r[s.key]);
+    const lines = [
+      "AL-NOOR INTERLOCK",
+      "SUPERVISOR DAILY REPORT",
+      "================================",
+      `Date   : ${r.date}`,
+      `By     : ${r.addedBy}`,
+      "================================",
+      "",
+      ...filled.flatMap(s => [
+        `${s.icon} ${s.label.toUpperCase()}`,
+        "--------------------------------",
+        r[s.key],
+        "",
+      ]),
+      "================================",
+      "END OF REPORT",
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Supervisor_Report_${r.date}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (loading) return <Loader />;
@@ -542,7 +576,6 @@ function DailyReport({ user }) {
         </button>
       </div>
 
-      {/* Report list by date */}
       <div className="space-y-3">
         {reports.length === 0 && (
           <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No reports yet</div>
@@ -550,14 +583,16 @@ function DailyReport({ user }) {
         {reports.map((r) => {
           const filled = sections.filter(s => r[s.key]);
           return (
-            <div key={r._id} onClick={() => setViewModal(r)}
-              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-center justify-between gap-2">
-                <div>
+                <div onClick={() => setViewModal(r)} className="flex-1 cursor-pointer">
                   <div className="font-black text-gray-900 text-base">📅 {r.date}</div>
                   <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
                 </div>
-                <span className="text-gray-300 text-xl">›</span>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button>
+                  <button onClick={() => setViewModal(r)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">View</button>
+                </div>
               </div>
               <div className="mt-2 flex gap-1 flex-wrap">
                 {filled.map(s => {
@@ -588,14 +623,13 @@ function DailyReport({ user }) {
                     rows={3}
                     value={form[s.key]}
                     onChange={(e) => setForm({ ...form, [s.key]: e.target.value })}
-                    placeholder={`Write ${s.label.toLowerCase()} details here...`}
+                    placeholder={`Write ${s.label.toLowerCase()} here...`}
                     className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
                   />
                 </div>
               );
             })}
-            <button onClick={save}
-              className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">
               Submit Report
             </button>
           </div>
@@ -606,7 +640,10 @@ function DailyReport({ user }) {
       {viewModal && (
         <Modal title={`Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
           <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+              <button onClick={() => downloadReport(viewModal)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button>
+            </div>
             {sections.filter(s => viewModal[s.key]).map((s) => {
               const c = colorMap[s.color];
               return (
