@@ -224,6 +224,8 @@ function WorkerReport({ user }) {
 
   const emptyForm = {
     startingDate: today(),
+    siteName: "",
+    phoneNo: "",
     workerName: "",
     totalArea: "",
     workingCost: "",
@@ -268,6 +270,8 @@ function WorkerReport({ user }) {
       "        AL-NOOR INTERLOCK       ",
       "           SITE REPORT          ",
       "════════════════════════════════",
+      `Site Name        : ${r.siteName || "—"}`,
+      `Phone No         : ${r.phoneNo || "—"}`,
       `Starting Date    : ${r.startingDate}`,
       `Worker Name      : ${r.workerName}`,
       "────────────────────────────────",
@@ -338,7 +342,8 @@ function WorkerReport({ user }) {
                     <Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>
                     {allSigned && <Badge color="green">✅ Signed</Badge>}
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">📅 {r.startingDate} · By: {r.addedBy}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName || "—"} · 📅 {r.startingDate}</div>
+                  <div className="text-xs text-gray-400">📞 {r.phoneNo || "—"} · By: {r.addedBy}</div>
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button onClick={() => downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
@@ -368,6 +373,10 @@ function WorkerReport({ user }) {
         <Modal title="Site Report" onClose={() => setModal(false)}>
           <div className="space-y-3">
             {/* Header fields */}
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Site Name" value={form.siteName} onChange={(e)=>setForm({...form,siteName:e.target.value})} placeholder="Site name" />
+              <Input label="Phone No" type="tel" value={form.phoneNo} onChange={(e)=>setForm({...form,phoneNo:e.target.value})} placeholder="Contact number" />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <Input label="Starting Date" type="date" value={form.startingDate} onChange={(e)=>setForm({...form,startingDate:e.target.value})} />
               <Input label="Worker Name" value={form.workerName} onChange={(e)=>setForm({...form,workerName:e.target.value})} placeholder="Full name" />
@@ -425,7 +434,7 @@ function WorkerReport({ user }) {
 
             {/* Info grid */}
             <div className="grid grid-cols-2 gap-2">
-              {[["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
+              {[["Site Name",viewModal.siteName],["Phone No",viewModal.phoneNo],["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
                 <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-gray-900">{v||"—"}</div></div>
               ))}
             </div>
