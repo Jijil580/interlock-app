@@ -480,568 +480,142 @@ function WorkerReport({ user }) {
   );
 }
 
-function DailyReport({ siteWorks, user }) {
+function DailyReport({ user }) {
   const [reports, setReports] = useState([]);
-  const [modal, setModal] = useState(false);
-  const [selectedSite, setSelectedSite] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("running");
-  const [activeSection, setActiveSection] = useState("newsite");
-
-  const emptyWorker = () => ({ id: Date.now(), name: "", attendance: "Present" });
-  const emptyComplaint = () => ({ id: Date.now(), siteName: "", description: "", reportedBy: "", actionTaken: "" });
-  const emptyPayment = () => ({ id: Date.now(), siteName: "", type: "Labour", amount: "", paidTo: "", mode: "Cash", date: today() });
-  const emptyExpense = () => ({ id: Date.now(), type: "", siteName: "", amount: "", description: "", date: today() });
+  const [modal, setModal] = useState(false);
+  const [viewModal, setViewModal] = useState(null);
 
   const emptyForm = {
     date: today(),
-    newSite: { siteName:"", location:"", clientName:"", startDate:today(), numWorkers:"", interlockType:"", totalWorkArea:"", materialsUnloaded:"", equipmentUnloaded:"", interlockQtyUnloaded:"", amountReceived:"", totalCost:"", pendingAmount:"" },
-    runningSite: { siteName:"", location:"", numWorkers:"", interlockType:"", totalWorkArea:"", workCompletedToday:"", materialsUnloaded:"", equipmentAvailable:"", amountReceived:"", totalCost:"", pendingAmount:"", progressStatus:"ongoing" },
-    completedSite: { siteName:"", location:"", completionDate:today(), totalSqftCompleted:"", interlockTypeUsed:"", totalWorkers:"", totalCost:"", totalAmountReceived:"", finalPendingAmount:"" },
-    workers: [], workerSite: "",
-    materialSupply: { siteName:"", materialName:"", qty:"", supplier:"", deliveryDetails:"" },
-    complaints: [],
-    payments: [],
-    dayNotes: "",
-    expenses: [],
+    newSite: "",
+    runningSite: "",
+    materialSupply: "",
+    complaints: "",
+    dayNote: "",
+    expenses: "",
   };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    api("GET", "/dailyreport").then((d) => { setReports(Array.isArray(d) ? d : []); setLoading(false); });
+    api("GET", "/dailyreport").then((d) => {
+      setReports(Array.isArray(d) ? d : []);
+      setLoading(false);
+    });
   }, []);
 
   const save = async () => {
-    const data = { ...form, addedBy: user.name };
-    const item = await api("POST", "/dailyreport", data);
-    setReports((p) => [item, ...p]);
-    setModal(false); setForm(emptyForm); setActiveSection("newsite");
+    if (!form.date) return;
+    const item = await api("POST", "/dailyreport", { ...form, addedBy: user.name });
+    setReports((p) => [item, ...p].sort((a,b) => (b.date||"").localeCompare(a.date||"")));
+    setModal(false);
+    setForm(emptyForm);
   };
 
-  // Collect all unique sites - NEW sites go straight to running
-  // Priority: completed > running > new(running)
-  const allSites = {};
-  reports.forEach((r) => {
-    if (r.newSite?.siteName) {
-      const key = r.newSite.siteName;
-      if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], latest: r };
-      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
-      // Only update status if not already completed
-      if (allSites[key].status !== "completed") allSites[key].status = "running";
-      allSites[key].latest = r;
-    }
-    if (r.runningSite?.siteName) {
-      const key = r.runningSite.siteName;
-      if (!allSites[key]) allSites[key] = { name: key, status: "running", entries: [], latest: r };
-      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
-      if (allSites[key].status !== "completed") allSites[key].status = "running";
-      allSites[key].latest = r;
-    }
-    if (r.completedSite?.siteName) {
-      const key = r.completedSite.siteName;
-      if (!allSites[key]) allSites[key] = { name: key, status: "completed", entries: [], latest: r };
-      if (!allSites[key].entries.includes(r)) allSites[key].entries.push(r);
-      allSites[key].status = "completed"; // completed always wins
-      allSites[key].latest = r;
-    }
-  });
-
-  const siteList = Object.values(allSites);
-  const runningSites = siteList.filter(s => s.status === "running");
-  const completedSites = siteList.filter(s => s.status === "completed");
-
   const sections = [
-    { id: "newsite", label: "🆕 New Site" },
-    { id: "runningsite", label: "🔄 Running" },
-    { id: "completedsite", label: "✅ Completed" },
-    { id: "workers", label: "👷 Workers" },
-    { id: "material", label: "🧱 Material" },
-    { id: "complaints", label: "⚠️ Complaints" },
-    { id: "payments", label: "💰 Payments" },
-    { id: "daynotes", label: "📝 Notes" },
-    { id: "expenses", label: "💸 Expenses" },
+    { key: "newSite",       icon: "🆕", label: "New Site Details",  color: "blue"   },
+    { key: "runningSite",   icon: "🔄", label: "Running Site Details", color: "teal" },
+    { key: "materialSupply",icon: "🧱", label: "Material Supply",   color: "orange" },
+    { key: "complaints",    icon: "⚠️", label: "Complaints",        color: "red"    },
+    { key: "dayNote",       icon: "📝", label: "Day Note",          color: "gray"   },
+    { key: "expenses",      icon: "💸", label: "Expenses",          color: "purple" },
   ];
+
+  const colorMap = {
+    blue:   { bg: "bg-blue-50",   border: "border-blue-200",   label: "text-blue-700"   },
+    teal:   { bg: "bg-teal-50",   border: "border-teal-200",   label: "text-teal-700"   },
+    orange: { bg: "bg-orange-50", border: "border-orange-200", label: "text-orange-700" },
+    red:    { bg: "bg-red-50",    border: "border-red-200",    label: "text-red-700"    },
+    gray:   { bg: "bg-gray-50",   border: "border-gray-200",   label: "text-gray-600"   },
+    purple: { bg: "bg-purple-50", border: "border-purple-200", label: "text-purple-700" },
+  };
 
   if (loading) return <Loader />;
 
-  // ── SITE DETAILS VIEW ──
-  if (selectedSite) {
-    const site = allSites[selectedSite];
-    if (!site) { setSelectedSite(null); return null; }
-    const allEntries = site.entries;
-    const latestNew = allEntries.map(e => e.newSite).filter(s => s?.siteName === selectedSite).pop();
-    const latestRunning = allEntries.map(e => e.runningSite).filter(s => s?.siteName === selectedSite).pop();
-    const latestCompleted = allEntries.map(e => e.completedSite).filter(s => s?.siteName === selectedSite).pop();
-    const allWorkers = allEntries.flatMap(e => e.workers || []);
-    const allComplaints = allEntries.flatMap(e => e.complaints || []).filter(c => !c.siteName || c.siteName === selectedSite);
-    const allPayments = allEntries.flatMap(e => e.payments || []).filter(p => !p.siteName || p.siteName === selectedSite);
-    const allExpenses = allEntries.flatMap(e => e.expenses || []).filter(ex => !ex.siteName || ex.siteName === selectedSite);
-    const allMaterials = allEntries.map(e => e.materialSupply).filter(m => m?.materialName && (!m.siteName || m.siteName === selectedSite));
-    const allNotes = allEntries.map(e => ({ date: e.date, note: e.dayNotes })).filter(n => n.note);
-    const totalReceived = allPayments.reduce((a, p) => a + (+p.amount || 0), 0);
-    const totalExpenses = allExpenses.reduce((a, e) => a + (+e.amount || 0), 0);
-
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setSelectedSite(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-xl font-bold text-sm">← Back</button>
-          <h2 className="text-xl font-black text-gray-900 flex-1">{selectedSite}</h2>
-          <Badge color={site.status === "completed" ? "green" : site.status === "running" ? "blue" : "yellow"}>{site.status}</Badge>
-        </div>
-
-        {/* Summary cards */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{allEntries.length}</div><div className="text-xs text-gray-500">Reports</div></div>
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-500">Received</div></div>
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-500">Expenses</div></div>
-        </div>
-
-        {/* Site Info */}
-        {latestNew && (
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-blue-700 mb-2">🆕 Site Info</div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
-              {[["Location", latestNew.location], ["Client", latestNew.clientName], ["Start Date", latestNew.startDate], ["Workers", latestNew.numWorkers], ["Interlock", latestNew.interlockType], ["Work Area", latestNew.totalWorkArea ? latestNew.totalWorkArea + " sqft" : ""]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2"><div className="text-gray-400">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
-              ))}
-            </div>
-            {latestNew.materialsUnloaded && <div className="mt-2 text-xs bg-white rounded-lg p-2"><span className="text-gray-400">Materials: </span>{latestNew.materialsUnloaded}</div>}
-            {latestNew.equipmentUnloaded && <div className="mt-1 text-xs bg-white rounded-lg p-2"><span className="text-gray-400">Equipment: </span>{latestNew.equipmentUnloaded}</div>}
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[["Received", latestNew.amountReceived], ["Total Cost", latestNew.totalCost], ["Pending", latestNew.pendingAmount]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2 text-center"><div className="text-sm font-black text-gray-800">{CURRENCY}{fmt(+v)}</div><div className="text-xs text-gray-400">{l}</div></div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {latestRunning && (
-          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-teal-700 mb-2">🔄 Running Site Details</div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {[["Workers", latestRunning.numWorkers], ["Interlock Type", latestRunning.interlockType], ["Total Area", latestRunning.totalWorkArea ? latestRunning.totalWorkArea + " sqft" : ""], ["Completed Today", latestRunning.workCompletedToday ? latestRunning.workCompletedToday + " sqft" : ""], ["Status", latestRunning.progressStatus]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2"><div className="text-gray-400">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
-              ))}
-            </div>
-            {latestRunning.materialsUnloaded && <div className="mt-2 text-xs bg-white rounded-lg p-2"><span className="text-gray-400">Materials: </span>{latestRunning.materialsUnloaded}</div>}
-            {latestRunning.equipmentAvailable && <div className="mt-1 text-xs bg-white rounded-lg p-2"><span className="text-gray-400">Equipment: </span>{latestRunning.equipmentAvailable}</div>}
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[["Received", latestRunning.amountReceived], ["Total Cost", latestRunning.totalCost], ["Pending", latestRunning.pendingAmount]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2 text-center"><div className="text-sm font-black text-gray-800">{CURRENCY}{fmt(+v)}</div><div className="text-xs text-gray-400">{l}</div></div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {latestCompleted && (
-          <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-green-700 mb-2">✅ Completed Site</div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {[["Location", latestCompleted.location], ["Completion Date", latestCompleted.completionDate], ["Total Sqft", latestCompleted.totalSqftCompleted], ["Interlock Used", latestCompleted.interlockTypeUsed], ["Total Workers", latestCompleted.totalWorkers]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2"><div className="text-gray-400">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
-              ))}
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[["Total Cost", latestCompleted.totalCost], ["Received", latestCompleted.totalAmountReceived], ["Pending", latestCompleted.finalPendingAmount]].filter(([,v]) => v).map(([l, v]) => (
-                <div key={l} className="bg-white rounded-lg p-2 text-center"><div className="text-sm font-black text-gray-800">{CURRENCY}{fmt(+v)}</div><div className="text-xs text-gray-400">{l}</div></div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Workers */}
-        {allWorkers.length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-amber-700 mb-2">👷 Workers Details</div>
-            {allWorkers.map((w, i) => (
-              <div key={i} className="flex justify-between items-center py-1.5 border-b border-amber-100 last:border-0">
-                <span className="text-sm font-semibold text-gray-800">{w.name}</span>
-                <Badge color={w.attendance === "Present" ? "green" : w.attendance === "Absent" ? "red" : "yellow"}>{w.attendance}</Badge>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Material Supply */}
-        {allMaterials.length > 0 && (
-          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-orange-700 mb-2">🧱 Material Supply</div>
-            {allMaterials.map((m, i) => (
-              <div key={i} className="bg-white rounded-xl p-3 mb-2 text-xs">
-                <div className="grid grid-cols-2 gap-1">
-                  {[["Material", m.materialName], ["Qty", m.qty], ["Supplier", m.supplier], ["Delivery", m.deliveryDetails]].filter(([,v]) => v).map(([l, v]) => (
-                    <div key={l}><span className="text-gray-400">{l}: </span><span className="font-semibold">{v}</span></div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Payments */}
-        {allPayments.length > 0 && (
-          <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-green-700 mb-2">💰 Payments</div>
-            {allPayments.map((p, i) => (
-              <div key={i} className="flex justify-between items-center py-1.5 border-b border-green-100 last:border-0 text-xs">
-                <span>{p.type} → {p.paidTo} <Badge color={p.mode === "Cash" ? "green" : p.mode === "Bank" ? "blue" : "purple"}>{p.mode}</Badge></span>
-                <span className="font-black text-green-700">{CURRENCY}{fmt(+p.amount)}</span>
-              </div>
-            ))}
-            <div className="text-right mt-2 font-black text-green-800">Total: {CURRENCY}{fmt(totalReceived)}</div>
-          </div>
-        )}
-
-        {/* Complaints */}
-        {allComplaints.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-red-700 mb-2">⚠️ Complaints</div>
-            {allComplaints.map((c, i) => (
-              <div key={i} className="bg-white rounded-xl p-3 mb-2 text-xs">
-                <div className="font-semibold text-gray-800">{c.description}</div>
-                <div className="text-gray-500 mt-0.5">By: {c.reportedBy}</div>
-                {c.actionTaken && <div className="text-green-700 mt-0.5">Action: {c.actionTaken}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Day Notes */}
-        {allNotes.length > 0 && (
-          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-gray-600 mb-2">📝 Day Notes</div>
-            {allNotes.map((n, i) => (
-              <div key={i} className="bg-white rounded-xl p-3 mb-2">
-                <div className="text-xs text-gray-400 mb-1">📅 {n.date}</div>
-                <div className="text-sm text-gray-700">{n.note}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Expenses */}
-        {allExpenses.length > 0 && (
-          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4">
-            <div className="text-xs font-bold text-purple-700 mb-2">💸 Expenses</div>
-            {allExpenses.map((e, i) => (
-              <div key={i} className="flex justify-between items-center py-1.5 border-b border-purple-100 last:border-0 text-xs">
-                <span>{e.type} — {e.description} <span className="text-gray-400">{e.date}</span></span>
-                <span className="font-black text-purple-700">{CURRENCY}{fmt(+e.amount)}</span>
-              </div>
-            ))}
-            <div className="text-right mt-2 font-black text-purple-800">Total: {CURRENCY}{fmt(totalExpenses)}</div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── MAIN LIST VIEW ──
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📋 Supervisor Report</h2>
-        <button onClick={() => { setForm(emptyForm); setActiveSection("newsite"); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        <button onClick={() => { setForm(emptyForm); setModal(true); }}
+          className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">
+          + Add Report
+        </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{runningSites.length}</div><div className="text-xs text-gray-500">Running Sites</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{completedSites.length}</div><div className="text-xs text-gray-500">Completed Sites</div></div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-2">
-        {[["running", "🔄 Running"], ["completed", "✅ Completed"]].map(([id, label]) => (
-          <button key={id} onClick={() => setActiveTab(id)}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === id ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* RUNNING SITES */}
-      {activeTab === "running" && (
-        <div className="space-y-3">
-          {runningSites.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No running sites</div>}
-          {runningSites.map((site) => {
-            const info = site.entries.map(e => e.runningSite).filter(s => s?.siteName).pop() || {};
-            const pending = info.pendingAmount || 0;
-            return (
-              <div key={site.name} onClick={() => setSelectedSite(site.name)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2"><h3 className="font-black text-gray-900">{site.name}</h3><Badge color="blue">Running</Badge></div>
-                    <div className="text-xs text-gray-400 mt-0.5">📍 {info.location} · 👷 {info.numWorkers} workers</div>
-                  </div>
-                  <span className="text-gray-300 text-lg">›</span>
+      {/* Report list by date */}
+      <div className="space-y-3">
+        {reports.length === 0 && (
+          <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No reports yet</div>
+        )}
+        {reports.map((r) => {
+          const filled = sections.filter(s => r[s.key]);
+          return (
+            <div key={r._id} onClick={() => setViewModal(r)}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-black text-gray-900 text-base">📅 {r.date}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-blue-700">{info.workCompletedToday || "—"} sqft</div><div className="text-gray-400">Today</div></div>
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-gray-700">{info.totalWorkArea || "—"} sqft</div><div className="text-gray-400">Total</div></div>
-                  <div className="bg-red-50 rounded-lg p-2 text-center"><div className="font-bold text-red-600">{CURRENCY}{fmt(+pending)}</div><div className="text-gray-400">Pending</div></div>
-                </div>
-                {info.totalWorkArea && info.workCompletedToday && (
-                  <div className="mt-2 bg-gray-100 rounded-full h-2">
-                    <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((+info.workCompletedToday / +info.totalWorkArea) * 100))}%` }} />
-                  </div>
-                )}
+                <span className="text-gray-300 text-xl">›</span>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* COMPLETED SITES */}
-      {activeTab === "completed" && (
-        <div className="space-y-3">
-          {completedSites.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No completed sites</div>}
-          {completedSites.map((site) => {
-            const info = site.entries.map(e => e.completedSite).filter(s => s?.siteName).pop() || {};
-            return (
-              <div key={site.name} onClick={() => setSelectedSite(site.name)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2"><h3 className="font-black text-gray-900">{site.name}</h3><Badge color="green">Completed</Badge></div>
-                    <div className="text-xs text-gray-400 mt-0.5">📍 {info.location} · ✅ {info.completionDate}</div>
-                  </div>
-                  <span className="text-gray-300 text-lg">›</span>
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                  <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-bold text-gray-700">{info.totalSqftCompleted || "—"} sqft</div><div className="text-gray-400">Completed</div></div>
-                  <div className="bg-green-50 rounded-lg p-2 text-center"><div className="font-bold text-green-700">{CURRENCY}{fmt(+(info.totalAmountReceived||0))}</div><div className="text-gray-400">Received</div></div>
-                  <div className="bg-red-50 rounded-lg p-2 text-center"><div className="font-bold text-red-600">{CURRENCY}{fmt(+(info.finalPendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                </div>
+              <div className="mt-2 flex gap-1 flex-wrap">
+                {filled.map(s => {
+                  const c = colorMap[s.color];
+                  return (
+                    <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>
+                      {s.icon} {s.label}
+                    </span>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ADD REPORT MODAL */}
-      {modal && (
-        <Modal title="Daily Report Entry" onClose={() => setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} />
-            <div className="flex gap-1 flex-wrap">
-              {sections.map((s) => (
-                <button key={s.id} onClick={() => setActiveSection(s.id)}
-                  className={`px-2 py-1 rounded-lg text-xs font-bold transition-colors ${activeSection === s.id ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-                  {s.label}
-                </button>
-              ))}
             </div>
+          );
+        })}
+      </div>
 
-            {activeSection === "newsite" && (
-              <div className="bg-blue-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="🆕" title="New Site Details" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Site Name" value={form.newSite.siteName} onChange={(e)=>setForm({...form,newSite:{...form.newSite,siteName:e.target.value}})} />
-                  <Input label="Location" value={form.newSite.location} onChange={(e)=>setForm({...form,newSite:{...form.newSite,location:e.target.value}})} />
-                  <Input label="Client Name" value={form.newSite.clientName} onChange={(e)=>setForm({...form,newSite:{...form.newSite,clientName:e.target.value}})} />
-                  <Input label="Start Date" type="date" value={form.newSite.startDate} onChange={(e)=>setForm({...form,newSite:{...form.newSite,startDate:e.target.value}})} />
-                  <Input label="No. of Workers" type="number" value={form.newSite.numWorkers} onChange={(e)=>setForm({...form,newSite:{...form.newSite,numWorkers:e.target.value}})} />
-                  <Input label="Interlock Type" value={form.newSite.interlockType} onChange={(e)=>setForm({...form,newSite:{...form.newSite,interlockType:e.target.value}})} />
-                  <Input label="Total Work Area (sqft)" type="number" value={form.newSite.totalWorkArea} onChange={(e)=>setForm({...form,newSite:{...form.newSite,totalWorkArea:e.target.value}})} />
-                  <Input label="Interlock Qty Unloaded" value={form.newSite.interlockQtyUnloaded} onChange={(e)=>setForm({...form,newSite:{...form.newSite,interlockQtyUnloaded:e.target.value}})} placeholder="sqft / piecework" />
+      {/* ADD MODAL */}
+      {modal && (
+        <Modal title="Daily Report" onClose={() => setModal(false)}>
+          <div className="space-y-3">
+            <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            {sections.map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1.5`}>{s.icon} {s.label}</div>
+                  <textarea
+                    rows={3}
+                    value={form[s.key]}
+                    onChange={(e) => setForm({ ...form, [s.key]: e.target.value })}
+                    placeholder={`Write ${s.label.toLowerCase()} details here...`}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
                 </div>
-                <Textarea label="Materials Unloaded" value={form.newSite.materialsUnloaded} onChange={(e)=>setForm({...form,newSite:{...form.newSite,materialsUnloaded:e.target.value}})} />
-                <Textarea label="Equipment Unloaded" value={form.newSite.equipmentUnloaded} onChange={(e)=>setForm({...form,newSite:{...form.newSite,equipmentUnloaded:e.target.value}})} />
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label={`Received (${CURRENCY})`} type="number" value={form.newSite.amountReceived} onChange={(e)=>setForm({...form,newSite:{...form.newSite,amountReceived:e.target.value}})} />
-                  <Input label={`Total Cost (${CURRENCY})`} type="number" value={form.newSite.totalCost} onChange={(e)=>setForm({...form,newSite:{...form.newSite,totalCost:e.target.value}})} />
-                  <Input label={`Pending (${CURRENCY})`} type="number" value={form.newSite.pendingAmount} onChange={(e)=>setForm({...form,newSite:{...form.newSite,pendingAmount:e.target.value}})} />
+              );
+            })}
+            <button onClick={save}
+              className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">
+              Submit Report
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* VIEW MODAL */}
+      {viewModal && (
+        <Modal title={`Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+            {sections.filter(s => viewModal[s.key]).map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
+                  <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewModal[s.key]}</div>
                 </div>
-              </div>
-            )}
-
-            {activeSection === "runningsite" && (
-              <div className="bg-teal-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="🔄" title="Running Site Details" />
-                <div className="mb-2">
-                  <Select label="Select Running Site (auto-fill)" value={form.runningSite.siteName}
-                    options={[{value:"",label:"-- Select site --"},...runningSites.map(s=>({value:s.name,label:s.name}))]}
-                    onChange={(e) => {
-                      const siteName = e.target.value;
-                      const site = allSites[siteName];
-                      if (site) {
-                        const latestInfo = site.entries.map(en => en.runningSite || en.newSite).filter(Boolean).pop() || {};
-                        setForm(f => ({...f, runningSite: {
-                          siteName,
-                          location: latestInfo.location || "",
-                          numWorkers: latestInfo.numWorkers || "",
-                          interlockType: latestInfo.interlockType || "",
-                          totalWorkArea: latestInfo.totalWorkArea || "",
-                          workCompletedToday: "",
-                          materialsUnloaded: "",
-                          equipmentAvailable: latestInfo.equipmentUnloaded || latestInfo.equipmentAvailable || "",
-                          amountReceived: latestInfo.amountReceived || "",
-                          totalCost: latestInfo.totalCost || "",
-                          pendingAmount: latestInfo.pendingAmount || "",
-                          progressStatus: "ongoing"
-                        }}));
-                      } else {
-                        setForm(f => ({...f, runningSite: {...f.runningSite, siteName}}));
-                      }
-                    }} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Site Name (or type new)" value={form.runningSite.siteName} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,siteName:e.target.value}})} />
-                  <Input label="Location" value={form.runningSite.location} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,location:e.target.value}})} />
-                  <Input label="No. of Workers" type="number" value={form.runningSite.numWorkers} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,numWorkers:e.target.value}})} />
-                  <Input label="Interlock Type" value={form.runningSite.interlockType} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,interlockType:e.target.value}})} />
-                  <Input label="Total Work Area (sqft)" type="number" value={form.runningSite.totalWorkArea} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,totalWorkArea:e.target.value}})} />
-                  <Input label="Work Completed Today (sqft)" type="number" value={form.runningSite.workCompletedToday} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,workCompletedToday:e.target.value}})} />
-                </div>
-                <Textarea label="Materials Unloaded" value={form.runningSite.materialsUnloaded} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,materialsUnloaded:e.target.value}})} />
-                <Textarea label="Equipment Available" value={form.runningSite.equipmentAvailable} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,equipmentAvailable:e.target.value}})} />
-                <Select label="Progress Status" value={form.runningSite.progressStatus} options={["ongoing","on-hold","near-completion"]} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,progressStatus:e.target.value}})} />
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label={`Received (${CURRENCY})`} type="number" value={form.runningSite.amountReceived} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,amountReceived:e.target.value}})} />
-                  <Input label={`Total Cost (${CURRENCY})`} type="number" value={form.runningSite.totalCost} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,totalCost:e.target.value}})} />
-                  <Input label={`Pending (${CURRENCY})`} type="number" value={form.runningSite.pendingAmount} onChange={(e)=>setForm({...form,runningSite:{...form.runningSite,pendingAmount:e.target.value}})} />
-                </div>
-              </div>
-            )}
-
-            {activeSection === "completedsite" && (
-              <div className="bg-green-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="✅" title="Completed Site Details" />
-                <div className="mb-2">
-                  <Select label="Select Running Site to Complete" value={form.completedSite.siteName}
-                    options={[{value:"",label:"-- Select running site --"},...runningSites.map(s=>({value:s.name,label:s.name}))]}
-                    onChange={(e) => {
-                      const siteName = e.target.value;
-                      const site = allSites[siteName];
-                      if (site) {
-                        const latestInfo = site.entries.map(en => en.runningSite || en.newSite).filter(Boolean).pop() || {};
-                        setForm(f => ({...f, completedSite: {
-                          siteName,
-                          location: latestInfo.location || "",
-                          completionDate: today(),
-                          totalSqftCompleted: latestInfo.totalWorkArea || "",
-                          interlockTypeUsed: latestInfo.interlockType || "",
-                          totalWorkers: latestInfo.numWorkers || "",
-                          totalCost: latestInfo.totalCost || "",
-                          totalAmountReceived: latestInfo.amountReceived || "",
-                          finalPendingAmount: latestInfo.pendingAmount || ""
-                        }}));
-                      } else {
-                        setForm(f => ({...f, completedSite: {...f.completedSite, siteName}}));
-                      }
-                    }} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Site Name" value={form.completedSite.siteName} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,siteName:e.target.value}})} />
-                  <Input label="Location" value={form.completedSite.location} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,location:e.target.value}})} />
-                  <Input label="Completion Date" type="date" value={form.completedSite.completionDate} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,completionDate:e.target.value}})} />
-                  <Input label="Total Sqft Completed" type="number" value={form.completedSite.totalSqftCompleted} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,totalSqftCompleted:e.target.value}})} />
-                  <Input label="Interlock Type Used" value={form.completedSite.interlockTypeUsed} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,interlockTypeUsed:e.target.value}})} />
-                  <Input label="Total Workers Used" type="number" value={form.completedSite.totalWorkers} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,totalWorkers:e.target.value}})} />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label={`Total Cost (${CURRENCY})`} type="number" value={form.completedSite.totalCost} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,totalCost:e.target.value}})} />
-                  <Input label={`Received (${CURRENCY})`} type="number" value={form.completedSite.totalAmountReceived} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,totalAmountReceived:e.target.value}})} />
-                  <Input label={`Pending (${CURRENCY})`} type="number" value={form.completedSite.finalPendingAmount} onChange={(e)=>setForm({...form,completedSite:{...form.completedSite,finalPendingAmount:e.target.value}})} />
-                </div>
-              </div>
-            )}
-
-            {activeSection === "workers" && (
-              <div className="bg-amber-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="👷" title="Workers Details" />
-                <Input label="Site Name" value={form.workerSite} onChange={(e)=>setForm({...form,workerSite:e.target.value})} placeholder="Which site" />
-                {(form.workers||[]).map((w,i) => (
-                  <div key={w.id} className="bg-white border border-amber-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between"><span className="text-xs font-bold text-amber-700">Worker {i+1}</span><button onClick={()=>setForm(f=>({...f,workers:f.workers.filter(x=>x.id!==w.id)}))} className="text-red-400 text-lg">×</button></div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input label="Name / Team" value={w.name} onChange={(e)=>setForm(f=>({...f,workers:f.workers.map(x=>x.id===w.id?{...x,name:e.target.value}:x)}))} />
-                      <Select label="Attendance" value={w.attendance} options={["Present","Absent","Half Day"]} onChange={(e)=>setForm(f=>({...f,workers:f.workers.map(x=>x.id===w.id?{...x,attendance:e.target.value}:x)}))} />
-                    </div>
-                  </div>
-                ))}
-                <button onClick={()=>setForm(f=>({...f,workers:[...(f.workers||[]),emptyWorker()]}))} className="w-full bg-amber-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-amber-600">+ Add Worker</button>
-              </div>
-            )}
-
-            {activeSection === "material" && (
-              <div className="bg-orange-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="🧱" title="Material Supply" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Site Name" value={form.materialSupply.siteName} onChange={(e)=>setForm({...form,materialSupply:{...form.materialSupply,siteName:e.target.value}})} />
-                  <Input label="Material Name" value={form.materialSupply.materialName} onChange={(e)=>setForm({...form,materialSupply:{...form.materialSupply,materialName:e.target.value}})} />
-                  <Input label="Quantity" value={form.materialSupply.qty} onChange={(e)=>setForm({...form,materialSupply:{...form.materialSupply,qty:e.target.value}})} />
-                  <Input label="Supplier" value={form.materialSupply.supplier} onChange={(e)=>setForm({...form,materialSupply:{...form.materialSupply,supplier:e.target.value}})} />
-                </div>
-                <Textarea label="Delivery Details" value={form.materialSupply.deliveryDetails} onChange={(e)=>setForm({...form,materialSupply:{...form.materialSupply,deliveryDetails:e.target.value}})} />
-              </div>
-            )}
-
-            {activeSection === "complaints" && (
-              <div className="bg-red-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="⚠️" title="Complaints" />
-                {(form.complaints||[]).map((c,i) => (
-                  <div key={c.id} className="bg-white border border-red-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between"><span className="text-xs font-bold text-red-600">Complaint {i+1}</span><button onClick={()=>setForm(f=>({...f,complaints:f.complaints.filter(x=>x.id!==c.id)}))} className="text-red-400 text-lg">×</button></div>
-                    <Input label="Site Name" value={c.siteName||""} onChange={(e)=>setForm(f=>({...f,complaints:f.complaints.map(x=>x.id===c.id?{...x,siteName:e.target.value}:x)}))} />
-                    <Textarea label="Description" value={c.description} onChange={(e)=>setForm(f=>({...f,complaints:f.complaints.map(x=>x.id===c.id?{...x,description:e.target.value}:x)}))} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input label="Reported By" value={c.reportedBy} onChange={(e)=>setForm(f=>({...f,complaints:f.complaints.map(x=>x.id===c.id?{...x,reportedBy:e.target.value}:x)}))} />
-                      <Input label="Action Taken" value={c.actionTaken} onChange={(e)=>setForm(f=>({...f,complaints:f.complaints.map(x=>x.id===c.id?{...x,actionTaken:e.target.value}:x)}))} />
-                    </div>
-                  </div>
-                ))}
-                <button onClick={()=>setForm(f=>({...f,complaints:[...(f.complaints||[]),emptyComplaint()]}))} className="w-full bg-red-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-red-600">+ Add Complaint</button>
-              </div>
-            )}
-
-            {activeSection === "payments" && (
-              <div className="bg-green-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="💰" title="Payments" />
-                {(form.payments||[]).map((p,i) => (
-                  <div key={p.id} className="bg-white border border-green-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between"><span className="text-xs font-bold text-green-600">Payment {i+1}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(x=>x.id!==p.id)}))} className="text-red-400 text-lg">×</button></div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input label="Site Name" value={p.siteName||""} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,siteName:e.target.value}:x)}))} />
-                      <Select label="Type" value={p.type} options={["Labour","Material","Equipment"]} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,type:e.target.value}:x)}))} />
-                      <Input label={`Amount (${CURRENCY})`} type="number" value={p.amount} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,amount:e.target.value}:x)}))} />
-                      <Input label="Paid To" value={p.paidTo} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,paidTo:e.target.value}:x)}))} />
-                      <Select label="Mode" value={p.mode} options={["Cash","Bank","GPay"]} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,mode:e.target.value}:x)}))} />
-                      <Input label="Date" type="date" value={p.date||today()} onChange={(e)=>setForm(f=>({...f,payments:f.payments.map(x=>x.id===p.id?{...x,date:e.target.value}:x)}))} />
-                    </div>
-                  </div>
-                ))}
-                <button onClick={()=>setForm(f=>({...f,payments:[...(f.payments||[]),emptyPayment()]}))} className="w-full bg-green-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-green-600">+ Add Payment</button>
-              </div>
-            )}
-
-            {activeSection === "daynotes" && (
-              <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="📝" title="Day Notes" />
-                <Textarea label="Supervisor remarks" value={form.dayNotes} onChange={(e)=>setForm({...form,dayNotes:e.target.value})} placeholder="Daily observations..." />
-              </div>
-            )}
-
-            {activeSection === "expenses" && (
-              <div className="bg-purple-50 rounded-xl p-3 space-y-2">
-                <SectionTitle icon="💸" title="Expenses" />
-                {(form.expenses||[]).map((e,i) => (
-                  <div key={e.id} className="bg-white border border-purple-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between"><span className="text-xs font-bold text-purple-600">Expense {i+1}</span><button onClick={()=>setForm(f=>({...f,expenses:f.expenses.filter(x=>x.id!==e.id)}))} className="text-red-400 text-lg">×</button></div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input label="Type" value={e.type} onChange={(ev)=>setForm(f=>({...f,expenses:f.expenses.map(x=>x.id===e.id?{...x,type:ev.target.value}:x)}))} />
-                      <Input label="Site Name" value={e.siteName||""} onChange={(ev)=>setForm(f=>({...f,expenses:f.expenses.map(x=>x.id===e.id?{...x,siteName:ev.target.value}:x)}))} />
-                      <Input label={`Amount (${CURRENCY})`} type="number" value={e.amount} onChange={(ev)=>setForm(f=>({...f,expenses:f.expenses.map(x=>x.id===e.id?{...x,amount:ev.target.value}:x)}))} />
-                      <Input label="Date" type="date" value={e.date||today()} onChange={(ev)=>setForm(f=>({...f,expenses:f.expenses.map(x=>x.id===e.id?{...x,date:ev.target.value}:x)}))} />
-                    </div>
-                    <Textarea label="Description" value={e.description} onChange={(ev)=>setForm(f=>({...f,expenses:f.expenses.map(x=>x.id===e.id?{...x,description:ev.target.value}:x)}))} />
-                  </div>
-                ))}
-                <button onClick={()=>setForm(f=>({...f,expenses:[...(f.expenses||[]),emptyExpense()]}))} className="w-full bg-purple-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-purple-600">+ Add Expense</button>
-              </div>
-            )}
-
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">Submit Report</button>
+              );
+            })}
           </div>
         </Modal>
       )}
@@ -1808,7 +1382,7 @@ export default function App() {
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
       case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
       case "workerreport": return <WorkerReport user={currentUser} />;
-      case "dailyreport": return <DailyReport siteWorks={siteWorks} user={currentUser} />;
+      case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={allUsers} />;
       case "users": return currentUser.role === "admin" ? <Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} /> : null;
