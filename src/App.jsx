@@ -294,8 +294,7 @@ function WorkerReport({ user }) {
       `Admin      : ${r.signatures?.admin ? "✓ Signed" : "Pending"}`,
       "════════════════════════════════",
     ];
-    const blob = new Blob([lines.join("
-")], { type: "text/plain" });
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
