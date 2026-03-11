@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "Al-Noor Interlock", logo: "🏭" };
+const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 
 const fmt = (n) => n?.toLocaleString("en-IN") ?? "0";
@@ -1094,9 +1094,16 @@ function Sales({ sales, setSales, stock, user }) {
 // ─── USERS ────────────────────────────────────────────────────────────────────
 function Users({ currentUser, allUsers, setAllUsers }) {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ role: "user" });
-  const save = async () => { const user = await api("POST", "/users", form); setAllUsers((p) => [...p, user]); setModal(false); setForm({ role: "user" }); };
-  const toggleActive = async (u) => { if (u._id === currentUser.id) return; await api("PUT", `/users/${u._id}`, { active: !u.active }); setAllUsers((p) => p.map((x) => x._id === u._id ? { ...x, active: !x.active } : x)); };
+  const [form, setForm] = useState({ name: "", username: "", password: "", role: "user" });
+  const [saveError, setSaveError] = useState("");
+  const save = async () => {
+    if (!form.name || !form.username || !form.password) { setSaveError("All fields are required"); return; }
+    setSaveError("");
+    const user = await api("POST", "/users", form);
+    if (user._id) { setAllUsers((p) => [...p, user]); setModal(false); setForm({ name: "", username: "", password: "", role: "user" }); }
+    else setSaveError(user.message || "Failed to add user");
+  };
+  const toggleActive = async (u) => { if (u._id === currentUser._id) return; await api("PUT", `/users/${u._id}`, { active: !u.active }); setAllUsers((p) => p.map((x) => x._id === u._id ? { ...x, active: !x.active } : x)); };
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between"><h2 className="text-xl font-black text-gray-900">👥 Users</h2><button onClick={() => { setForm({ role: "user" }); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button></div>
@@ -1118,6 +1125,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
           <Input label="Username" value={form.username || ""} onChange={(e) => setForm({ ...form, username: e.target.value })} />
           <Input label="Password" type="password" value={form.password || ""} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           <Select label="Role" value={form.role} options={["user", "supervisor", "admin"]} onChange={(e) => setForm({ ...form, role: e.target.value })} />
+          {saveError && <div className="text-xs text-red-600 font-semibold bg-red-50 rounded-lg p-2">{saveError}</div>}
           <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add User</button>
         </div>
       </Modal>}
