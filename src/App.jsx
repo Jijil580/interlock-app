@@ -276,13 +276,13 @@ function WorkerReport({ user }) {
       `Worker Name      : ${r.workerName}`,
       "────────────────────────────────",
       `Total Area       : ${r.totalArea} sqft`,
-      `Working Cost     : ${CURRENCY}${fmt(+r.workingCost)}`,
+      `Working Cost     : ${CURRENCY}${fmt(+(r.workingCost)||0)}`,
       "────────────────────────────────",
       `Extra Work       : ${r.extraWork || "—"}`,
       `Extra Material   : ${r.extraMaterial || "—"}`,
       "────────────────────────────────",
       `Total Working Area : ${r.totalWorkingArea} sqft`,
-      `Total Amount     : ${CURRENCY}${fmt(+r.totalAmount)}`,
+      `Total Amount     : ${CURRENCY}${fmt(+(r.totalAmount)||0)}`,
       "────────────────────────────────",
       `Note             : ${r.note || "—"}`,
       "────────────────────────────────",
@@ -324,7 +324,7 @@ function WorkerReport({ user }) {
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{reports.length}</div><div className="text-xs text-gray-500">Total</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(+r.totalAmount||0),0))}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(+(r.totalAmount)||0),0))}</div><div className="text-xs text-gray-500">Total Amount</div></div>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{reports.filter(r=>r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin).length}</div><div className="text-xs text-gray-500">Fully Signed</div></div>
       </div>
 
@@ -351,9 +351,9 @@ function WorkerReport({ user }) {
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="font-black text-gray-800">{r.totalWorkingArea} sqft</div><div className="text-gray-400">Total Area</div></div>
-                <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+r.workingCost)}</div><div className="text-gray-400">Working Cost</div></div>
-                <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+r.totalAmount)}</div><div className="text-gray-400">Total Amt</div></div>
+                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="font-black text-gray-800">{r.totalWorkingArea || "0"} sqft</div><div className="text-gray-400">Total Area</div></div>
+                <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Working Cost</div></div>
+                <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total Amt</div></div>
               </div>
               {/* Signature strip */}
               <div className="mt-3 flex gap-2">
@@ -441,10 +441,10 @@ function WorkerReport({ user }) {
 
             {/* Numbers */}
             <div className="grid grid-cols-2 gap-2">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.totalArea} sqft</div><div className="text-xs text-gray-500">Total Area</div></div>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+viewModal.workingCost)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
-              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-teal-700">{viewModal.totalWorkingArea} sqft</div><div className="text-xs text-gray-500">Total Working Area</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+viewModal.totalAmount)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.totalArea || "0"} sqft</div><div className="text-xs text-gray-500">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.workingCost)||0)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-teal-700">{viewModal.totalWorkingArea || "0"} sqft</div><div className="text-xs text-gray-500">Total Working Area</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
             </div>
 
             {viewModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewModal.extraWork}</div></div>}
