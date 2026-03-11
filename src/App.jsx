@@ -1403,6 +1403,33 @@ function SupervisorReports({ allUsers }) {
   );
 }
 
+
+const NAV = {
+  admin: [
+    { id: "dashboard", label: "Dashboard", icon: "📊" },
+    { id: "stock", label: "Stock", icon: "📦" },
+    { id: "raw", label: "Raw Material", icon: "🧱" },
+    { id: "production", label: "Production", icon: "🏭" },
+    { id: "sales", label: "Sales", icon: "💰" },
+    { id: "sitework", label: "Site Work", icon: "🏗️" },
+    { id: "workerreport", label: "Site Report", icon: "👷" },
+    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
+    { id: "supervisorreports", label: "Supervisor Overview", icon: "🔍" },
+    { id: "users", label: "Users", icon: "👥" },
+    { id: "reports", label: "Reports", icon: "📈" },
+  ],
+  supervisor: [
+    { id: "workerreport", label: "Site Report", icon: "👷" },
+    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
+    { id: "workplan", label: "Work Planning", icon: "📅" },
+  ],
+  user: [
+    { id: "dashboard", label: "Dashboard", icon: "📊" },
+    { id: "production", label: "Log Production", icon: "🏭" },
+    { id: "stock", label: "View Stock", icon: "📦" },
+  ],
+};
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
