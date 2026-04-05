@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "PK- Interlock", logo: "🏭" };
+const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 
 const fmt = (n) => n?.toLocaleString("en-IN") ?? "0";
@@ -213,81 +213,228 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 }
 
 // ─── WORKER REPORT ────────────────────────────────────────────────────────────
-function WorkerReport({ siteWorks, user }) {
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
+// ─── SITE REPORT (Worker Report) ─────────────────────────────────────────────
+// ─── SITE REPORT ─────────────────────────────────────────────────────────────
+// Shows all sites from Supervisor Reports with full details
+function WorkerReport({ user }) {
   const [reports, setReports] = useState([]);
+  const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ date: today(), siteId: "", workerName: "", remuneration: "", workingArea: "", workAmount: "", paymentMode: "Cash", materialAmount: "", notes: "" });
-  const [signatures, setSignatures] = useState({ supervisor: false, office: false, admin: false });
+  const [modal, setModal] = useState(false);
+  const [editModal, setEditModal] = useState(null);
+  const [viewModal, setViewModal] = useState(null);
+
+  const MATERIAL_TYPES = ["Interlock Paving","Kerbstone","Hollow Block","Solid Block","Coping Stone","Retaining Wall Block","Grass Block","Other"];
+
+  const emptyForm = {
+    startingDate: today(), siteName: "", phoneNo: "", workerName: "",
+    totalArea: "", workingCost: "", extraWork: "", extraMaterial: "",
+    totalWorkingArea: "", totalAmount: "", note: "",
+    paymentMode: "Cash", upiId: "", bankName: "", bankBranch: "", bankAccount: "",
+    amountReceivedBy: "", materialSupply: "", materialType: "",
+    signatures: { supervisor: false, office: false, admin: false },
+  };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    api("GET", "/workerreport").then((d) => { setReports(Array.isArray(d) ? d : []); setLoading(false); });
+    Promise.all([api("GET", "/workerreport"), api("GET", "/workers")]).then(([d, w]) => {
+      setReports(Array.isArray(d) ? d : []);
+      setWorkers(Array.isArray(w) ? w : []);
+      setLoading(false);
+    });
   }, []);
 
   const save = async () => {
-    const data = { ...form, remuneration: +form.remuneration, workingArea: +form.workingArea, workAmount: +form.workAmount, materialAmount: +form.materialAmount, signatures: { supervisor: false, office: false, admin: false }, addedBy: user.name };
-    const item = await api("POST", "/workerreport", data);
-    setReports((p) => [item, ...p]);
-    setModal(false);
-    setForm({ date: today(), siteId: "", workerName: "", remuneration: "", workingArea: "", workAmount: "", paymentMode: "Cash", materialAmount: "", notes: "" });
+    if (!form.workerName) return;
+    const item = await api("POST", "/workerreport", { ...form, addedBy: user.name });
+    if (item._id) {
+      setReports((p) => [item, ...p]);
+      setModal(false); setForm(emptyForm);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editModal) return;
+    const updated = await api("PUT", `/workerreport/${editModal._id}`, editModal);
+    setReports((p) => p.map((r) => r._id === editModal._id ? { ...r, ...editModal } : r));
+    if (viewModal?._id === editModal._id) setViewModal({ ...viewModal, ...editModal });
+    setEditModal(null);
   };
 
   const signReport = async (id, role) => {
     const report = reports.find((r) => r._id === id);
-    const updatedSigs = { ...report.signatures, [role]: true };
+    const updatedSigs = { ...(report.signatures || {}), [role]: true };
     await api("PUT", `/workerreport/${id}`, { signatures: updatedSigs });
     setReports((p) => p.map((r) => r._id === id ? { ...r, signatures: updatedSigs } : r));
     if (viewModal?._id === id) setViewModal((v) => ({ ...v, signatures: updatedSigs }));
   };
 
-  const paymentColors = { Cash: "green", Bank: "blue", GPay: "purple" };
+  const downloadReport = (r) => {
+    const payInfo = r.paymentMode === "GPay" || r.paymentMode === "UPI"
+      ? `UPI ID          : ${r.upiId || "—"}`
+      : r.paymentMode === "Bank"
+      ? `Bank Name       : ${r.bankName || "—"}\nBranch          : ${r.bankBranch || "—"}\nAccount No      : ${r.bankAccount || "—"}`
+      : "";
+    const lines = [
+      "════════════════════════════════",
+      "         PK INTERLOCK          ",
+      "          SITE REPORT          ",
+      "════════════════════════════════",
+      `Site Name        : ${r.siteName || "—"}`,
+      `Phone No         : ${r.phoneNo || "—"}`,
+      `Starting Date    : ${r.startingDate}`,
+      `Worker Name      : ${r.workerName}`,
+      "────────────────────────────────",
+      `Total Area       : ${r.totalArea} sqft`,
+      `Working Cost     : ${CURRENCY}${r.workingCost || 0}`,
+      "────────────────────────────────",
+      `Extra Work       : ${r.extraWork || "—"}`,
+      `Extra Material   : ${r.extraMaterial || "—"}`,
+      "────────────────────────────────",
+      `Total Working Area : ${r.totalWorkingArea} sqft`,
+      `Total Amount     : ${CURRENCY}${r.totalAmount || 0}`,
+      "────────────────────────────────",
+      `Note             : ${r.note || "—"}`,
+      "────────────────────────────────",
+      "PAYMENTS",
+      `Payment Mode     : ${r.paymentMode}`,
+      payInfo,
+      `Amount Received By: ${r.amountReceivedBy || "—"}`,
+      "────────────────────────────────",
+      `Material Type    : ${r.materialType || "—"}`,
+      `Material Supply  : ${r.materialSupply || "—"}`,
+      "────────────────────────────────",
+      "WORK FINISHED SIGNATURES",
+      `Supervisor : ${r.signatures?.supervisor ? "✓ Signed" : "Pending"}`,
+      `Office     : ${r.signatures?.office ? "✓ Signed" : "Pending"}`,
+      `Admin      : ${r.signatures?.admin ? "✓ Signed" : "Pending"}`,
+      "════════════════════════════════",
+    ].filter(l => l !== "");
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `Site_Report_${r.workerName}_${r.startingDate}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const PaymentFields = ({ f, setF }) => (
+    <>
+      <Select label="Payment Mode" value={f.paymentMode} options={["Cash","Bank","GPay","UPI"]} onChange={(e)=>setF({...f,paymentMode:e.target.value,upiId:"",bankName:"",bankBranch:"",bankAccount:""})} />
+      {(f.paymentMode === "GPay" || f.paymentMode === "UPI") && (
+        <Input label="UPI ID" value={f.upiId||""} onChange={(e)=>setF({...f,upiId:e.target.value})} placeholder="example@upi" />
+      )}
+      {f.paymentMode === "Bank" && (
+        <div className="space-y-2">
+          <Input label="Bank Name" value={f.bankName||""} onChange={(e)=>setF({...f,bankName:e.target.value})} placeholder="e.g. SBI" />
+          <Input label="Branch" value={f.bankBranch||""} onChange={(e)=>setF({...f,bankBranch:e.target.value})} placeholder="Branch name" />
+          <Input label="Account Number" value={f.bankAccount||""} onChange={(e)=>setF({...f,bankAccount:e.target.value})} placeholder="Account number" />
+        </div>
+      )}
+      <Input label="Amount Received By" value={f.amountReceivedBy||""} onChange={(e)=>setF({...f,amountReceivedBy:e.target.value})} placeholder="Name of person" />
+    </>
+  );
+
+  const FormBody = ({ f, setF }) => (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Site Name" value={f.siteName} onChange={(e)=>setF({...f,siteName:e.target.value})} placeholder="Site name" />
+        <Input label="Phone No" type="tel" value={f.phoneNo} onChange={(e)=>setF({...f,phoneNo:e.target.value})} placeholder="Contact number" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Starting Date" type="date" value={f.startingDate} onChange={(e)=>setF({...f,startingDate:e.target.value})} />
+        <div>
+          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Worker Name</label>
+          <select className="mt-1 w-full border-b-2 border-gray-200 focus:border-amber-500 px-0 py-2 text-sm outline-none bg-transparent"
+            value={f.workerName} onChange={(e)=>setF({...f,workerName:e.target.value})}>
+            <option value="">Select worker</option>
+            {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+            <option value="__custom__">+ Type manually</option>
+          </select>
+          {f.workerName === "__custom__" && (
+            <Input label="Enter Name" value={f._customWorker||""} onChange={(e)=>setF({...f,_customWorker:e.target.value,workerName:e.target.value})} placeholder="Full name" />
+          )}
+        </div>
+      </div>
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+        <div className="text-xs font-bold text-blue-700">📐 Area & Cost</div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Total Area (sqft)" type="number" value={f.totalArea} onChange={(e)=>setF({...f,totalArea:e.target.value})} />
+          <Input label={`Working Cost (${CURRENCY})`} type="number" value={f.workingCost} onChange={(e)=>setF({...f,workingCost:e.target.value})} />
+        </div>
+      </div>
+      <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 space-y-2">
+        <div className="text-xs font-bold text-orange-700">➕ Extra</div>
+        <Textarea label="Extra Work" value={f.extraWork} onChange={(e)=>setF({...f,extraWork:e.target.value})} placeholder="Any extra work done..." />
+        <Textarea label="Extra Material Using" value={f.extraMaterial} onChange={(e)=>setF({...f,extraMaterial:e.target.value})} placeholder="Extra materials used..." />
+      </div>
+      <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
+        <div className="text-xs font-bold text-green-700">💰 Totals</div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Total Working Area (sqft)" type="number" value={f.totalWorkingArea} onChange={(e)=>setF({...f,totalWorkingArea:e.target.value})} />
+          <Input label={`Total Amount (${CURRENCY})`} type="number" value={f.totalAmount} onChange={(e)=>setF({...f,totalAmount:e.target.value})} />
+        </div>
+      </div>
+      <Textarea label="📝 Note" value={f.note} onChange={(e)=>setF({...f,note:e.target.value})} placeholder="Any notes..." />
+      <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 space-y-2">
+        <div className="text-xs font-bold text-purple-700">💳 Payments</div>
+        <PaymentFields f={f} setF={setF} />
+      </div>
+      <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 space-y-2">
+        <div className="text-xs font-bold text-teal-700">🧱 Material</div>
+        <Select label="Material Type" value={f.materialType||""} options={["", ...MATERIAL_TYPES]} onChange={(e)=>setF({...f,materialType:e.target.value})} />
+        <Textarea label="Material Supply Details" value={f.materialSupply} onChange={(e)=>setF({...f,materialSupply:e.target.value})} placeholder="Materials supplied..." />
+      </div>
+    </div>
+  );
 
   if (loading) return <Loader />;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        <h2 className="text-xl font-black text-gray-900">🏗️ Site Report</h2>
+        {(user.role === "supervisor" || user.role === "admin") && (
+          <button onClick={() => { setForm(emptyForm); setModal(true); }}
+            className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-gray-900">{reports.length}</div><div className="text-xs text-gray-500">Total Reports</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a, r) => a + (r.workAmount || 0), 0))}</div><div className="text-xs text-gray-500">Total Work</div></div>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(reports.reduce((a, r) => a + (r.remuneration || 0), 0))}</div><div className="text-xs text-gray-500">Total Pay</div></div>
+        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{reports.length}</div><div className="text-xs text-gray-500">Total</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(+(r.totalAmount)||0),0))}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-amber-700">{reports.filter(r=>r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin).length}</div><div className="text-xs text-gray-500">Fully Signed</div></div>
       </div>
 
       <div className="space-y-3">
-        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No worker reports yet</div>}
+        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No site reports yet</div>}
         {reports.map((r) => {
           const allSigned = r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin;
           return (
             <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-start justify-between gap-2 flex-wrap">
-                <div>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 cursor-pointer" onClick={() => setViewModal(r)}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-black text-gray-900">{r.workerName}</h3>
-                    <Badge color={paymentColors[r.paymentMode] || "gray"}>{r.paymentMode}</Badge>
-                    {allSigned && <Badge color="green">✓ Fully Signed</Badge>}
+                    <span className="font-black text-gray-900">{r.workerName}</span>
+                    <Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>
+                    {allSigned && <Badge color="green">✅ Signed</Badge>}
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">📅 {r.date} · 📍 {siteWorks.find((s) => s._id === r.siteId)?.customerName || r.siteId}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
+                  <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}{r.materialType ? ` · 🧱 ${r.materialType}` : ""}</div>
                 </div>
-                <button onClick={() => setViewModal(r)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100">View</button>
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={() => setEditModal({...r})} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>
+                  <button onClick={() => downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(r.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-blue-700">{r.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-gray-50 rounded-xl p-2 text-center"><div className="font-black text-gray-800">{r.totalWorkingArea||"0"} sqft</div><div className="text-gray-400">Total Area</div></div>
+                <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Working Cost</div></div>
+                <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total Amt</div></div>
               </div>
-              {r.materialAmount > 0 && <div className="mt-2 text-xs text-gray-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">🧱 Material Amount: <span className="font-bold">{CURRENCY}{fmt(r.materialAmount)}</span></div>}
-              <div className="mt-3 flex gap-2 flex-wrap">
-                {["supervisor", "office", "admin"].map((role) => (
-                  <div key={role} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role] ? "bg-green-50 border-green-200 text-green-700" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
-                    {r.signatures?.[role] ? "✓" : "○"} <span className="capitalize font-semibold">{role}</span>
-                    {!r.signatures?.[role] && (user.role === role || (user.role === "admin")) && (
-                      <button onClick={() => signReport(r._id, role)} className="ml-1 bg-green-500 text-white px-1.5 rounded text-xs font-bold hover:bg-green-600">Sign</button>
-                    )}
+              <div className="mt-2 flex gap-2">
+                {["supervisor","office","admin"].map((role) => (
+                  <div key={role} className={`flex-1 text-center py-1.5 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>
+                    {r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}
                   </div>
                 ))}
               </div>
@@ -297,56 +444,67 @@ function WorkerReport({ siteWorks, user }) {
       </div>
 
       {modal && (
-        <Modal title="Add Worker Report" onClose={() => setModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              <Select label="Site" value={form.siteId} options={[{ value: "", label: "Select site..." }, ...siteWorks.map((s) => ({ value: s._id, label: s.customerName }))]} onChange={(e) => setForm({ ...form, siteId: e.target.value })} />
-            </div>
-            <Input label="Worker Name" value={form.workerName} onChange={(e) => setForm({ ...form, workerName: e.target.value })} placeholder="Full name" />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label={`Daily Remuneration (${CURRENCY})`} type="number" value={form.remuneration} onChange={(e) => setForm({ ...form, remuneration: e.target.value })} />
-              <Select label="Payment Mode" value={form.paymentMode} options={["Cash", "Bank", "GPay"]} onChange={(e) => setForm({ ...form, paymentMode: e.target.value })} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Working Area (sqm)" type="number" value={form.workingArea} onChange={(e) => setForm({ ...form, workingArea: e.target.value })} />
-              <Input label={`Total Work Amount (${CURRENCY})`} type="number" value={form.workAmount} onChange={(e) => setForm({ ...form, workAmount: e.target.value })} />
-            </div>
-            <Input label={`Material Amount Received (${CURRENCY})`} type="number" value={form.materialAmount} onChange={(e) => setForm({ ...form, materialAmount: e.target.value })} placeholder="0" />
-            <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any remarks..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
+        <Modal title="Add Site Report" onClose={() => setModal(false)}>
+          <FormBody f={form} setF={setForm} />
+          <div className="mt-3">
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
+          </div>
+        </Modal>
+      )}
+
+      {editModal && (
+        <Modal title="Edit Site Report" onClose={() => setEditModal(null)}>
+          <FormBody f={editModal} setF={setEditModal} />
+          <div className="mt-3">
+            <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold hover:bg-blue-600">Save Changes</button>
           </div>
         </Modal>
       )}
 
       {viewModal && (
-        <Modal title="Worker Report Details" onClose={() => setViewModal(null)}>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              {[["Worker", viewModal.workerName], ["Date", viewModal.date], ["Site", siteWorks.find((s) => s._id === viewModal.siteId)?.customerName || "-"], ["Payment Mode", viewModal.paymentMode]].map(([l, v]) => (
-                <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-500">{l}</div><div className="font-bold text-gray-900">{v}</div></div>
+        <Modal title="Site Report Details" onClose={() => setViewModal(null)}>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+              <button onClick={() => downloadReport(viewModal)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[["Site Name",viewModal.siteName],["Phone No",viewModal.phoneNo],["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
+                <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-gray-900">{v||"—"}</div></div>
               ))}
+              {(viewModal.paymentMode==="GPay"||viewModal.paymentMode==="UPI") && viewModal.upiId && (
+                <div className="col-span-2 bg-purple-50 rounded-xl p-3"><div className="text-xs text-gray-400">UPI ID</div><div className="font-bold text-gray-900">{viewModal.upiId}</div></div>
+              )}
+              {viewModal.paymentMode==="Bank" && (
+                <div className="col-span-2 bg-blue-50 rounded-xl p-3 grid grid-cols-3 gap-2">
+                  <div><div className="text-xs text-gray-400">Bank</div><div className="font-bold text-sm">{viewModal.bankName||"—"}</div></div>
+                  <div><div className="text-xs text-gray-400">Branch</div><div className="font-bold text-sm">{viewModal.bankBranch||"—"}</div></div>
+                  <div><div className="text-xs text-gray-400">Account</div><div className="font-bold text-sm">{viewModal.bankAccount||"—"}</div></div>
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(viewModal.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.workingCost)||0)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-teal-700">{viewModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Working Area</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
             </div>
-            {viewModal.materialAmount > 0 && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs text-gray-500">Material Amount</div><div className="font-black text-orange-700">{CURRENCY}{fmt(viewModal.materialAmount)}</div></div>}
-            {viewModal.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-500">Notes</div><div className="text-sm text-gray-700">{viewModal.notes}</div></div>}
-            <div>
-              <div className="text-xs font-bold text-gray-500 uppercase mb-2">Signatures</div>
-              <div className="space-y-2">
-                {["supervisor", "office", "admin"].map((role) => (
-                  <div key={role} className={`flex items-center justify-between p-3 rounded-xl border ${viewModal.signatures?.[role] ? "bg-green-50 border-green-200" : "bg-gray-50 border-gray-200"}`}>
-                    <div className="flex items-center gap-2">
-                      <span className={viewModal.signatures?.[role] ? "text-green-600" : "text-gray-400"}>{viewModal.signatures?.[role] ? "✅" : "⭕"}</span>
-                      <span className="capitalize font-semibold text-sm text-gray-700">{role}</span>
-                    </div>
+            {viewModal.materialType && <div className="bg-teal-50 border border-teal-200 rounded-xl p-3"><div className="text-xs font-bold text-teal-600 mb-1">🧱 Material Type</div><div className="text-sm font-bold text-gray-800">{viewModal.materialType}</div></div>}
+            {viewModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewModal.extraWork}</div></div>}
+            {viewModal.extraMaterial && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material</div><div className="text-sm text-gray-700">{viewModal.extraMaterial}</div></div>}
+            {viewModal.note && <div className="bg-gray-50 border border-gray-200 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm text-gray-700">{viewModal.note}</div></div>}
+            {viewModal.materialSupply && <div className="bg-teal-50 border border-teal-200 rounded-xl p-3"><div className="text-xs font-bold text-teal-600 mb-1">📦 Material Supply</div><div className="text-sm text-gray-700">{viewModal.materialSupply}</div></div>}
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div className="text-xs font-bold text-gray-600 uppercase mb-3">✍️ Work Finished Signatures</div>
+              <div className="grid grid-cols-3 gap-3">
+                {["supervisor","office","admin"].map((role) => (
+                  <div key={role} className={`rounded-xl border p-3 text-center ${viewModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
+                    <div className="text-2xl mb-1">{viewModal.signatures?.[role]?"✅":"⭕"}</div>
+                    <div className="text-xs font-bold text-gray-700 capitalize">{role}</div>
                     {!viewModal.signatures?.[role] && (user.role === role || user.role === "admin") && (
-                      <button onClick={() => signReport(viewModal._id, role)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-600">Sign Now</button>
+                      <button onClick={() => signReport(viewModal._id, role)} className="mt-2 bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-green-600 w-full">Sign</button>
                     )}
-                    {viewModal.signatures?.[role] && <span className="text-xs text-green-600 font-semibold">Signed ✓</span>}
+                    {viewModal.signatures?.[role] && <div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
                   </div>
                 ))}
               </div>
@@ -358,35 +516,96 @@ function WorkerReport({ siteWorks, user }) {
   );
 }
 
-// ─── DAILY SUPERVISOR REPORT ──────────────────────────────────────────────────
-function DailyReport({ siteWorks, user }) {
+
+function DailyReport({ user }) {
   const [reports, setReports] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({
-    date: today(), newSiteDetails: "", workersDetails: "", materialsSupplied: "",
-    complaints: "", paymentsReceived: "", dayExpenses: "", expenseAmount: "", notes: "",
-    payments: [],
-  });
-  const [newPayment, setNewPayment] = useState({ from: "", amount: "", mode: "Cash" });
+
+  const emptyForm = {
+    date: today(), newSite: "", runningSite: "", workersDetail: "",
+    materialSupply: "", complaints: "", payments: "", dayNote: "", expenses: "",
+    workerPayments: [], // [{workerName, amount, date, note}]
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [wpForm, setWpForm] = useState({ workerName: "", amount: "", date: today(), note: "" });
 
   useEffect(() => {
-    api("GET", "/dailyreport").then((d) => { setReports(Array.isArray(d) ? d : []); setLoading(false); });
+    Promise.all([api("GET", "/dailyreport"), api("GET", "/workers")]).then(([d, w]) => {
+      setReports(Array.isArray(d) ? d : []);
+      setWorkers(Array.isArray(w) ? w : []);
+      setLoading(false);
+    });
   }, []);
 
-  const addPayment = () => {
-    if (!newPayment.from || !newPayment.amount) return;
-    setForm((f) => ({ ...f, payments: [...(f.payments || []), { ...newPayment, amount: +newPayment.amount, id: Date.now() }] }));
-    setNewPayment({ from: "", amount: "", mode: "Cash" });
+  const addWorkerPayment = () => {
+    if (!wpForm.workerName || !wpForm.amount) return;
+    setForm(f => ({ ...f, workerPayments: [...(f.workerPayments||[]), { ...wpForm, amount: +wpForm.amount }] }));
+    setWpForm({ workerName: "", amount: "", date: today(), note: "" });
+  };
+
+  const removeWorkerPayment = (i) => {
+    setForm(f => ({ ...f, workerPayments: f.workerPayments.filter((_,idx)=>idx!==i) }));
   };
 
   const save = async () => {
-    const data = { ...form, expenseAmount: +form.expenseAmount, addedBy: user.name };
-    const item = await api("POST", "/dailyreport", data);
-    setReports((p) => [item, ...p]);
-    setModal(false);
-    setForm({ date: today(), newSiteDetails: "", workersDetails: "", materialsSupplied: "", complaints: "", paymentsReceived: "", dayExpenses: "", expenseAmount: "", notes: "", payments: [] });
+    if (!form.date) return;
+    // Also record payments in worker payment history
+    if (form.workerPayments?.length > 0) {
+      for (const wp of form.workerPayments) {
+        await api("POST", "/workerpayments", { ...wp, addedBy: user.name, source: "supervisor_report", reportDate: form.date });
+      }
+    }
+    const item = await api("POST", "/dailyreport", { ...form, addedBy: user.name });
+    setReports((p) => [item, ...p].sort((a, b) => (b.date||"").localeCompare(a.date||"")));
+    setModal(false); setForm(emptyForm);
+  };
+
+  const sections = [
+    { key: "newSite",        icon: "🆕", label: "New Site Details",     color: "blue"   },
+    { key: "runningSite",    icon: "🔄", label: "Running Site Details",  color: "teal"   },
+    { key: "workersDetail",  icon: "👷", label: "Workers Detail",        color: "amber"  },
+    { key: "materialSupply", icon: "🧱", label: "Material Supply",       color: "orange" },
+    { key: "complaints",     icon: "⚠️", label: "Complaints",            color: "red"    },
+    { key: "payments",       icon: "💰", label: "Payments",              color: "green"  },
+    { key: "dayNote",        icon: "📝", label: "Day Note",              color: "gray"   },
+    { key: "expenses",       icon: "💸", label: "Expenses",              color: "purple" },
+  ];
+
+  const colorMap = {
+    blue:   { bg: "bg-blue-50",   border: "border-blue-200",   label: "text-blue-700"   },
+    teal:   { bg: "bg-teal-50",   border: "border-teal-200",   label: "text-teal-700"   },
+    amber:  { bg: "bg-amber-50",  border: "border-amber-200",  label: "text-amber-700"  },
+    orange: { bg: "bg-orange-50", border: "border-orange-200", label: "text-orange-700" },
+    red:    { bg: "bg-red-50",    border: "border-red-200",    label: "text-red-700"    },
+    green:  { bg: "bg-green-50",  border: "border-green-200",  label: "text-green-700"  },
+    gray:   { bg: "bg-gray-50",   border: "border-gray-200",   label: "text-gray-600"   },
+    purple: { bg: "bg-purple-50", border: "border-purple-200", label: "text-purple-700" },
+  };
+
+  const downloadReport = (r) => {
+    const wpLines = r.workerPayments?.length > 0
+      ? ["👷 WORKER PAYMENTS","─────────────────────────────",
+          ...r.workerPayments.map(wp=>`${wp.workerName} | ${wp.date} | ${CURRENCY}${wp.amount}${wp.note?" | "+wp.note:""}`),
+          ""]
+      : [];
+    const filled = sections.filter(s => r[s.key]);
+    const lines = [
+      "PK INTERLOCK","SUPERVISOR DAILY REPORT",
+      "================================",
+      `Date   : ${r.date}`,`By     : ${r.addedBy}`,
+      "================================","",
+      ...wpLines,
+      ...filled.flatMap(s => [`${s.icon} ${s.label.toUpperCase()}`,"--------------------------------",r[s.key],""]),
+      "================================","END OF REPORT",
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `Supervisor_Report_${r.date}.txt`; a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (loading) return <Loader />;
@@ -394,128 +613,123 @@ function DailyReport({ siteWorks, user }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
+        <h2 className="text-xl font-black text-gray-900">📋 Supervisor Report</h2>
+        <button onClick={() => { setForm(emptyForm); setWpForm({ workerName: "", amount: "", date: today(), note: "" }); setModal(true); }}
+          className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Report</button>
       </div>
 
       <div className="space-y-3">
-        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No daily reports yet</div>}
-        {reports.map((r) => (
-          <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="font-black text-gray-900">📅 {r.date}</div>
-                <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  {r.newSiteDetails && <Badge color="blue">🏗️ New Site</Badge>}
-                  {r.complaints && <Badge color="red">⚠️ Complaint</Badge>}
-                  {r.payments?.length > 0 && <Badge color="green">💰 {r.payments.length} Payments</Badge>}
-                  {r.expenseAmount > 0 && <Badge color="orange">💸 Expense</Badge>}
+        {reports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No reports yet</div>}
+        {reports.map((r) => {
+          const filled = sections.filter(s => r[s.key]);
+          const hasWP = r.workerPayments?.length > 0;
+          return (
+            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div onClick={() => setViewModal(r)} className="flex-1 cursor-pointer">
+                  <div className="font-black text-gray-900 text-base">📅 {r.date}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}{hasWP ? ` · 💸 ${r.workerPayments.length} worker payment${r.workerPayments.length>1?"s":""}` : ""}</div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
+                  <button onClick={() => setViewModal(r)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">View</button>
                 </div>
               </div>
-              <button onClick={() => setViewModal(r)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100 shrink-0">View</button>
+              <div className="mt-2 flex gap-1 flex-wrap">
+                {hasWP && <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-50 text-green-700 border border-green-200">💸 Worker Payments</span>}
+                {filled.map(s => {
+                  const c = colorMap[s.color];
+                  return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;
+                })}
+              </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {r.payments?.length > 0 && <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.payments.reduce((a, p) => a + p.amount, 0))}</div><div className="text-xs text-gray-500">Received</div></div>}
-              {r.expenseAmount > 0 && <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="text-sm font-black text-red-600">{CURRENCY}{fmt(r.expenseAmount)}</div><div className="text-xs text-gray-500">Expenses</div></div>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {modal && (
-        <Modal title="Daily Supervisor Report" onClose={() => setModal(false)}>
+        <Modal title="Daily Report" onClose={() => setModal(false)}>
           <div className="space-y-3">
             <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
 
-            <div className="bg-blue-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="🏗️" title="New Site Details" />
-              <Textarea label="" value={form.newSiteDetails} onChange={(e) => setForm({ ...form, newSiteDetails: e.target.value })} placeholder="Any new site started today..." />
-            </div>
-
-            <div className="bg-amber-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="👷" title="Workers Details" />
-              <Textarea label="" value={form.workersDetails} onChange={(e) => setForm({ ...form, workersDetails: e.target.value })} placeholder="Workers present, tasks assigned..." />
-            </div>
-
-            <div className="bg-orange-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="🧱" title="Materials Supplied" />
-              <Textarea label="" value={form.materialsSupplied} onChange={(e) => setForm({ ...form, materialsSupplied: e.target.value })} placeholder="Materials sent to sites..." />
-            </div>
-
-            <div className="bg-green-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="💰" title="Payments Received" />
-              {(form.payments || []).map((p) => (
-                <div key={p.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                  <span className="text-sm font-semibold text-gray-700">{p.from} — {CURRENCY}{fmt(p.amount)} ({p.mode})</span>
-                  <button onClick={() => setForm((f) => ({ ...f, payments: f.payments.filter((x) => x.id !== p.id) }))} className="text-red-400 hover:text-red-600 text-lg">×</button>
+            {/* Worker Payments Section */}
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-green-700">💸 Worker Payments</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Worker</label>
+                  <select className="mt-1 w-full border-b-2 border-gray-200 focus:border-amber-500 px-0 py-2 text-sm outline-none bg-transparent"
+                    value={wpForm.workerName} onChange={(e)=>setWpForm({...wpForm,workerName:e.target.value})}>
+                    <option value="">Select worker</option>
+                    {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+                  </select>
                 </div>
-              ))}
-              <div className="flex gap-2">
-                <input className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
-                  placeholder="From (customer/site)" value={newPayment.from} onChange={(e) => setNewPayment({ ...newPayment, from: e.target.value })} />
-                <input type="number" className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none"
-                  placeholder="Amount" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} />
-                <select className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white"
-                  value={newPayment.mode} onChange={(e) => setNewPayment({ ...newPayment, mode: e.target.value })}>
-                  <option>Cash</option><option>Bank</option><option>GPay</option>
-                </select>
-                <button onClick={addPayment} className="bg-green-500 text-white px-3 py-2 rounded-lg font-bold hover:bg-green-600">+</button>
+                <Input label={`Amount (${CURRENCY})`} type="number" value={wpForm.amount} onChange={(e)=>setWpForm({...wpForm,amount:e.target.value})} placeholder="0" />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Date" type="date" value={wpForm.date} onChange={(e)=>setWpForm({...wpForm,date:e.target.value})} />
+                <Input label="Note" value={wpForm.note} onChange={(e)=>setWpForm({...wpForm,note:e.target.value})} placeholder="Optional" />
+              </div>
+              <button onClick={addWorkerPayment} className="w-full bg-green-500 text-white py-1.5 rounded-lg text-xs font-bold hover:bg-green-600">+ Add Payment</button>
+              {form.workerPayments?.length > 0 && (
+                <div className="space-y-1 mt-1">
+                  {form.workerPayments.map((wp, i) => (
+                    <div key={i} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-green-200">
+                      <div className="text-xs"><span className="font-bold">{wp.workerName}</span> · {wp.date} · <span className="font-black text-green-700">{CURRENCY}{wp.amount}</span>{wp.note ? ` · ${wp.note}` : ""}</div>
+                      <button onClick={() => removeWorkerPayment(i)} className="text-red-400 hover:text-red-600 text-xs font-bold ml-2">✕</button>
+                    </div>
+                  ))}
+                  <div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt(form.workerPayments.reduce((a,w)=>a+w.amount,0))}</div>
+                </div>
+              )}
             </div>
 
-            <div className="bg-red-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="⚠️" title="Complaints" />
-              <Textarea label="" value={form.complaints} onChange={(e) => setForm({ ...form, complaints: e.target.value })} placeholder="Any complaints or issues..." />
-            </div>
-
-            <div className="bg-purple-50 rounded-xl p-3 space-y-2">
-              <SectionTitle icon="💸" title="Day Expenses" />
-              <Textarea label="Expense Details" value={form.dayExpenses} onChange={(e) => setForm({ ...form, dayExpenses: e.target.value })} placeholder="What was spent today..." />
-              <Input label={`Total Expense Amount (${CURRENCY})`} type="number" value={form.expenseAmount} onChange={(e) => setForm({ ...form, expenseAmount: e.target.value })} placeholder="0" />
-            </div>
-
-            <Textarea label="📝 Day Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any other notes for the day..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit Daily Report</button>
+            {sections.map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1.5`}>{s.icon} {s.label}</div>
+                  <textarea rows={3} value={form[s.key]}
+                    onChange={(e) => setForm({ ...form, [s.key]: e.target.value })}
+                    placeholder={`Write ${s.label.toLowerCase()} here...`}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
+              );
+            })}
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">Submit Report</button>
           </div>
         </Modal>
       )}
 
       {viewModal && (
-        <Modal title={`Daily Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
+        <Modal title={`Report — ${viewModal.date}`} onClose={() => setViewModal(null)}>
           <div className="space-y-3">
-            {[
-              { icon: "🏗️", label: "New Site Details", value: viewModal.newSiteDetails, color: "bg-blue-50 border-blue-200" },
-              { icon: "👷", label: "Workers Details", value: viewModal.workersDetails, color: "bg-amber-50 border-amber-200" },
-              { icon: "🧱", label: "Materials Supplied", value: viewModal.materialsSupplied, color: "bg-orange-50 border-orange-200" },
-              { icon: "⚠️", label: "Complaints", value: viewModal.complaints, color: "bg-red-50 border-red-200" },
-              { icon: "📝", label: "Day Notes", value: viewModal.notes, color: "bg-gray-50 border-gray-200" },
-            ].filter((x) => x.value).map(({ icon, label, value, color }) => (
-              <div key={label} className={`border rounded-xl p-3 ${color}`}>
-                <div className="text-xs font-bold text-gray-500 mb-1">{icon} {label}</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap">{value}</div>
-              </div>
-            ))}
-            {viewModal.payments?.length > 0 && (
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+              <button onClick={() => downloadReport(viewModal)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button>
+            </div>
+            {viewModal.workerPayments?.length > 0 && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                <div className="text-xs font-bold text-gray-500 mb-2">💰 Payments Received</div>
-                {viewModal.payments.map((p, i) => (
-                  <div key={i} className="flex justify-between text-sm py-1 border-b border-green-100 last:border-0">
-                    <span className="text-gray-700">{p.from} <Badge color={p.mode === "Cash" ? "green" : p.mode === "Bank" ? "blue" : "purple"}>{p.mode}</Badge></span>
-                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
+                <div className="text-xs font-bold text-green-700 mb-2">💸 Worker Payments</div>
+                {viewModal.workerPayments.map((wp, i) => (
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className="font-bold">{wp.workerName}</span>{wp.note ? ` — ${wp.note}` : ""}</span>
+                    <span><span className="text-gray-400">{wp.date}</span> · <span className="font-black text-green-700">{CURRENCY}{fmt(wp.amount)}</span></span>
                   </div>
                 ))}
-                <div className="text-right mt-2 font-black text-green-800 text-sm">Total: {CURRENCY}{fmt(viewModal.payments.reduce((a, p) => a + p.amount, 0))}</div>
+                <div className="text-xs font-black text-green-700 text-right mt-1">Total: {CURRENCY}{fmt(viewModal.workerPayments.reduce((a,w)=>a+(+w.amount||0),0))}</div>
               </div>
             )}
-            {viewModal.expenseAmount > 0 && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                <div className="text-xs font-bold text-gray-500 mb-1">💸 Day Expenses</div>
-                <div className="text-sm text-gray-700">{viewModal.dayExpenses}</div>
-                <div className="text-lg font-black text-red-600 mt-1">{CURRENCY}{fmt(viewModal.expenseAmount)}</div>
-              </div>
-            )}
-            <div className="text-xs text-gray-400">Added by: {viewModal.addedBy}</div>
+            {sections.filter(s => viewModal[s.key]).map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
+                  <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewModal[s.key]}</div>
+                </div>
+              );
+            })}
           </div>
         </Modal>
       )}
@@ -523,24 +737,23 @@ function DailyReport({ siteWorks, user }) {
   );
 }
 
-// ─── WORK PLANNING ────────────────────────────────────────────────────────────
+
 function WorkPlanning({ siteWorks, user }) {
   const [plans, setPlans] = useState([]);
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ fromDate: today(), toDate: "", site: "", plannedWork: "", workersAllocated: "", materialsNeeded: "", estimatedCost: "", paymentPlan: "", notes: "" });
+  const emptyForm = { fromDate: today(), toDate: "", site: "", isNewSite: false, siteWork: "", materialsNeeded: "", payments: "", workersSettling: "", notes: "", status: "planned" };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
     api("GET", "/workplan").then((d) => { setPlans(Array.isArray(d) ? d : []); setLoading(false); });
   }, []);
 
   const save = async () => {
-    const data = { ...form, estimatedCost: +form.estimatedCost, addedBy: user.name, status: "planned" };
-    const item = await api("POST", "/workplan", data);
+    const item = await api("POST", "/workplan", { ...form, addedBy: user.name });
     setPlans((p) => [item, ...p]);
-    setModal(false);
-    setForm({ fromDate: today(), toDate: "", site: "", plannedWork: "", workersAllocated: "", materialsNeeded: "", estimatedCost: "", paymentPlan: "", notes: "" });
+    setModal(false); setForm(emptyForm);
   };
 
   const updateStatus = async (id, status) => {
@@ -556,16 +769,16 @@ function WorkPlanning({ siteWorks, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
-        <button onClick={() => setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Plan</button>
+        <button onClick={() => { setForm(emptyForm); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Plan</button>
       </div>
-
       <div className="grid grid-cols-2 gap-3">
-        {["planned", "in-progress", "completed", "cancelled"].map((s) => {
-          const count = plans.filter((p) => p.status === s).length;
-          return <div key={s} className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-xl font-black text-gray-900">{count}</div><div className="text-xs text-gray-500 capitalize">{s}</div></div>;
-        })}
+        {["planned","in-progress","completed","cancelled"].map((s) => (
+          <div key={s} className="bg-white border rounded-xl p-3 text-center shadow-sm">
+            <div className="text-xl font-black">{plans.filter(p=>p.status===s).length}</div>
+            <div className="text-xs text-gray-500 capitalize">{s}</div>
+          </div>
+        ))}
       </div>
-
       <div className="space-y-3">
         {plans.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No work plans yet</div>}
         {plans.map((p) => (
@@ -580,72 +793,51 @@ function WorkPlanning({ siteWorks, user }) {
               </div>
               <button onClick={() => setViewModal(p)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-100 shrink-0">View</button>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-500">Planned Work</div><div className="text-sm font-semibold text-gray-800 truncate">{p.plannedWork}</div></div>
-              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-500">Est. Cost</div><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(p.estimatedCost)}</div></div>
-            </div>
-            {p.workersAllocated && <div className="mt-2 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">👷 Workers: <span className="font-semibold">{p.workersAllocated}</span></div>}
+            {p.siteWork && <div className="mt-2 bg-gray-50 rounded-xl p-2 text-xs text-gray-700">🏗️ {p.siteWork}</div>}
+            {p.workersSettling && <div className="mt-1 bg-amber-50 border border-amber-200 rounded-xl p-2 text-xs text-amber-800">👷 {p.workersSettling}</div>}
             <div className="mt-3 flex gap-2 flex-wrap">
-              {["planned", "in-progress", "completed", "cancelled"].filter((s) => s !== p.status).map((s) => (
-                <button key={s} onClick={() => updateStatus(p._id, s)}
-                  className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-200 capitalize">→ {s}</button>
+              {["planned","in-progress","completed","cancelled"].filter(s=>s!==p.status).map(s=>(
+                <button key={s} onClick={()=>updateStatus(p._id,s)} className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-200 capitalize">→ {s}</button>
               ))}
             </div>
           </div>
         ))}
       </div>
-
       {modal && (
-        <Modal title="New Work Plan" onClose={() => setModal(false)}>
+        <Modal title="New Work Plan (1 Week)" onClose={() => setModal(false)}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Input label="From Date" type="date" value={form.fromDate} onChange={(e) => setForm({ ...form, fromDate: e.target.value })} />
-              <Input label="To Date" type="date" value={form.toDate} onChange={(e) => setForm({ ...form, toDate: e.target.value })} />
+              <Input label="From Date" type="date" value={form.fromDate} onChange={(e)=>setForm({...form,fromDate:e.target.value})} />
+              <Input label="To Date" type="date" value={form.toDate} onChange={(e)=>setForm({...form,toDate:e.target.value})} />
             </div>
-            <Select label="Site" value={form.site} options={[{ value: "", label: "Select site..." }, ...siteWorks.map((s) => ({ value: s.customerName, label: s.customerName })), { value: "New Site", label: "New Site" }]} onChange={(e) => setForm({ ...form, site: e.target.value })} />
-            {form.site === "New Site" && <Input label="New Site Name" value={form.customSite || ""} onChange={(e) => setForm({ ...form, site: e.target.value, customSite: e.target.value })} placeholder="Enter site name" />}
-            <Textarea label="Planned Work" value={form.plannedWork} onChange={(e) => setForm({ ...form, plannedWork: e.target.value })} placeholder="What work is planned..." />
-            <Textarea label="👷 Workers Allocated" value={form.workersAllocated} onChange={(e) => setForm({ ...form, workersAllocated: e.target.value })} placeholder="Worker names and roles..." />
-            <Textarea label="🧱 Materials Needed" value={form.materialsNeeded} onChange={(e) => setForm({ ...form, materialsNeeded: e.target.value })} placeholder="Materials required for this work..." />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label={`Estimated Cost (${CURRENCY})`} type="number" value={form.estimatedCost} onChange={(e) => setForm({ ...form, estimatedCost: e.target.value })} placeholder="0" />
-              <Select label="Payment Plan" value={form.paymentPlan} options={["", "Advance", "On Completion", "Milestone", "Credit"]} onChange={(e) => setForm({ ...form, paymentPlan: e.target.value })} />
+            <div>
+              <Select label="Site" value={form.isNewSite?"__new__":form.site} options={[{value:"",label:"Select site..."},...siteWorks.map(s=>({value:s.customerName,label:s.customerName})),{value:"__new__",label:"+ New Site"}]} onChange={(e)=>{ if(e.target.value==="__new__"){setForm({...form,isNewSite:true,site:""})}else{setForm({...form,isNewSite:false,site:e.target.value})}}} />
+              {form.isNewSite && <Input label="New Site Name" value={form.site} onChange={(e)=>setForm({...form,site:e.target.value})} placeholder="Enter new site name" />}
             </div>
-            <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." />
+            <div className="bg-blue-50 rounded-xl p-3 space-y-2"><SectionTitle icon="🏗️" title="Site Work Plan" /><Textarea label="" value={form.siteWork} onChange={(e)=>setForm({...form,siteWork:e.target.value})} placeholder="What site work is planned this week..." /></div>
+            <div className="bg-orange-50 rounded-xl p-3 space-y-2"><SectionTitle icon="🧱" title="Materials Needed" /><Textarea label="" value={form.materialsNeeded} onChange={(e)=>setForm({...form,materialsNeeded:e.target.value})} placeholder="Materials required this week..." /></div>
+            <div className="bg-green-50 rounded-xl p-3 space-y-2"><SectionTitle icon="💰" title="Payments Plan" /><Textarea label="" value={form.payments} onChange={(e)=>setForm({...form,payments:e.target.value})} placeholder="Expected payments..." /></div>
+            <div className="bg-amber-50 rounded-xl p-3 space-y-2"><SectionTitle icon="👷" title="Workers Settling" /><Textarea label="" value={form.workersSettling} onChange={(e)=>setForm({...form,workersSettling:e.target.value})} placeholder="Worker allocation and settling plan..." /></div>
+            <Textarea label="📝 Notes" value={form.notes} onChange={(e)=>setForm({...form,notes:e.target.value})} placeholder="Any additional notes..." />
             <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Save Work Plan</button>
           </div>
         </Modal>
       )}
-
       {viewModal && (
         <Modal title="Work Plan Details" onClose={() => setViewModal(null)}>
           <div className="space-y-3">
-            <div className="flex items-center gap-2"><h3 className="font-black text-gray-900 text-lg">{viewModal.site}</h3><Badge color={statusColors[viewModal.status]}>{viewModal.status}</Badge></div>
+            <div className="flex items-center gap-2 flex-wrap"><h3 className="font-black text-gray-900 text-lg">{viewModal.site}</h3><Badge color={statusColors[viewModal.status]}>{viewModal.status}</Badge></div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-sm font-bold text-blue-700">📅 {viewModal.fromDate} → {viewModal.toDate}</div></div>
-            {[
-              { icon: "🔨", label: "Planned Work", value: viewModal.plannedWork, color: "bg-gray-50 border-gray-200" },
-              { icon: "👷", label: "Workers Allocated", value: viewModal.workersAllocated, color: "bg-amber-50 border-amber-200" },
-              { icon: "🧱", label: "Materials Needed", value: viewModal.materialsNeeded, color: "bg-orange-50 border-orange-200" },
-              { icon: "📝", label: "Notes", value: viewModal.notes, color: "bg-gray-50 border-gray-200" },
-            ].filter((x) => x.value).map(({ icon, label, value, color }) => (
-              <div key={label} className={`border rounded-xl p-3 ${color}`}>
-                <div className="text-xs font-bold text-gray-500 mb-1">{icon} {label}</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap">{value}</div>
-              </div>
+            {[{icon:"🏗️",label:"Site Work",value:viewModal.siteWork,color:"bg-blue-50 border-blue-200"},{icon:"🧱",label:"Materials Needed",value:viewModal.materialsNeeded,color:"bg-orange-50 border-orange-200"},{icon:"💰",label:"Payments Plan",value:viewModal.payments,color:"bg-green-50 border-green-200"},{icon:"👷",label:"Workers Settling",value:viewModal.workersSettling,color:"bg-amber-50 border-amber-200"},{icon:"📝",label:"Notes",value:viewModal.notes,color:"bg-gray-50 border-gray-200"}].filter(x=>x.value).map(({icon,label,value,color})=>(
+              <div key={label} className={`border rounded-xl p-3 ${color}`}><div className="text-xs font-bold text-gray-500 mb-1">{icon} {label}</div><div className="text-sm text-gray-700 whitespace-pre-wrap">{value}</div></div>
             ))}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(viewModal.estimatedCost)}</div><div className="text-xs text-gray-500">Est. Cost</div></div>
-              {viewModal.paymentPlan && <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{viewModal.paymentPlan}</div><div className="text-xs text-gray-500">Payment Plan</div></div>}
-            </div>
-            <div className="text-xs text-gray-400">Added by: {viewModal.addedBy}</div>
+            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
           </div>
         </Modal>
       )}
     </div>
   );
 }
-
-// ─── SITE WORK ────────────────────────────────────────────────────────────────
 function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [modal, setModal] = useState(null);
   const [viewModal, setViewModal] = useState(null);
@@ -982,9 +1174,16 @@ function Sales({ sales, setSales, stock, user }) {
 // ─── USERS ────────────────────────────────────────────────────────────────────
 function Users({ currentUser, allUsers, setAllUsers }) {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ role: "user" });
-  const save = async () => { const user = await api("POST", "/users", form); setAllUsers((p) => [...p, user]); setModal(false); setForm({ role: "user" }); };
-  const toggleActive = async (u) => { if (u._id === currentUser.id) return; await api("PUT", `/users/${u._id}`, { active: !u.active }); setAllUsers((p) => p.map((x) => x._id === u._id ? { ...x, active: !x.active } : x)); };
+  const [form, setForm] = useState({ name: "", username: "", password: "", role: "user" });
+  const [saveError, setSaveError] = useState("");
+  const save = async () => {
+    if (!form.name || !form.username || !form.password) { setSaveError("All fields are required"); return; }
+    setSaveError("");
+    const user = await api("POST", "/users", form);
+    if (user._id) { setAllUsers((p) => [...p, user]); setModal(false); setForm({ name: "", username: "", password: "", role: "user" }); }
+    else setSaveError(user.message || "Failed to add user");
+  };
+  const toggleActive = async (u) => { if (u._id === currentUser._id) return; await api("PUT", `/users/${u._id}`, { active: !u.active }); setAllUsers((p) => p.map((x) => x._id === u._id ? { ...x, active: !x.active } : x)); };
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between"><h2 className="text-xl font-black text-gray-900">👥 Users</h2><button onClick={() => { setForm({ role: "user" }); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button></div>
@@ -1006,6 +1205,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
           <Input label="Username" value={form.username || ""} onChange={(e) => setForm({ ...form, username: e.target.value })} />
           <Input label="Password" type="password" value={form.password || ""} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           <Select label="Role" value={form.role} options={["user", "supervisor", "admin"]} onChange={(e) => setForm({ ...form, role: e.target.value })} />
+          {saveError && <div className="text-xs text-red-600 font-semibold bg-red-50 rounded-lg p-2">{saveError}</div>}
           <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add User</button>
         </div>
       </Modal>}
@@ -1047,12 +1247,15 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
 // ─── SUPERVISOR REPORTS (ADMIN VIEW) ─────────────────────────────────────────
 function SupervisorReports({ allUsers }) {
   const [selectedSupervisor, setSelectedSupervisor] = useState("");
-  const [siteWorks, setSiteWorks] = useState([]);
   const [workerReports, setWorkerReports] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
-  const [workPlans, setWorkPlans] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
+
+  // view states
+  const [activeTab, setActiveTab] = useState("supervisor"); // "supervisor" | "site"
+  const [viewDailyModal, setViewDailyModal] = useState(null);
+  const [viewSiteModal, setViewSiteModal] = useState(null);
+  const [signLoading, setSignLoading] = useState(false);
 
   const supervisors = allUsers.filter((u) => u.role === "supervisor");
 
@@ -1060,33 +1263,57 @@ function SupervisorReports({ allUsers }) {
     if (!selectedSupervisor) return;
     setLoading(true);
     Promise.all([
-      api("GET", "/sitework"),
       api("GET", "/workerreport"),
       api("GET", "/dailyreport"),
-      api("GET", "/workplan"),
-    ]).then(([sw, wr, dr, wp]) => {
-      setSiteWorks((Array.isArray(sw) ? sw : []).filter((x) => x.addedBy === selectedSupervisor));
-      setWorkerReports((Array.isArray(wr) ? wr : []).filter((x) => x.addedBy === selectedSupervisor));
-      setDailyReports((Array.isArray(dr) ? dr : []).filter((x) => x.addedBy === selectedSupervisor));
-      setWorkPlans((Array.isArray(wp) ? wp : []).filter((x) => x.addedBy === selectedSupervisor));
+    ]).then(([wr, dr]) => {
+      setWorkerReports((Array.isArray(wr) ? wr : []).filter((x) => x.addedBy === selectedSupervisor).sort((a,b)=>(b.startingDate||"").localeCompare(a.startingDate||"")));
+      setDailyReports((Array.isArray(dr) ? dr : []).filter((x) => x.addedBy === selectedSupervisor).sort((a,b)=>(b.date||"").localeCompare(a.date||"")));
       setLoading(false);
     });
   }, [selectedSupervisor]);
 
-  const totalSiteWork = siteWorks.reduce((a, s) => a + (s.totalAmount || 0), 0);
-  const totalPending = siteWorks.reduce((a, s) => a + (s.pendingAmount || 0), 0);
-  const totalWorkerPay = workerReports.reduce((a, r) => a + (r.remuneration || 0), 0);
-  const totalDayExpenses = dailyReports.reduce((a, r) => a + (r.expenseAmount || 0), 0);
+  const signSiteReport = async (id, role) => {
+    setSignLoading(true);
+    const report = workerReports.find((r) => r._id === id);
+    const updatedSigs = { ...(report.signatures || {}), [role]: true };
+    await api("PUT", `/workerreport/${id}`, { signatures: updatedSigs });
+    setWorkerReports((p) => p.map((r) => r._id === id ? { ...r, signatures: updatedSigs } : r));
+    if (viewSiteModal?._id === id) setViewSiteModal((v) => ({ ...v, signatures: updatedSigs }));
+    setSignLoading(false);
+  };
+
+  const dailySections = [
+    { key: "newSite",        icon: "🆕", label: "New Site Details",    color: "blue"   },
+    { key: "runningSite",    icon: "🔄", label: "Running Site Details", color: "teal"   },
+    { key: "workersDetail",  icon: "👷", label: "Workers Detail",       color: "amber"  },
+    { key: "materialSupply", icon: "🧱", label: "Material Supply",      color: "orange" },
+    { key: "complaints",     icon: "⚠️", label: "Complaints",           color: "red"    },
+    { key: "payments",       icon: "💰", label: "Payments",             color: "green"  },
+    { key: "dayNote",        icon: "📝", label: "Day Note",             color: "gray"   },
+    { key: "expenses",       icon: "💸", label: "Expenses",             color: "purple" },
+  ];
+
+  const colorMap = {
+    blue:   { bg: "bg-blue-50",   border: "border-blue-200",   label: "text-blue-700"   },
+    teal:   { bg: "bg-teal-50",   border: "border-teal-200",   label: "text-teal-700"   },
+    amber:  { bg: "bg-amber-50",  border: "border-amber-200",  label: "text-amber-700"  },
+    orange: { bg: "bg-orange-50", border: "border-orange-200", label: "text-orange-700" },
+    red:    { bg: "bg-red-50",    border: "border-red-200",    label: "text-red-700"    },
+    green:  { bg: "bg-green-50",  border: "border-green-200",  label: "text-green-700"  },
+    gray:   { bg: "bg-gray-50",   border: "border-gray-200",   label: "text-gray-600"   },
+    purple: { bg: "bg-purple-50", border: "border-purple-200", label: "text-purple-700" },
+  };
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Reports</h2>
+      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
 
       {/* Supervisor selector */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
         <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Select Supervisor</label>
         <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
-          value={selectedSupervisor} onChange={(e) => { setSelectedSupervisor(e.target.value); setActiveTab("all"); }}>
+          value={selectedSupervisor}
+          onChange={(e) => { setSelectedSupervisor(e.target.value); setActiveTab("supervisor"); setViewDailyModal(null); setViewSiteModal(null); }}>
           <option value="">-- Select a Supervisor --</option>
           {supervisors.map((s) => <option key={s._id} value={s.name}>{s.name} (@{s.username})</option>)}
         </select>
@@ -1103,147 +1330,325 @@ function SupervisorReports({ allUsers }) {
 
       {selectedSupervisor && !loading && (
         <>
-          {/* Summary cards */}
+          {/* Stats */}
           <div className="grid grid-cols-2 gap-3">
-            <StatCard icon="🏗️" label="Site Works" value={siteWorks.length} sub={`Pending: ${CURRENCY}${fmt(totalPending)}`} color="teal" />
-            <StatCard icon="👷" label="Worker Reports" value={workerReports.length} sub={`Pay: ${CURRENCY}${fmt(totalWorkerPay)}`} color="amber" />
-            <StatCard icon="📋" label="Daily Reports" value={dailyReports.length} sub={`Expenses: ${CURRENCY}${fmt(totalDayExpenses)}`} color="purple" />
-            <StatCard icon="📅" label="Work Plans" value={workPlans.length} sub={`${workPlans.filter((w) => w.status === "planned").length} planned`} color="blue" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{dailyReports.length}</div><div className="text-xs text-gray-500">Supervisor Reports</div></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{workerReports.length}</div><div className="text-xs text-gray-500">Site Reports</div></div>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 flex-wrap">
-            {["all", "sitework", "workers", "daily", "plans"].map((t) => (
-              <button key={t} onClick={() => setActiveTab(t)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-colors ${activeTab === t ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-                {t === "all" ? "All" : t === "sitework" ? "🏗️ Sites" : t === "workers" ? "👷 Workers" : t === "daily" ? "📋 Daily" : "📅 Plans"}
-              </button>
-            ))}
+          <div className="flex gap-2">
+            <button onClick={() => setActiveTab("supervisor")}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === "supervisor" ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              📋 Supervisor Report
+            </button>
+            <button onClick={() => setActiveTab("site")}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab === "site" ? "bg-amber-500 text-white shadow" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+              🏗️ Site Report
+            </button>
           </div>
 
-          {/* Site Works */}
-          {(activeTab === "all" || activeTab === "sitework") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">🏗️</span><h3 className="font-black text-gray-800">Site Works ({siteWorks.length})</h3></div>
-              {siteWorks.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site works</div>}
-              {siteWorks.map((s) => (
-                <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{s.customerName}</div>
-                      <div className="text-xs text-gray-400">📍{s.location} · 📅{s.date}</div>
-                    </div>
-                    <Badge color={s.workStatus === "completed" ? "green" : s.workStatus === "ongoing" ? "blue" : "yellow"}>{s.workStatus}</Badge>
-                  </div>
-                  {s.items?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {s.items.map((item, i) => <span key={i} className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-lg">{item.size} — {item.qty} {item.unit}</span>)}
-                    </div>
-                  )}
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-gray-50 rounded-xl p-2"><div className="text-sm font-black">{CURRENCY}{fmt(s.totalAmount)}</div><div className="text-xs text-gray-500">Total</div></div>
-                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(s.paidAmount)}</div><div className="text-xs text-gray-500">Paid</div></div>
-                    <div className="bg-red-50 rounded-xl p-2"><div className="text-sm font-black text-red-600">{CURRENCY}{fmt(s.pendingAmount)}</div><div className="text-xs text-gray-500">Pending</div></div>
-                  </div>
-                  {s.totalAmount > 0 && <div className="mt-2 bg-gray-200 rounded-full h-2"><div className="bg-green-500 h-2 rounded-full" style={{ width: `${Math.min(100, Math.round((s.paidAmount / s.totalAmount) * 100))}%` }} /></div>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Worker Reports */}
-          {(activeTab === "all" || activeTab === "workers") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">👷</span><h3 className="font-black text-gray-800">Worker Reports ({workerReports.length})</h3></div>
-              {workerReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No worker reports</div>}
-              {workerReports.map((r) => (
-                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{r.workerName}</div>
-                      <div className="text-xs text-gray-400">📅{r.date}</div>
-                    </div>
-                    <Badge color={r.paymentMode === "Cash" ? "green" : r.paymentMode === "Bank" ? "blue" : "purple"}>{r.paymentMode}</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-amber-50 rounded-xl p-2"><div className="text-sm font-black text-amber-700">{CURRENCY}{fmt(r.remuneration)}</div><div className="text-xs text-gray-500">Daily Pay</div></div>
-                    <div className="bg-blue-50 rounded-xl p-2"><div className="text-sm font-black text-blue-700">{r.workingArea} sqm</div><div className="text-xs text-gray-500">Area</div></div>
-                    <div className="bg-green-50 rounded-xl p-2"><div className="text-sm font-black text-green-700">{CURRENCY}{fmt(r.workAmount)}</div><div className="text-xs text-gray-500">Work Amt</div></div>
-                  </div>
-                  {r.materialAmount > 0 && <div className="mt-2 text-xs bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5">🧱 Material: <span className="font-bold">{CURRENCY}{fmt(r.materialAmount)}</span></div>}
-                  <div className="mt-2 flex gap-2">
-                    {["supervisor", "office", "admin"].map((role) => (
-                      <span key={role} className={`text-xs px-2 py-1 rounded-lg border ${r.signatures?.[role] ? "bg-green-50 border-green-200 text-green-700" : "bg-gray-50 border-gray-200 text-gray-400"}`}>
-                        {r.signatures?.[role] ? "✓" : "○"} <span className="capitalize">{role}</span>
-                      </span>
-                    ))}
-                  </div>
-                  {r.notes && <div className="mt-2 text-xs text-gray-500 italic">📝 {r.notes}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Daily Reports */}
-          {(activeTab === "all" || activeTab === "daily") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">📋</span><h3 className="font-black text-gray-800">Daily Reports ({dailyReports.length})</h3></div>
-              {dailyReports.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No daily reports</div>}
-              {dailyReports.map((r) => (
-                <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="font-black text-gray-900">📅 {r.date}</div>
-                  <div className="mt-2 space-y-2">
-                    {r.newSiteDetails && <div className="bg-blue-50 border border-blue-200 rounded-xl p-3"><div className="text-xs font-bold text-blue-600 mb-1">🏗️ New Site</div><div className="text-xs text-gray-700">{r.newSiteDetails}</div></div>}
-                    {r.workersDetails && <div className="bg-amber-50 border border-amber-200 rounded-xl p-3"><div className="text-xs font-bold text-amber-600 mb-1">👷 Workers</div><div className="text-xs text-gray-700">{r.workersDetails}</div></div>}
-                    {r.materialsSupplied && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Materials</div><div className="text-xs text-gray-700">{r.materialsSupplied}</div></div>}
-                    {r.complaints && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">⚠️ Complaints</div><div className="text-xs text-gray-700">{r.complaints}</div></div>}
-                    {r.payments?.length > 0 && (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                        <div className="text-xs font-bold text-green-600 mb-1">💰 Payments</div>
-                        {r.payments.map((p, i) => <div key={i} className="flex justify-between text-xs"><span>{p.from} ({p.mode})</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}
-                        <div className="text-xs font-black text-green-700 mt-1">Total: {CURRENCY}{fmt(r.payments.reduce((a, p) => a + p.amount, 0))}</div>
+          {/* ── SUPERVISOR REPORTS TAB ── */}
+          {activeTab === "supervisor" && (
+            <div className="space-y-3">
+              {dailyReports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No supervisor reports</div>}
+              {dailyReports.map((r) => {
+                const filled = dailySections.filter(s => r[s.key]);
+                return (
+                  <div key={r._id} onClick={() => setViewDailyModal(r)}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-black text-gray-900 text-base">📅 {r.date}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">By: {r.addedBy}</div>
                       </div>
-                    )}
-                    {r.expenseAmount > 0 && <div className="bg-red-50 border border-red-200 rounded-xl p-3"><div className="text-xs font-bold text-red-600 mb-1">💸 Expenses</div><div className="text-xs text-gray-700">{r.dayExpenses}</div><div className="text-sm font-black text-red-700">{CURRENCY}{fmt(r.expenseAmount)}</div></div>}
-                    {r.notes && <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Notes</div><div className="text-xs text-gray-700">{r.notes}</div></div>}
+                      <span className="text-gray-300 text-xl">›</span>
+                    </div>
+                    <div className="mt-2 flex gap-1 flex-wrap">
+                      {filled.map(s => {
+                        const c = colorMap[s.color];
+                        return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;
+                      })}
+                      {filled.length === 0 && <span className="text-xs text-gray-400">No sections filled</span>}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
-          {/* Work Plans */}
-          {(activeTab === "all" || activeTab === "plans") && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 px-1"><span className="text-base">📅</span><h3 className="font-black text-gray-800">Work Plans ({workPlans.length})</h3></div>
-              {workPlans.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No work plans</div>}
-              {workPlans.map((p) => (
-                <div key={p._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div>
-                      <div className="font-black text-gray-900">{p.site}</div>
-                      <div className="text-xs text-gray-400">📅 {p.fromDate} → {p.toDate}</div>
+          {/* ── SITE REPORTS TAB ── */}
+          {activeTab === "site" && (
+            <div className="space-y-3">
+              {workerReports.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No site reports</div>}
+              {workerReports.map((r) => {
+                const allSigned = r.signatures?.supervisor && r.signatures?.office && r.signatures?.admin;
+                return (
+                  <div key={r._id} onClick={() => setViewSiteModal(r)}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-black text-gray-900">{r.workerName}</span>
+                          <Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode||"Cash"}</Badge>
+                          {allSigned && <Badge color="green">✅ Signed</Badge>}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
+                        <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}</div>
+                      </div>
+                      <span className="text-gray-300 text-xl shrink-0">›</span>
                     </div>
-                    <Badge color={p.status === "completed" ? "green" : p.status === "in-progress" ? "yellow" : p.status === "cancelled" ? "red" : "blue"}>{p.status}</Badge>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-gray-50 rounded-lg p-2 text-center"><div className="font-black text-gray-800">{r.totalWorkingArea||"0"} sqft</div><div className="text-gray-400">Area</div></div>
+                      <div className="bg-amber-50 rounded-lg p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Cost</div></div>
+                      <div className="bg-green-50 rounded-lg p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total</div></div>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      {["supervisor","office","admin"].map((role) => (
+                        <div key={role} className={`flex-1 text-center py-1 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>
+                          {r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {p.plannedWork && <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">🔨 {p.plannedWork}</div>}
-                  {p.workersAllocated && <div className="mt-1 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">👷 {p.workersAllocated}</div>}
-                  {p.materialsNeeded && <div className="mt-1 text-xs text-gray-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">🧱 {p.materialsNeeded}</div>}
-                  <div className="mt-2 flex gap-3 text-xs text-gray-500">
-                    <span>Est: <span className="font-black text-amber-700">{CURRENCY}{fmt(p.estimatedCost)}</span></span>
-                    {p.paymentPlan && <span>Payment: <span className="font-semibold">{p.paymentPlan}</span></span>}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>
+      )}
+
+      {/* ── VIEW DAILY REPORT MODAL ── */}
+      {viewDailyModal && (
+        <Modal title={`Supervisor Report — ${viewDailyModal.date}`} onClose={() => setViewDailyModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewDailyModal.addedBy}</div>
+            {dailySections.filter(s => viewDailyModal[s.key]).map((s) => {
+              const c = colorMap[s.color];
+              return (
+                <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
+                  <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
+                  <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewDailyModal[s.key]}</div>
+                </div>
+              );
+            })}
+            {dailySections.filter(s => viewDailyModal[s.key]).length === 0 && (
+              <div className="text-center text-gray-400 py-6">No content in this report</div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── VIEW SITE REPORT MODAL ── */}
+      {viewSiteModal && (
+        <Modal title="Site Report Details" onClose={() => setViewSiteModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewSiteModal.addedBy}</div>
+
+            {/* Info grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {[["Site Name",viewSiteModal.siteName],["Phone No",viewSiteModal.phoneNo],["Starting Date",viewSiteModal.startingDate],["Worker Name",viewSiteModal.workerName],["Payment Mode",viewSiteModal.paymentMode],["Received By",viewSiteModal.amountReceivedBy]].map(([l,v])=>(
+                <div key={l} className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-gray-900">{v||"—"}</div></div>
+              ))}
+            </div>
+
+            {/* Numbers */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{viewSiteModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(viewSiteModal.workingCost)||0)}</div><div className="text-xs text-gray-500">Working Cost</div></div>
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-teal-700">{viewSiteModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-500">Total Working Area</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(viewSiteModal.totalAmount)||0)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
+            </div>
+
+            {viewSiteModal.extraWork && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm text-gray-700">{viewSiteModal.extraWork}</div></div>}
+            {viewSiteModal.extraMaterial && <div className="bg-orange-50 border border-orange-200 rounded-xl p-3"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material Using</div><div className="text-sm text-gray-700">{viewSiteModal.extraMaterial}</div></div>}
+            {viewSiteModal.note && <div className="bg-gray-50 border border-gray-200 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm text-gray-700">{viewSiteModal.note}</div></div>}
+            {viewSiteModal.materialSupply && <div className="bg-teal-50 border border-teal-200 rounded-xl p-3"><div className="text-xs font-bold text-teal-600 mb-1">🧱 Material Supply</div><div className="text-sm text-gray-700">{viewSiteModal.materialSupply}</div></div>}
+
+            {/* Signatures — admin can sign */}
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div className="text-xs font-bold text-gray-600 uppercase mb-3">✍️ Work Finished Signatures</div>
+              <div className="grid grid-cols-3 gap-3">
+                {["supervisor","office","admin"].map((role) => (
+                  <div key={role} className={`rounded-xl border p-3 text-center ${viewSiteModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
+                    <div className="text-2xl mb-1">{viewSiteModal.signatures?.[role]?"✅":"⭕"}</div>
+                    <div className="text-xs font-bold text-gray-700 capitalize">{role}</div>
+                    {!viewSiteModal.signatures?.[role] && (
+                      <button onClick={() => signSiteReport(viewSiteModal._id, role)} disabled={signLoading}
+                        className="mt-2 bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold hover:bg-green-600 w-full disabled:opacity-50">
+                        Sign
+                      </button>
+                    )}
+                    {viewSiteModal.signatures?.[role] && <div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-// ─── NAV ─────────────────────────────────────────────────────────────────────
+
+// ─── WORKERS MENU ─────────────────────────────────────────────────────────────
+function Workers({ user }) {
+  const [workers, setWorkers] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addModal, setAddModal] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [workerForm, setWorkerForm] = useState({ name: "", phone: "", role: "Labourer" });
+
+  useEffect(() => {
+    Promise.all([api("GET", "/workers"), api("GET", "/workerpayments")]).then(([w, p]) => {
+      setWorkers(Array.isArray(w) ? w : []);
+      setPayments(Array.isArray(p) ? p : []);
+      setLoading(false);
+    });
+  }, []);
+
+  const addWorker = async () => {
+    if (!workerForm.name) return;
+    const w = await api("POST", "/workers", { ...workerForm, addedBy: user.name });
+    if (w._id) { setWorkers(p => [...p, w]); setAddModal(false); setWorkerForm({ name: "", phone: "", role: "Labourer" }); }
+  };
+
+  const workerPayments = (wname) => payments.filter(p => p.workerName === wname).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const totalPaid = (wname) => workerPayments(wname).reduce((a, p) => a + (+(p.amount)||0), 0);
+
+  // Get site report sqft for worker from workerreport
+  const [siteReports, setSiteReports] = useState([]);
+  useEffect(() => {
+    api("GET", "/workerreport").then(d => setSiteReports(Array.isArray(d)?d:[]));
+  }, []);
+
+  const workerSqft = (wname) => siteReports
+    .filter(r => r.workerName === wname)
+    .reduce((a, r) => a + (+(r.totalWorkingArea)||0), 0);
+
+  const workerDays = (wname) => {
+    const dates = new Set(siteReports.filter(r=>r.workerName===wname).map(r=>r.startingDate).filter(Boolean));
+    return dates.size;
+  };
+
+  if (loading) return <Loader />;
+
+  if (selectedWorker) {
+    const wp = workerPayments(selectedWorker.name);
+    const totalSqft = workerSqft(selectedWorker.name);
+    const days = workerDays(selectedWorker.name);
+    const total = totalPaid(selectedWorker.name);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
+          <h2 className="text-xl font-black text-gray-900">👷 {selectedWorker.name}</h2>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-1">
+          {selectedWorker.phone && <div className="text-sm text-gray-500">📞 {selectedWorker.phone}</div>}
+          <div className="text-sm text-gray-500">🔧 {selectedWorker.role}</div>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{days}</div><div className="text-xs text-gray-500">Work Days</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(totalSqft)}</div><div className="text-xs text-gray-500">Total sqft</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(total)}</div><div className="text-xs text-gray-500">Total Paid</div></div>
+        </div>
+
+        <div>
+          <h3 className="font-black text-gray-800 mb-2">💸 Payment History</h3>
+          {wp.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No payments recorded</div>}
+          {wp.map((p, i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-gray-900">{CURRENCY}{fmt(+(p.amount)||0)}</div>
+                <div className="text-xs text-gray-400">📅 {p.date}{p.note ? ` · ${p.note}` : ""}</div>
+                <div className="text-xs text-gray-400">Added by: {p.addedBy}</div>
+              </div>
+              <Badge color="green">Paid</Badge>
+            </div>
+          ))}
+        </div>
+
+        <div>
+          <h3 className="font-black text-gray-800 mb-2">🏗️ Site Work History</h3>
+          {siteReports.filter(r=>r.workerName===selectedWorker.name).length === 0 && (
+            <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site reports</div>
+          )}
+          {siteReports.filter(r=>r.workerName===selectedWorker.name).map(r => (
+            <div key={r._id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 mb-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="font-bold text-sm text-gray-900">{r.siteName||"—"}</div>
+                  <div className="text-xs text-gray-400">📅 {r.startingDate}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-black text-teal-700">{r.totalWorkingArea||"0"} sqft</div>
+                  <div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">👷 Workers</h2>
+        <button onClick={() => setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Worker</button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{workers.length}</div><div className="text-xs text-gray-500">Total Workers</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-500">Total Paid</div></div>
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))}</div><div className="text-xs text-gray-500">Total sqft</div></div>
+      </div>
+
+      <div className="space-y-3">
+        {workers.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No workers added yet</div>}
+        {workers.map(w => {
+          const paid = totalPaid(w.name);
+          const sqft = workerSqft(w.name);
+          const days = workerDays(w.name);
+          return (
+            <div key={w._id} onClick={() => setSelectedWorker(w)}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-black text-gray-900">{w.name}</div>
+                  <div className="text-xs text-gray-400">{w.role}{w.phone ? ` · 📞 ${w.phone}` : ""}</div>
+                </div>
+                <span className="text-gray-300 text-xl">›</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="font-black text-blue-700">{days}</div><div className="text-gray-400">Days</div></div>
+                <div className="bg-teal-50 rounded-lg p-2 text-center"><div className="font-black text-teal-700">{fmt(sqft)} sqft</div><div className="text-gray-400">Work Done</div></div>
+                <div className="bg-green-50 rounded-lg p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {addModal && (
+        <Modal title="Add Worker" onClose={() => setAddModal(false)}>
+          <div className="space-y-3">
+            <Input label="Worker Name" value={workerForm.name} onChange={(e)=>setWorkerForm({...workerForm,name:e.target.value})} placeholder="Full name" />
+            <Input label="Phone Number" type="tel" value={workerForm.phone} onChange={(e)=>setWorkerForm({...workerForm,phone:e.target.value})} placeholder="Contact number" />
+            <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={(e)=>setWorkerForm({...workerForm,role:e.target.value})} />
+            <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add Worker</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+
 const NAV = {
   admin: [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
@@ -1252,21 +1657,18 @@ const NAV = {
     { id: "production", label: "Production", icon: "🏭" },
     { id: "sales", label: "Sales", icon: "💰" },
     { id: "sitework", label: "Site Work", icon: "🏗️" },
-    { id: "supervisorreports", label: "Supervisor Reports", icon: "🔍" },
+    { id: "workerreport", label: "Site Report", icon: "👷" },
+    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
+    { id: "workers", label: "Workers", icon: "🧑‍🔧" },
+    { id: "supervisorreports", label: "Supervisor Overview", icon: "🔍" },
     { id: "users", label: "Users", icon: "👥" },
     { id: "reports", label: "Reports", icon: "📈" },
   ],
   supervisor: [
-    { id: "dashboard", label: "Dashboard", icon: "📊" },
-    { id: "sitework", label: "Site Work", icon: "🏗️" },
-    { id: "workerreport", label: "Worker Reports", icon: "👷" },
-    { id: "dailyreport", label: "Daily Report", icon: "📋" },
+    { id: "workerreport", label: "Site Report", icon: "👷" },
+    { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
+    { id: "workers", label: "Workers", icon: "🧑‍🔧" },
     { id: "workplan", label: "Work Planning", icon: "📅" },
-    { id: "production", label: "Production", icon: "🏭" },
-    { id: "stock", label: "Stock", icon: "📦" },
-    { id: "raw", label: "Raw Material", icon: "🧱" },
-    { id: "sales", label: "Sales", icon: "💰" },
-    { id: "reports", label: "Reports", icon: "📈" },
   ],
   user: [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
@@ -1290,13 +1692,18 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
+      if (currentUser.role === "supervisor") {
+        // Supervisor only needs siteworks
+        api("GET", "/sitework").then(sw => { setSiteWorks(Array.isArray(sw)?sw:[]); }).catch(()=>{});
+        return;
+      }
       setLoading(true);
       Promise.all([api("GET", "/stock"), api("GET", "/raw"), api("GET", "/production"), api("GET", "/sales"), api("GET", "/users"), api("GET", "/sitework")])
-        .then(([s, r, p, sa, u, sw]) => { setStock(s); setRaw(r); setProduction(p); setSales(sa); setAllUsers(u); setSiteWorks(Array.isArray(sw) ? sw : []); setLoading(false); });
+        .then(([s, r, p, sa, u, sw]) => { setStock(Array.isArray(s)?s:[]); setRaw(Array.isArray(r)?r:[]); setProduction(Array.isArray(p)?p:[]); setSales(Array.isArray(sa)?sa:[]); setAllUsers(Array.isArray(u)?u:[]); setSiteWorks(Array.isArray(sw)?sw:[]); setLoading(false); }).catch(()=>setLoading(false));
     }
   }, [currentUser]);
 
-  if (!currentUser) return <Login onLogin={(u) => { setCurrentUser(u); setPage("dashboard"); }} />;
+  if (!currentUser) return <Login onLogin={(u) => { setCurrentUser(u); setPage(u.role === "supervisor" ? "workerreport" : "dashboard"); }} />;
 
   const nav = NAV[currentUser.role] || [];
   const roleColors = { admin: "from-violet-500 to-purple-600", supervisor: "from-emerald-500 to-green-600", user: "from-blue-500 to-blue-600" };
@@ -1310,10 +1717,11 @@ export default function App() {
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
       case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
-      case "workerreport": return <WorkerReport siteWorks={siteWorks} user={currentUser} />;
-      case "dailyreport": return <DailyReport siteWorks={siteWorks} user={currentUser} />;
+      case "workerreport": return <WorkerReport user={currentUser} />;
+      case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
-      case "supervisorreports": return <SupervisorReports allUsers={allUsers} />;
+      case "workers": return <Workers user={currentUser} />;
+      case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "users": return currentUser.role === "admin" ? <Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} /> : null;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
