@@ -1492,205 +1492,46 @@ function SupervisorReports({ allUsers }) {
 }
 
 
-// ─── PURCHASES ────────────────────────────────────────────────────────────────
-function Purchases({ user }) {
-  const [purchases, setPurchases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-
-  const emptyForm = {
-    date: today(), supplierName: "", supplierPhone: "", supplierAddress: "",
-    itemName: "", itemType: "Material", quantity: "", unit: "nos",
-    unitPrice: "", totalAmount: "", paymentMode: "Cash",
-    vehicleNumber: "", vehicleType: "", driverName: "", driverPhone: "",
-    deliveryAddress: "", note: "",
-  };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(() => {
-    api("GET", "/purchases").then(d => {
-      setPurchases(Array.isArray(d) ? d : []);
-      setLoading(false);
-    });
-  }, []);
-
-  const save = async () => {
-    if (!form.supplierName || !form.itemName) return;
-    const total = +form.quantity * +form.unitPrice;
-    const item = await api("POST", "/purchases", { ...form, totalAmount: total || +form.totalAmount || 0, addedBy: user.name });
-    if (item._id) { setPurchases(p => [item, ...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  if (loading) return <Loader />;
-
-  const totalSpent = purchases.reduce((a, p) => a + (+(p.totalAmount)||0), 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {(user.role === "admin" || user.role === "user") && (
-          <button onClick={() => { setForm(emptyForm); setModal(true); }}
-            className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{purchases.length}</div><div className="text-xs text-gray-500">Total</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(totalSpent)}</div><div className="text-xs text-gray-500">Total Spent</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-blue-700">{new Set(purchases.map(p=>p.supplierName).filter(Boolean)).size}</div><div className="text-xs text-gray-500">Suppliers</div></div>
-      </div>
-
-      <div className="space-y-3">
-        {purchases.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No purchases yet</div>}
-        {purchases.map(p => (
-          <div key={p._id} onClick={() => setViewModal(p)}
-            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-black text-gray-900">{p.itemName}</span>
-                  <Badge color={p.itemType==="Material"?"teal":p.itemType==="Vehicle"?"blue":"amber"}>{p.itemType}</Badge>
-                </div>
-                <div className="text-xs text-gray-400 mt-0.5">🏪 {p.supplierName} · 📅 {p.date}</div>
-                {p.vehicleNumber && <div className="text-xs text-gray-400">🚛 {p.vehicleNumber} {p.vehicleType ? `(${p.vehicleType})` : ""}</div>}
-              </div>
-              <div className="text-right shrink-0">
-                <div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount)||0)}</div>
-                <div className="text-xs text-gray-400">{p.quantity} {p.unit}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {modal && (
-        <Modal title="Add Purchase" onClose={() => setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-
-            {/* Supplier */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-              <div className="text-xs font-bold text-blue-700">🏪 Supplier Details</div>
-              <Input label="Supplier Name *" value={form.supplierName} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Company / Person name" />
-              <Input label="Phone" type="tel" value={form.supplierPhone} onChange={e=>setForm({...form,supplierPhone:e.target.value})} placeholder="Contact number" />
-              <Input label="Address" value={form.supplierAddress} onChange={e=>setForm({...form,supplierAddress:e.target.value})} placeholder="Supplier address" />
-            </div>
-
-            {/* Item */}
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-              <div className="text-xs font-bold text-amber-700">📦 Item Details</div>
-              <Input label="Item Name *" value={form.itemName} onChange={e=>setForm({...form,itemName:e.target.value})} placeholder="What was purchased" />
-              <Select label="Item Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e=>setForm({...form,itemType:e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,totalAmount:String(+e.target.value*(+form.unitPrice||0))})} placeholder="0" />
-                <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input label={`Unit Price (${CURRENCY})`} type="number" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:e.target.value,totalAmount:String(+e.target.value*(+form.quantity||0))})} placeholder="0" />
-                <Input label={`Total (${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value})} placeholder="Auto-calculated" />
-              </div>
-            </div>
-
-            {/* Vehicle */}
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
-              <div className="text-xs font-bold text-gray-600">🚛 Vehicle Details (Optional)</div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Vehicle Number" value={form.vehicleNumber} onChange={e=>setForm({...form,vehicleNumber:e.target.value})} placeholder="e.g. KL 01 AB 1234" />
-                <Select label="Vehicle Type" value={form.vehicleType} options={["","Lorry","Tipper","Van","Auto","Other"]} onChange={e=>setForm({...form,vehicleType:e.target.value})} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Driver Name" value={form.driverName} onChange={e=>setForm({...form,driverName:e.target.value})} placeholder="Driver name" />
-                <Input label="Driver Phone" type="tel" value={form.driverPhone} onChange={e=>setForm({...form,driverPhone:e.target.value})} placeholder="Phone" />
-              </div>
-              <Input label="Delivery Address" value={form.deliveryAddress} onChange={e=>setForm({...form,deliveryAddress:e.target.value})} placeholder="Where delivered" />
-            </div>
-
-            <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Any additional notes..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Purchase</button>
-          </div>
-        </Modal>
-      )}
-
-      {viewModal && (
-        <Modal title="Purchase Details" onClose={() => setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-              <div className="text-xs font-bold text-blue-700 mb-2">🏪 Supplier</div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.supplierName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.supplierPhone||"—"}</div></div>
-                <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold">{viewModal.supplierAddress||"—"}</div></div>
-              </div>
-            </div>
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-              <div className="text-xs font-bold text-amber-700 mb-2">📦 Item</div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Item</div><div className="font-bold">{viewModal.itemName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewModal.itemType||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Qty</div><div className="font-bold">{viewModal.quantity} {viewModal.unit}</div></div>
-                <div><div className="text-xs text-gray-400">Unit Price</div><div className="font-bold">{CURRENCY}{fmt(+(viewModal.unitPrice)||0)}</div></div>
-              </div>
-              <div className="mt-2 bg-red-50 rounded-xl p-2 text-center"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-500">Total Amount</div></div>
-            </div>
-            {(viewModal.vehicleNumber || viewModal.driverName) && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                <div className="text-xs font-bold text-gray-600 mb-2">🚛 Vehicle</div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><div className="text-xs text-gray-400">Vehicle No</div><div className="font-bold">{viewModal.vehicleNumber||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewModal.vehicleType||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Driver</div><div className="font-bold">{viewModal.driverName||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Driver Phone</div><div className="font-bold">{viewModal.driverPhone||"—"}</div></div>
-                  {viewModal.deliveryAddress && <div className="col-span-2"><div className="text-xs text-gray-400">Delivery Address</div><div className="font-bold">{viewModal.deliveryAddress}</div></div>}
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">Payment Mode</div><div className="font-bold">{viewModal.paymentMode||"—"}</div></div>
-            </div>
-            {viewModal.note && <div className="bg-gray-50 border border-gray-200 rounded-xl p-3"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm text-gray-700">{viewModal.note}</div></div>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-
 // ─── WORKERS MENU ─────────────────────────────────────────────────────────────
 function Workers({ user }) {
   const [workers, setWorkers] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [siteReports, setSiteReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addModal, setAddModal] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState(null);
-  const [workerForm, setWorkerForm] = useState({ name: "", phone: "", address: "", role: "Labourer", rateType: "sqft", rateAmount: "" });
+  const [workerForm, setWorkerForm] = useState({ name: "", phone: "", role: "Labourer" });
 
   useEffect(() => {
-    Promise.all([api("GET", "/workers"), api("GET", "/workerpayments"), api("GET", "/workerreport")]).then(([w, p, sr]) => {
+    Promise.all([api("GET", "/workers"), api("GET", "/workerpayments")]).then(([w, p]) => {
       setWorkers(Array.isArray(w) ? w : []);
       setPayments(Array.isArray(p) ? p : []);
-      setSiteReports(Array.isArray(sr) ? sr : []);
       setLoading(false);
     });
   }, []);
 
-  const canAdd = user.role === "admin" || user.role === "user";
-
   const addWorker = async () => {
     if (!workerForm.name) return;
-    const w = await api("POST", "/workers", { ...workerForm, rateAmount: +workerForm.rateAmount || 0, addedBy: user.name });
-    if (w._id) { setWorkers(p => [...p, w]); setAddModal(false); setWorkerForm({ name: "", phone: "", address: "", role: "Labourer", rateType: "sqft", rateAmount: "" }); }
+    const w = await api("POST", "/workers", { ...workerForm, addedBy: user.name });
+    if (w._id) { setWorkers(p => [...p, w]); setAddModal(false); setWorkerForm({ name: "", phone: "", role: "Labourer" }); }
   };
 
   const workerPayments = (wname) => payments.filter(p => p.workerName === wname).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
   const totalPaid = (wname) => workerPayments(wname).reduce((a, p) => a + (+(p.amount)||0), 0);
-  const workerSqft = (wname) => siteReports.filter(r => r.workerName === wname).reduce((a, r) => a + (+(r.totalWorkingArea)||0), 0);
-  const workerDays = (wname) => new Set(siteReports.filter(r=>r.workerName===wname).map(r=>r.startingDate).filter(Boolean)).size;
+
+  // Get site report sqft for worker from workerreport
+  const [siteReports, setSiteReports] = useState([]);
+  useEffect(() => {
+    api("GET", "/workerreport").then(d => setSiteReports(Array.isArray(d)?d:[]));
+  }, []);
+
+  const workerSqft = (wname) => siteReports
+    .filter(r => r.workerName === wname)
+    .reduce((a, r) => a + (+(r.totalWorkingArea)||0), 0);
+
+  const workerDays = (wname) => {
+    const dates = new Set(siteReports.filter(r=>r.workerName===wname).map(r=>r.startingDate).filter(Boolean));
+    return dates.size;
+  };
 
   if (loading) return <Loader />;
 
@@ -1699,7 +1540,6 @@ function Workers({ user }) {
     const totalSqft = workerSqft(selectedWorker.name);
     const days = workerDays(selectedWorker.name);
     const total = totalPaid(selectedWorker.name);
-    const workerSites = siteReports.filter(r=>r.workerName===selectedWorker.name);
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -1707,19 +1547,15 @@ function Workers({ user }) {
           <h2 className="text-xl font-black text-gray-900">👷 {selectedWorker.name}</h2>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-1">
-          <div className="grid grid-cols-2 gap-2">
-            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold text-sm">{selectedWorker.role}</div></div>
-            <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold text-sm">{selectedWorker.phone||"—"}</div></div>
-            <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold text-sm">{selectedWorker.address||"—"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate Type</div><div className="font-bold text-sm capitalize">{selectedWorker.rateType||"sqft"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-sm text-amber-700">{CURRENCY}{fmt(selectedWorker.rateAmount||0)} / {selectedWorker.rateType||"sqft"}</div></div>
-          </div>
+          {selectedWorker.phone && <div className="text-sm text-gray-500">📞 {selectedWorker.phone}</div>}
+          <div className="text-sm text-gray-500">🔧 {selectedWorker.role}</div>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{days}</div><div className="text-xs text-gray-500">Work Days</div></div>
           <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(totalSqft)}</div><div className="text-xs text-gray-500">Total sqft</div></div>
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(total)}</div><div className="text-xs text-gray-500">Total Paid</div></div>
         </div>
+
         <div>
           <h3 className="font-black text-gray-800 mb-2">💸 Payment History</h3>
           {wp.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No payments recorded</div>}
@@ -1728,16 +1564,19 @@ function Workers({ user }) {
               <div>
                 <div className="text-sm font-bold text-gray-900">{CURRENCY}{fmt(+(p.amount)||0)}</div>
                 <div className="text-xs text-gray-400">📅 {p.date}{p.note ? ` · ${p.note}` : ""}</div>
-                <div className="text-xs text-gray-400">By: {p.addedBy}</div>
+                <div className="text-xs text-gray-400">Added by: {p.addedBy}</div>
               </div>
               <Badge color="green">Paid</Badge>
             </div>
           ))}
         </div>
+
         <div>
           <h3 className="font-black text-gray-800 mb-2">🏗️ Site Work History</h3>
-          {workerSites.length === 0 && <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site reports</div>}
-          {workerSites.map(r => (
+          {siteReports.filter(r=>r.workerName===selectedWorker.name).length === 0 && (
+            <div className="bg-white rounded-xl border p-4 text-center text-gray-400 text-sm">No site reports</div>
+          )}
+          {siteReports.filter(r=>r.workerName===selectedWorker.name).map(r => (
             <div key={r._id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 mb-2">
               <div className="flex justify-between items-start">
                 <div>
@@ -1760,13 +1599,15 @@ function Workers({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">👷 Workers</h2>
-        {canAdd && <button onClick={() => setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Worker</button>}
+        <button onClick={() => setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add Worker</button>
       </div>
+
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{workers.length}</div><div className="text-xs text-gray-500">Workers</div></div>
+        <div className="bg-white border rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black">{workers.length}</div><div className="text-xs text-gray-500">Total Workers</div></div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-500">Total Paid</div></div>
-        <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))} sqft</div><div className="text-xs text-gray-500">Total Work</div></div>
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center shadow-sm"><div className="text-lg font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))}</div><div className="text-xs text-gray-500">Total sqft</div></div>
       </div>
+
       <div className="space-y-3">
         {workers.length === 0 && <div className="bg-white rounded-2xl border p-8 text-center text-gray-400">No workers added yet</div>}
         {workers.map(w => {
@@ -1780,31 +1621,25 @@ function Workers({ user }) {
                 <div>
                   <div className="font-black text-gray-900">{w.name}</div>
                   <div className="text-xs text-gray-400">{w.role}{w.phone ? ` · 📞 ${w.phone}` : ""}</div>
-                  {w.rateAmount > 0 && <div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount)} / {w.rateType||"sqft"}</div>}
                 </div>
                 <span className="text-gray-300 text-xl">›</span>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="font-black text-blue-700">{days}</div><div className="text-gray-400">Days</div></div>
-                <div className="bg-teal-50 rounded-lg p-2 text-center"><div className="font-black text-teal-700">{fmt(sqft)} sqft</div><div className="text-gray-400">Work</div></div>
+                <div className="bg-teal-50 rounded-lg p-2 text-center"><div className="font-black text-teal-700">{fmt(sqft)} sqft</div><div className="text-gray-400">Work Done</div></div>
                 <div className="bg-green-50 rounded-lg p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
               </div>
             </div>
           );
         })}
       </div>
+
       {addModal && (
         <Modal title="Add Worker" onClose={() => setAddModal(false)}>
           <div className="space-y-3">
-            <Input label="Worker Name *" value={workerForm.name} onChange={(e)=>setWorkerForm({...workerForm,name:e.target.value})} placeholder="Full name" />
+            <Input label="Worker Name" value={workerForm.name} onChange={(e)=>setWorkerForm({...workerForm,name:e.target.value})} placeholder="Full name" />
             <Input label="Phone Number" type="tel" value={workerForm.phone} onChange={(e)=>setWorkerForm({...workerForm,phone:e.target.value})} placeholder="Contact number" />
-            <Input label="Address" value={workerForm.address} onChange={(e)=>setWorkerForm({...workerForm,address:e.target.value})} placeholder="Home address" />
             <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={(e)=>setWorkerForm({...workerForm,role:e.target.value})} />
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-              <div className="text-xs font-bold text-amber-700">💰 Work Rate</div>
-              <Select label="Rate Type" value={workerForm.rateType} options={["sqft","sqm","day","hour","fixed"]} onChange={(e)=>setWorkerForm({...workerForm,rateType:e.target.value})} />
-              <Input label={`Rate Amount (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={(e)=>setWorkerForm({...workerForm,rateAmount:e.target.value})} placeholder="e.g. 25" />
-            </div>
             <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add Worker</button>
           </div>
         </Modal>
@@ -1812,6 +1647,7 @@ function Workers({ user }) {
     </div>
   );
 }
+
 
 const NAV = {
   admin: [
@@ -1826,22 +1662,18 @@ const NAV = {
     { id: "workers", label: "Workers", icon: "🧑‍🔧" },
     { id: "supervisorreports", label: "Supervisor Overview", icon: "🔍" },
     { id: "users", label: "Users", icon: "👥" },
-    { id: "purchases", label: "Purchases", icon: "🛒" },
     { id: "reports", label: "Reports", icon: "📈" },
   ],
   supervisor: [
     { id: "workerreport", label: "Site Report", icon: "👷" },
     { id: "dailyreport", label: "Supervisor Report", icon: "📋" },
     { id: "workers", label: "Workers", icon: "🧑‍🔧" },
-    { id: "purchases", label: "Purchases", icon: "🛒" },
     { id: "workplan", label: "Work Planning", icon: "📅" },
   ],
   user: [
     { id: "dashboard", label: "Dashboard", icon: "📊" },
     { id: "production", label: "Log Production", icon: "🏭" },
     { id: "stock", label: "View Stock", icon: "📦" },
-    { id: "workers", label: "Workers", icon: "🧑‍🔧" },
-    { id: "purchases", label: "Purchases", icon: "🛒" },
   ],
 };
 
@@ -1889,7 +1721,6 @@ export default function App() {
       case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "workers": return <Workers user={currentUser} />;
-      case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "users": return currentUser.role === "admin" ? <Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} /> : null;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
