@@ -529,44 +529,68 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       </SectionBox>
 
       <SectionBox title="Extra Work" icon="➕" color="orange">
-        <div className="grid grid-cols-2 gap-2">
-          <Select label="Work Type" value={ewForm.name} options={[{value:"",label:"Select or type"},...extraWorkTypes.map(e=>({value:e.name,label:e.name}))]} onChange={e=>{
-            const et = extraWorkTypes.find(x=>x.name===e.target.value);
-            setEwForm({...ewForm,name:e.target.value,rate:et?String(et.rate):ewForm.rate});
-          }} />
-          <Input label="Custom name" value={ewForm.name} onChange={e=>setEwForm({...ewForm,name:e.target.value})} placeholder="Or type name" />
-          <Input label="Qty" type="number" value={ewForm.qty} onChange={e=>setEwForm({...ewForm,qty:e.target.value,total:String(+e.target.value*(+(ewForm.rate)||0))})} placeholder="1" />
-          <Input label={`Rate(${CURRENCY})`} type="number" value={ewForm.rate} onChange={e=>setEwForm({...ewForm,rate:e.target.value,total:String(+(ewForm.qty||1)*(+e.target.value))})} placeholder="0" />
+        <div className="space-y-2">
+          <Input label="Work Name (type or select)" value={ewForm.name} onChange={e=>{const et=extraWorkTypes.find(x=>x.name===e.target.value);setEwForm({...ewForm,name:e.target.value,rate:et?String(et.rate):ewForm.rate});}} placeholder="e.g. Excavation, Leveling..." list="ew-list" />
+          <datalist id="ew-list">{extraWorkTypes.map(e=><option key={e._id} value={e.name}/>)}</datalist>
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Qty" type="number" value={ewForm.qty} onChange={e=>setEwForm({...ewForm,qty:e.target.value})} placeholder="1" />
+            <Input label={`Rate (${CURRENCY})`} type="number" value={ewForm.rate} onChange={e=>setEwForm({...ewForm,rate:e.target.value})} placeholder="0" />
+          </div>
+          <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200">
+            <div className="text-xs text-gray-400">This item cost</div>
+            <div className="font-black text-orange-700">{CURRENCY}{fmt(+(ewForm.qty||1)*(+(ewForm.rate)||0))}</div>
+          </div>
         </div>
-        <button onClick={addExtraWork} className="w-full bg-orange-500 text-white py-1.5 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add Extra Work</button>
+        <button onClick={()=>{
+          if(!ewForm.name||!ewForm.rate)return;
+          const total=+(ewForm.qty||1)*(+(ewForm.rate)||0);
+          const updated=[...(f.extraWork||[]),{...ewForm,total}];
+          const totalCost=calcTotal({...f,extraWork:updated});
+          const pending=Math.max(0,totalCost-(+(f.advancePaid||0)));
+          setF({...f,extraWork:updated,totalCost:String(totalCost),pendingAmount:String(pending)});
+          setEwForm({name:"",qty:"",rate:""});
+        }} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add to Total</button>
         {(f.extraWork||[]).map((e,i)=>(
-          <div key={i} className="flex justify-between items-center bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs">
-            <span className="font-bold">{e.name}</span>
-            <span>{e.qty} × {CURRENCY}{e.rate} = <span className="font-black text-orange-700">{CURRENCY}{fmt(e.total)}</span></span>
-            <button onClick={()=>{const ew=f.extraWork.filter((_,j)=>j!==i);setForm(x=>({...x,extraWork:ew,totalCost:String(calcTotal({...x,extraWork:ew}))}));}} className="text-red-400 ml-2">✕</button>
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs gap-1">
+            <span className="font-bold flex-1">{e.name}</span>
+            <span>{e.qty||1} x {CURRENCY}{e.rate} = <span className="font-black text-orange-700">{CURRENCY}{fmt(e.total)}</span></span>
+            <button onClick={()=>{const ew=f.extraWork.filter((_,j)=>j!==i);const tc=calcTotal({...f,extraWork:ew});setF({...f,extraWork:ew,totalCost:String(tc),pendingAmount:String(Math.max(0,tc-(+(f.advancePaid||0))))});}} className="text-red-400 hover:text-red-600 font-bold ml-1">x</button>
           </div>
         ))}
+        {(f.extraWork||[]).length>0&&<div className="text-xs font-black text-orange-700 text-right">Extra Work: {CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
       </SectionBox>
 
       <SectionBox title="Extra Materials" icon="🧱" color="purple">
-        <div className="grid grid-cols-2 gap-2">
-          <Select label="Material" value={emForm.name} options={[{value:"",label:"Select"},...materialTypes.map(m=>({value:m.name,label:m.name}))]} onChange={e=>{
-            const mt = materialTypes.find(x=>x.name===e.target.value);
-            setEmForm({...emForm,name:e.target.value,unit:mt?mt.unit:emForm.unit,rate:mt?String(mt.price):emForm.rate});
-          }} />
-          <Input label="Custom name" value={emForm.name} onChange={e=>setEmForm({...emForm,name:e.target.value})} placeholder="Or type name" />
-          <Input label="Qty" type="number" value={emForm.qty} onChange={e=>setEmForm({...emForm,qty:e.target.value,total:String(+e.target.value*(+(emForm.rate)||0))})} placeholder="0" />
-          <Select label="Unit" value={emForm.unit||"nos"} options={["nos","bag","kg","ton","litre","sqft","sqm","load"]} onChange={e=>setEmForm({...emForm,unit:e.target.value})} />
-          <Input label={`Rate(${CURRENCY})`} type="number" value={emForm.rate} onChange={e=>setEmForm({...emForm,rate:e.target.value,total:String(+(emForm.qty||1)*(+e.target.value))})} placeholder="0" />
+        <div className="space-y-2">
+          <Input label="Material Name (type or select)" value={emForm.name} onChange={e=>{const mt=materialTypes.find(x=>x.name===e.target.value);setEmForm({...emForm,name:e.target.value,unit:mt?mt.unit:emForm.unit,rate:mt?String(mt.price):emForm.rate});}} placeholder="e.g. Cement, Sand..." list="em-list" />
+          <datalist id="em-list">{materialTypes.map(m=><option key={m._id} value={m.name}/>)}</datalist>
+          <div className="grid grid-cols-3 gap-2">
+            <Input label="Qty" type="number" value={emForm.qty} onChange={e=>setEmForm({...emForm,qty:e.target.value})} placeholder="0" />
+            <Select label="Unit" value={emForm.unit||"nos"} options={["nos","bag","kg","ton","litre","sqft","sqm","load"]} onChange={e=>setEmForm({...emForm,unit:e.target.value})} />
+            <Input label={`Rate (${CURRENCY})`} type="number" value={emForm.rate} onChange={e=>setEmForm({...emForm,rate:e.target.value})} placeholder="0" />
+          </div>
+          <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200">
+            <div className="text-xs text-gray-400">This item cost</div>
+            <div className="font-black text-purple-700">{CURRENCY}{fmt(+(emForm.qty||0)*(+(emForm.rate)||0))}</div>
+          </div>
         </div>
-        <button onClick={addExtraMaterial} className="w-full bg-purple-500 text-white py-1.5 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add Material</button>
+        <button onClick={()=>{
+          if(!emForm.name||!emForm.qty)return;
+          const total=+(emForm.qty||0)*(+(emForm.rate)||0);
+          const updated=[...(f.extraMaterials||[]),{...emForm,total}];
+          const totalCost=calcTotal({...f,extraMaterials:updated});
+          const pending=Math.max(0,totalCost-(+(f.advancePaid||0)));
+          setF({...f,extraMaterials:updated,totalCost:String(totalCost),pendingAmount:String(pending)});
+          setEmForm({name:"",qty:"",unit:"nos",rate:""});
+        }} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add to Total</button>
         {(f.extraMaterials||[]).map((e,i)=>(
-          <div key={i} className="flex justify-between items-center bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs">
-            <span className="font-bold">{e.name}</span>
-            <span>{e.qty} {e.unit} × {CURRENCY}{e.rate} = <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span></span>
-            <button onClick={()=>{const em=f.extraMaterials.filter((_,j)=>j!==i);setForm(x=>({...x,extraMaterials:em,totalCost:String(calcTotal({...x,extraMaterials:em}))}));}} className="text-red-400 ml-2">✕</button>
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs gap-1">
+            <span className="font-bold flex-1">{e.name}</span>
+            <span>{e.qty} {e.unit} x {CURRENCY}{e.rate} = <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span></span>
+            <button onClick={()=>{const em=f.extraMaterials.filter((_,j)=>j!==i);const tc=calcTotal({...f,extraMaterials:em});setF({...f,extraMaterials:em,totalCost:String(tc),pendingAmount:String(Math.max(0,tc-(+(f.advancePaid||0))))});}} className="text-red-400 hover:text-red-600 font-bold ml-1">x</button>
           </div>
         ))}
+        {(f.extraMaterials||[]).length>0&&<div className="text-xs font-black text-purple-700 text-right">Materials: {CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
       </SectionBox>
 
       <SectionBox title="Costing" icon="💰" color="green">
