@@ -108,10 +108,18 @@ function Login({ onLogin }) {
   const login = async () => {
     if (!username || !password) return setError("Enter username and password");
     setLoading(true); setError("");
-    const users = await api("GET", "/users");
-    const user = Array.isArray(users) && users.find(u => u.username === username && u.password === password && u.active !== false);
-    if (user) onLogin(user);
-    else setError("Invalid credentials or account inactive");
+    try {
+      const res = await fetch(`${API}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.role) onLogin(data);
+      else setError(data.message || "Invalid credentials");
+    } catch {
+      setError("Server error, please try again");
+    }
     setLoading(false);
   };
 
