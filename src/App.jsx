@@ -343,25 +343,11 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [extraWorkTypes, setExtraWorkTypes] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [editModal, setEditModal] = useState(null);
-  const [viewModal, setViewModal] = useState(null);
-  const [invoiceModal, setInvoiceModal] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [viewItem, setViewItem] = useState(null);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-
-  const emptyForm = {
-    customerName:"", phone:"", siteLocation:"", interlockType:"", interlockColor:"",
-    selectedWorkers:[], startDate:today(), endDate:"", status:"running",
-    workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
-    extraWork:[], extraMaterials:[],
-    materialCost:"", laborCost:"", totalCost:"",
-    advancePaid:"", pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash",
-    note:"", addedBy: user.name,
-  };
-  const [form, setForm] = useState(emptyForm);
-  const [ewForm, setEwForm] = useState({name:"",qty:"",rate:"",total:""});
-  const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:"",total:""});
 
   useEffect(()=>{
     Promise.all([
@@ -387,41 +373,25 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     return base + ew + em + mat + lab;
   };
 
-  const updateFormCalc = (updates) => {
-    const newForm = {...form,...updates};
-    const total = calcTotal(newForm);
-    const pending = total - +(newForm.advancePaid||0);
-    setForm({...newForm, baseWorkCost:String(+(newForm.workSize||0)*(+(newForm.ratePerUnit||0))), totalCost:String(total), pendingAmount:String(Math.max(0,pending))});
+  const emptyForm = {
+    customerName:"", phone:"", siteLocation:"", interlockType:"", interlockColor:"",
+    selectedWorkers:[], startDate:today(), endDate:"", status:"running",
+    workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
+    extraWork:[], extraMaterials:[],
+    materialCost:"", laborCost:"", totalCost:"",
+    advancePaid:"", pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
   };
 
-  const addExtraWork = () => {
-    if (!ewForm.name) return;
-    const total = +(ewForm.qty||1) * +(ewForm.rate||0);
-    const updated = [...(form.extraWork||[]), {...ewForm,total}];
-    const totalCost = calcTotal({...form, extraWork:updated});
-    setForm(f=>({...f, extraWork:updated, totalCost:String(totalCost), pendingAmount:String(Math.max(0,totalCost-(+(f.advancePaid||0))))}));
-    setEwForm({name:"",qty:"",rate:"",total:""});
+  const save = async (f) => {
+    if (!f.customerName) return;
+    const item = await api("POST", "/sitework", {...f, addedBy:user.name});
+    if (item._id) { setSiteWorks(p=>[item,...p]); setShowAdd(false); }
   };
 
-  const addExtraMaterial = () => {
-    if (!emForm.name) return;
-    const total = +(emForm.qty||1) * +(emForm.rate||0);
-    const updated = [...(form.extraMaterials||[]), {...emForm,total}];
-    const totalCost = calcTotal({...form, extraMaterials:updated});
-    setForm(f=>({...f, extraMaterials:updated, totalCost:String(totalCost), pendingAmount:String(Math.max(0,totalCost-(+(f.advancePaid||0))))}));
-    setEmForm({name:"",qty:"",unit:"nos",rate:"",total:""});
-  };
-
-  const save = async () => {
-    if (!form.customerName) return;
-    const item = await api("POST", "/sitework", form);
-    if (item._id) { setSiteWorks(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  const saveEdit = async () => {
-    await api("PUT", `/sitework/${editModal._id}`, editModal);
-    setSiteWorks(p=>p.map(x=>x._id===editModal._id?{...x,...editModal}:x));
-    setEditModal(null);
+  const saveEdit = async (f) => {
+    await api("PUT", `/sitework/${f._id}`, f);
+    setSiteWorks(p=>p.map(x=>x._id===f._id?{...x,...f}:x));
+    setEditItem(null);
   };
 
   const del = async (id) => {
@@ -439,45 +409,38 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   const statusColor = {running:"amber",completed:"green",pending:"gray",cancelled:"red"};
 
   const generateInvoice = (s) => {
+    const ewTotal = (s.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const emTotal = (s.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0);
     const lines = [
-      "════════════════════════════════════",
-      "           PK INTERLOCK            ",
-      "            INVOICE / BILL          ",
-      "════════════════════════════════════",
-      `Invoice Date : ${today()}`,
-      `Site         : ${s.customerName||"—"}`,
-      `Phone        : ${s.phone||"—"}`,
-      `Location     : ${s.siteLocation||"—"}`,
-      "────────────────────────────────────",
-      `Interlock Type : ${s.interlockType||"—"}`,
-      `Work Size      : ${s.workSize} ${s.workUnit}`,
-      `Rate           : ${CURRENCY}${s.ratePerUnit}/${s.workUnit}`,
-      `Base Cost      : ${CURRENCY}${fmt(+(s.workSize||0)*(+(s.ratePerUnit||0)))}`,
-      "────────────────────────────────────",
-      "EXTRA WORK:",
-      ...(s.extraWork||[]).map(e=>`  ${e.name}: ${e.qty} × ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),
-      "────────────────────────────────────",
-      "EXTRA MATERIALS:",
-      ...(s.extraMaterials||[]).map(e=>`  ${e.name}: ${e.qty} ${e.unit} × ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),
-      "────────────────────────────────────",
-      s.materialCost>0?`Material Cost  : ${CURRENCY}${fmt(s.materialCost)}`:"",
-      s.laborCost>0?`Labour Cost    : ${CURRENCY}${fmt(s.laborCost)}`:"",
-      `TOTAL AMOUNT   : ${CURRENCY}${fmt(s.totalCost||s.totalAmount)}`,
-      `Advance Paid   : ${CURRENCY}${fmt(s.advancePaid||0)}`,
-      `PENDING        : ${CURRENCY}${fmt(s.pendingAmount||0)}`,
-      "────────────────────────────────────",
-      `Payment Mode   : ${s.paymentMode||"—"}`,
-      `Payment Status : ${s.paymentStatus||"—"}`,
-      "────────────────────────────────────",
-      `Start Date     : ${s.startDate||"—"}`,
-      `End Date       : ${s.endDate||"—"}`,
-      `Status         : ${s.status||"—"}`,
-      s.note?`Note           : ${s.note}`:"",
-      "════════════════════════════════════",
-      "   Thank you for choosing PK Interlock",
-      "════════════════════════════════════",
+      "════════════════════════════════",
+      "         PK INTERLOCK          ",
+      "          INVOICE / BILL        ",
+      "════════════════════════════════",
+      `Date     : ${today()}`,
+      `Customer : ${s.customerName||"—"}`,
+      `Phone    : ${s.phone||"—"}`,
+      `Location : ${s.siteLocation||"—"}`,
+      "────────────────────────────────",
+      `Type     : ${s.interlockType||"—"} ${s.interlockColor||""}`,
+      `Size     : ${s.workSize} ${s.workUnit}`,
+      `Rate     : ${CURRENCY}${s.ratePerUnit}/${s.workUnit}`,
+      `Base Cost: ${CURRENCY}${fmt(+(s.workSize||0)*(+(s.ratePerUnit||0)))}`,
+      "────────────────────────────────",
+      ...(s.extraWork||[]).length>0?["EXTRA WORK:",...(s.extraWork||[]).map(e=>`  ${e.name}: ${e.qty||1} x ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),`  Subtotal: ${CURRENCY}${fmt(ewTotal)}`,"────────────────────────────────"]:[],
+      ...(s.extraMaterials||[]).length>0?["EXTRA MATERIALS:",...(s.extraMaterials||[]).map(e=>`  ${e.name}: ${e.qty} ${e.unit} x ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),`  Subtotal: ${CURRENCY}${fmt(emTotal)}`,"────────────────────────────────"]:[],
+      +(s.materialCost||0)>0?`Material : ${CURRENCY}${fmt(s.materialCost)}`:"",
+      +(s.laborCost||0)>0?`Labour   : ${CURRENCY}${fmt(s.laborCost)}`:"",
+      `TOTAL    : ${CURRENCY}${fmt(+(s.totalCost||s.totalAmount||0))}`,
+      `Advance  : ${CURRENCY}${fmt(s.advancePaid||0)}`,
+      `PENDING  : ${CURRENCY}${fmt(s.pendingAmount||0)}`,
+      "────────────────────────────────",
+      `Payment  : ${s.paymentMode||"—"} | ${s.paymentStatus||"—"}`,
+      `Start    : ${s.startDate||"—"} | End: ${s.endDate||"—"}`,
+      s.note?`Note     : ${s.note}`:"",
+      "════════════════════════════════",
+      "Thank you for choosing PK Interlock",
     ].filter(l=>l!=="");
-    const blob = new Blob([lines.join("\n")], {type:"text/plain"});
+    const blob = new Blob([lines.join("\n")],{type:"text/plain"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href=url; a.download=`Invoice_${s.customerName}_${today()}.txt`; a.click();
@@ -486,152 +449,12 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
 
   if (loading) return <Loader />;
 
-  const FormContent = ({ f, setF }) => (
-    <div className="space-y-3">
-      <SectionBox title="Customer Details" icon="👤" color="blue">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Customer Name *" value={f.customerName||""} onChange={e=>setF({...f,customerName:e.target.value})} placeholder="Full name" />
-          <Input label="Phone" type="tel" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} placeholder="Number" />
-        </div>
-        <Input label="Site Location" value={f.siteLocation||""} onChange={e=>setF({...f,siteLocation:e.target.value})} placeholder="Address / area" />
-      </SectionBox>
-
-      <SectionBox title="Work Details" icon="🧱" color="amber">
-        <Select label="Interlock Type" value={f.interlockType||""} options={[{value:"",label:"Select type"},...interlockTypes.map(i=>({value:i.name,label:i.name}))]} onChange={e=>{
-          const it = interlockTypes.find(i=>i.name===e.target.value);
-          const rate = f.workUnit==="sqm"?(it?.pricePerSqm||""):(it?.pricePerSqft||"");
-          setF({...f,interlockType:e.target.value,ratePerUnit:String(rate||f.ratePerUnit)});
-        }} />
-        <Input label="Color / Specification" value={f.interlockColor||""} onChange={e=>setF({...f,interlockColor:e.target.value})} placeholder="e.g. Grey, Natural" />
-        <div className="grid grid-cols-3 gap-2">
-          <Select label="Unit" value={f.workUnit||"sqft"} options={["sqft","sqm"]} onChange={e=>setF({...f,workUnit:e.target.value})} />
-          <Input label="Work Size" type="number" value={f.workSize||""} onChange={e=>updateFormCalc({workSize:e.target.value})} placeholder="0" />
-          <Input label={`Rate(${CURRENCY})`} type="number" value={f.ratePerUnit||""} onChange={e=>updateFormCalc({ratePerUnit:e.target.value})} placeholder="0" />
-        </div>
-        <div className="bg-white rounded-xl p-2 text-center border border-amber-200">
-          <div className="text-xs text-gray-400">Base Cost</div>
-          <div className="font-black text-amber-700">{CURRENCY}{fmt(+(f.workSize||0)*(+(f.ratePerUnit||0)))}</div>
-        </div>
-      </SectionBox>
-
-      <SectionBox title="Workers" icon="👷" color="teal">
-        <div className="flex flex-wrap gap-1">
-          {workers.map(w=>(
-            <button key={w._id} onClick={()=>{
-              const sel = f.selectedWorkers||[];
-              setF({...f, selectedWorkers: sel.includes(w.name)?sel.filter(x=>x!==w.name):[...sel,w.name]});
-            }} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(f.selectedWorkers||[]).includes(w.name)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>
-              {w.name}
-            </button>
-          ))}
-          {workers.length===0 && <div className="text-xs text-gray-400">No workers in system — add from Workers menu</div>}
-        </div>
-      </SectionBox>
-
-      <SectionBox title="Extra Work" icon="➕" color="orange">
-        <div className="space-y-2">
-          <Input label="Work Name (type or select)" value={ewForm.name} onChange={e=>{const et=extraWorkTypes.find(x=>x.name===e.target.value);setEwForm({...ewForm,name:e.target.value,rate:et?String(et.rate):ewForm.rate});}} placeholder="e.g. Excavation, Leveling..." list="ew-list" />
-          <datalist id="ew-list">{extraWorkTypes.map(e=><option key={e._id} value={e.name}/>)}</datalist>
-          <div className="grid grid-cols-2 gap-2">
-            <Input label="Qty" type="number" value={ewForm.qty} onChange={e=>setEwForm({...ewForm,qty:e.target.value})} placeholder="1" />
-            <Input label={`Rate (${CURRENCY})`} type="number" value={ewForm.rate} onChange={e=>setEwForm({...ewForm,rate:e.target.value})} placeholder="0" />
-          </div>
-          <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200">
-            <div className="text-xs text-gray-400">This item cost</div>
-            <div className="font-black text-orange-700">{CURRENCY}{fmt(+(ewForm.qty||1)*(+(ewForm.rate)||0))}</div>
-          </div>
-        </div>
-        <button onClick={()=>{
-          if(!ewForm.name||!ewForm.rate)return;
-          const total=+(ewForm.qty||1)*(+(ewForm.rate)||0);
-          const updated=[...(f.extraWork||[]),{...ewForm,total}];
-          const totalCost=calcTotal({...f,extraWork:updated});
-          const pending=Math.max(0,totalCost-(+(f.advancePaid||0)));
-          setF({...f,extraWork:updated,totalCost:String(totalCost),pendingAmount:String(pending)});
-          setEwForm({name:"",qty:"",rate:""});
-        }} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add to Total</button>
-        {(f.extraWork||[]).map((e,i)=>(
-          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs gap-1">
-            <span className="font-bold flex-1">{e.name}</span>
-            <span>{e.qty||1} x {CURRENCY}{e.rate} = <span className="font-black text-orange-700">{CURRENCY}{fmt(e.total)}</span></span>
-            <button onClick={()=>{const ew=f.extraWork.filter((_,j)=>j!==i);const tc=calcTotal({...f,extraWork:ew});setF({...f,extraWork:ew,totalCost:String(tc),pendingAmount:String(Math.max(0,tc-(+(f.advancePaid||0))))});}} className="text-red-400 hover:text-red-600 font-bold ml-1">x</button>
-          </div>
-        ))}
-        {(f.extraWork||[]).length>0&&<div className="text-xs font-black text-orange-700 text-right">Extra Work: {CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
-      </SectionBox>
-
-      <SectionBox title="Extra Materials" icon="🧱" color="purple">
-        <div className="space-y-2">
-          <Input label="Material Name (type or select)" value={emForm.name} onChange={e=>{const mt=materialTypes.find(x=>x.name===e.target.value);setEmForm({...emForm,name:e.target.value,unit:mt?mt.unit:emForm.unit,rate:mt?String(mt.price):emForm.rate});}} placeholder="e.g. Cement, Sand..." list="em-list" />
-          <datalist id="em-list">{materialTypes.map(m=><option key={m._id} value={m.name}/>)}</datalist>
-          <div className="grid grid-cols-3 gap-2">
-            <Input label="Qty" type="number" value={emForm.qty} onChange={e=>setEmForm({...emForm,qty:e.target.value})} placeholder="0" />
-            <Select label="Unit" value={emForm.unit||"nos"} options={["nos","bag","kg","ton","litre","sqft","sqm","load"]} onChange={e=>setEmForm({...emForm,unit:e.target.value})} />
-            <Input label={`Rate (${CURRENCY})`} type="number" value={emForm.rate} onChange={e=>setEmForm({...emForm,rate:e.target.value})} placeholder="0" />
-          </div>
-          <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200">
-            <div className="text-xs text-gray-400">This item cost</div>
-            <div className="font-black text-purple-700">{CURRENCY}{fmt(+(emForm.qty||0)*(+(emForm.rate)||0))}</div>
-          </div>
-        </div>
-        <button onClick={()=>{
-          if(!emForm.name||!emForm.qty)return;
-          const total=+(emForm.qty||0)*(+(emForm.rate)||0);
-          const updated=[...(f.extraMaterials||[]),{...emForm,total}];
-          const totalCost=calcTotal({...f,extraMaterials:updated});
-          const pending=Math.max(0,totalCost-(+(f.advancePaid||0)));
-          setF({...f,extraMaterials:updated,totalCost:String(totalCost),pendingAmount:String(pending)});
-          setEmForm({name:"",qty:"",unit:"nos",rate:""});
-        }} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add to Total</button>
-        {(f.extraMaterials||[]).map((e,i)=>(
-          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs gap-1">
-            <span className="font-bold flex-1">{e.name}</span>
-            <span>{e.qty} {e.unit} x {CURRENCY}{e.rate} = <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span></span>
-            <button onClick={()=>{const em=f.extraMaterials.filter((_,j)=>j!==i);const tc=calcTotal({...f,extraMaterials:em});setF({...f,extraMaterials:em,totalCost:String(tc),pendingAmount:String(Math.max(0,tc-(+(f.advancePaid||0))))});}} className="text-red-400 hover:text-red-600 font-bold ml-1">x</button>
-          </div>
-        ))}
-        {(f.extraMaterials||[]).length>0&&<div className="text-xs font-black text-purple-700 text-right">Materials: {CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
-      </SectionBox>
-
-      <SectionBox title="Costing" icon="💰" color="green">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Material Cost" type="number" value={f.materialCost||""} onChange={e=>updateFormCalc({materialCost:e.target.value})} placeholder="0" />
-          <Input label="Labour Cost" type="number" value={f.laborCost||""} onChange={e=>updateFormCalc({laborCost:e.target.value})} placeholder="0" />
-        </div>
-        <div className="bg-white rounded-xl p-3 border border-green-200 text-center">
-          <div className="text-xs text-gray-400">TOTAL COST</div>
-          <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(+(f.totalCost||0))}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Advance Paid" type="number" value={f.advancePaid||""} onChange={e=>updateFormCalc({advancePaid:e.target.value})} placeholder="0" />
-          <div className="bg-red-50 rounded-xl p-2 border border-red-200 text-center">
-            <div className="text-xs text-gray-400">Pending</div>
-            <div className="font-black text-red-600">{CURRENCY}{fmt(+(f.pendingAmount||0))}</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Select label="Payment Mode" value={f.paymentMode||"Cash"} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setF({...f,paymentMode:e.target.value})} />
-          <Select label="Payment Status" value={f.paymentStatus||"pending"} options={["pending","partial","paid"]} onChange={e=>setF({...f,paymentStatus:e.target.value})} />
-        </div>
-      </SectionBox>
-
-      <SectionBox title="Timeline" icon="📅" color="gray">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Start Date" type="date" value={f.startDate||""} onChange={e=>setF({...f,startDate:e.target.value})} />
-          <Input label="End Date" type="date" value={f.endDate||""} onChange={e=>setF({...f,endDate:e.target.value})} />
-        </div>
-        <Select label="Status" value={f.status||"running"} options={["pending","running","completed","cancelled"]} onChange={e=>setF({...f,status:e.target.value})} />
-        <Textarea label="Note" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any additional notes..." />
-      </SectionBox>
-    </div>
-  );
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏗️ Site Work</h2>
-        {(user.role==="admin"||user.role==="supervisor") && (
-          <button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
+        {(user.role==="admin"||user.role==="supervisor")&&(
+          <button onClick={()=>setShowAdd(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
         )}
       </div>
 
@@ -640,7 +463,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       <div className="flex gap-1 overflow-x-auto pb-1">
         {["all","running","pending","completed","cancelled"].map(s=>(
           <button key={s} onClick={()=>setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${filter===s?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-            {s.charAt(0).toUpperCase()+s.slice(1)} {s==="all"?`(${siteWorks.length})`:siteWorks.filter(x=>x.status===s).length>0?`(${siteWorks.filter(x=>x.status===s).length})`:""}
+            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?siteWorks.length:siteWorks.filter(x=>x.status===s).length})
           </button>
         ))}
       </div>
@@ -652,11 +475,11 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       </div>
 
       <div className="space-y-3">
-        {filtered.length===0 && <EmptyState icon="🏗️" text="No sites found" />}
+        {filtered.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
         {filtered.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 cursor-pointer" onClick={()=>setViewModal(s)}>
+              <div className="flex-1 cursor-pointer" onClick={()=>setViewItem(s)}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-black text-gray-900">{s.customerName}</span>
                   <Badge color={statusColor[s.status]||"gray"}>{s.status||"pending"}</Badge>
@@ -666,89 +489,81 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
                 <div className="text-xs text-gray-400">🧱 {s.interlockType||"—"} · {s.workSize} {s.workUnit}</div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-black text-green-700">{CURRENCY}{fmt(s.totalCost||s.totalAmount||0)}</div>
-                {+(s.pendingAmount||0)>0 && <div className="text-xs text-red-500 font-semibold">Pending: {CURRENCY}{fmt(s.pendingAmount)}</div>}
+                <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.totalCost||s.totalAmount)||0)}</div>
+                {+(s.pendingAmount||0)>0&&<div className="text-xs text-red-500 font-semibold">Pending: {CURRENCY}{fmt(s.pendingAmount)}</div>}
               </div>
             </div>
-            <div className="mt-2 flex gap-1 flex-wrap">
-              {(s.selectedWorkers||[]).slice(0,3).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}
-              {(s.selectedWorkers||[]).length>3 && <Badge color="gray">+{(s.selectedWorkers||[]).length-3} more</Badge>}
-            </div>
-            <div className="mt-3 flex gap-1">
-              <button onClick={()=>setViewModal(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
-              {(user.role==="admin"||user.role==="supervisor") && <button onClick={()=>setEditModal({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
+            {(s.selectedWorkers||[]).length>0&&(
+              <div className="mt-1 flex gap-1 flex-wrap">
+                {(s.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}
+              </div>
+            )}
+            <div className="mt-2 flex gap-1">
+              <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
+              {(user.role==="admin"||user.role==="supervisor")&&<button onClick={()=>setEditItem({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
               <button onClick={()=>generateInvoice(s)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 py-1.5 rounded-xl text-xs font-bold">🧾 Invoice</button>
-              {user.role==="admin" && <button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
+              {user.role==="admin"&&<button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
             </div>
           </div>
         ))}
       </div>
 
-      {modal && (
-        <Modal title="New Site Work" onClose={()=>setModal(false)} wide>
-          <FormContent f={form} setF={setForm} />
-          <div className="mt-4"><button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">Create Site</button></div>
-        </Modal>
-      )}
+      {showAdd&&<SiteWorkForm title="New Site" initData={emptyForm} onSave={save} onClose={()=>setShowAdd(false)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} calcTotal={calcTotal} />}
+      {editItem&&<SiteWorkForm title="Edit Site" initData={editItem} onSave={saveEdit} onClose={()=>setEditItem(null)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} calcTotal={calcTotal} />}
 
-      {editModal && (
-        <Modal title="Edit Site Work" onClose={()=>setEditModal(null)} wide>
-          <FormContent f={editModal} setF={setEditModal} />
-          <div className="mt-4"><button onClick={saveEdit} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold hover:bg-blue-600 text-base">Save Changes</button></div>
-        </Modal>
-      )}
-
-      {viewModal && (
-        <Modal title="Site Details" onClose={()=>setViewModal(null)} wide>
+      {viewItem&&(
+        <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <Badge color={statusColor[viewModal.status]||"gray"}>{viewModal.status}</Badge>
-              <Badge color={viewModal.paymentStatus==="paid"?"green":viewModal.paymentStatus==="partial"?"amber":"red"}>{viewModal.paymentStatus||"pending"}</Badge>
-              <button onClick={()=>generateInvoice(viewModal)} className="ml-auto bg-amber-50 text-amber-700 px-3 py-1 rounded-lg text-xs font-bold hover:bg-amber-100">🧾 Download Invoice</button>
+            <div className="flex gap-2 flex-wrap">
+              <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
+              <Badge color={viewItem.paymentStatus==="paid"?"green":viewItem.paymentStatus==="partial"?"amber":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
+              <button onClick={()=>generateInvoice(viewItem)} className="ml-auto bg-amber-50 text-amber-700 px-3 py-1 rounded-lg text-xs font-bold hover:bg-amber-100">🧾 Download Invoice</button>
             </div>
             <SectionBox title="Customer" icon="👤" color="blue">
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.customerName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.phone||"—"}</div></div>
-                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewModal.siteLocation||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewItem.customerName||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewItem.phone||"—"}</div></div>
+                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewItem.siteLocation||"—"}</div></div>
               </div>
             </SectionBox>
             <SectionBox title="Work" icon="🧱" color="amber">
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewModal.interlockType||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Color</div><div className="font-bold">{viewModal.interlockColor||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewModal.workSize} {viewModal.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewModal.ratePerUnit}/{viewModal.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Start</div><div className="font-bold">{viewModal.startDate||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">End</div><div className="font-bold">{viewModal.endDate||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewItem.interlockType||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Color</div><div className="font-bold">{viewItem.interlockColor||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewItem.workSize} {viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewItem.ratePerUnit}/{viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Start</div><div className="font-bold">{viewItem.startDate||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">End</div><div className="font-bold">{viewItem.endDate||"—"}</div></div>
               </div>
             </SectionBox>
-            {(viewModal.selectedWorkers||[]).length>0 && (
+            {(viewItem.selectedWorkers||[]).length>0&&(
               <SectionBox title="Workers" icon="👷" color="teal">
-                <div className="flex flex-wrap gap-1">{(viewModal.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}</div>
+                <div className="flex flex-wrap gap-1">{(viewItem.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}</div>
               </SectionBox>
             )}
-            {(viewModal.extraWork||[]).length>0 && (
-              <SectionBox title="Extra Work" icon="➕" color="orange">
-                {viewModal.extraWork.map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} × {e.qty}</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            {(viewModal.extraMaterials||[]).length>0 && (
-              <SectionBox title="Extra Materials" icon="🧱" color="purple">
-                {viewModal.extraMaterials.map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} {e.qty} {e.unit}</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            <SectionBox title="Costing" icon="💰" color="green">
+            <SectionBox title="Costing Breakdown" icon="💰" color="green">
               <div className="space-y-1 text-sm">
-                <div className="flex justify-between"><span>Base Cost</span><span className="font-bold">{CURRENCY}{fmt(+(viewModal.workSize||0)*(+(viewModal.ratePerUnit||0)))}</span></div>
-                {+(viewModal.materialCost||0)>0 && <div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(viewModal.materialCost)}</span></div>}
-                {+(viewModal.laborCost||0)>0 && <div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(viewModal.laborCost)}</span></div>}
-                <div className="flex justify-between border-t pt-1"><span className="font-black">TOTAL</span><span className="font-black text-green-700 text-lg">{CURRENCY}{fmt(viewModal.totalCost||viewModal.totalAmount||0)}</span></div>
-                <div className="flex justify-between"><span>Advance Paid</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewModal.advancePaid||0)}</span></div>
-                <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(viewModal.pendingAmount||0)}</span></div>
+                <div className="flex justify-between"><span>Base Cost ({viewItem.workSize} {viewItem.workUnit} x {CURRENCY}{viewItem.ratePerUnit})</span><span className="font-bold">{CURRENCY}{fmt(+(viewItem.workSize||0)*(+(viewItem.ratePerUnit||0)))}</span></div>
+                {(viewItem.extraWork||[]).length>0&&<>
+                  <div className="text-xs font-bold text-orange-600 mt-1">Extra Work:</div>
+                  {(viewItem.extraWork||[]).map((e,i)=><div key={i} className="flex justify-between pl-2 text-xs"><span>{e.name} ({e.qty||1} x {CURRENCY}{e.rate})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+                </>}
+                {(viewItem.extraMaterials||[]).length>0&&<>
+                  <div className="text-xs font-bold text-purple-600 mt-1">Extra Materials:</div>
+                  {(viewItem.extraMaterials||[]).map((e,i)=><div key={i} className="flex justify-between pl-2 text-xs"><span>{e.name} ({e.qty} {e.unit} x {CURRENCY}{e.rate})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+                </>}
+                {+(viewItem.materialCost||0)>0&&<div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.materialCost)}</span></div>}
+                {+(viewItem.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.laborCost)}</span></div>}
+                <div className="flex justify-between border-t pt-1 mt-1"><span className="font-black">TOTAL</span><span className="font-black text-green-700 text-lg">{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
+                <div className="flex justify-between"><span>Advance Paid</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewItem.advancePaid||0)}</span></div>
+                <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
               </div>
             </SectionBox>
-            {viewModal.note && <SectionBox title="Note" icon="📝" color="gray"><div className="text-sm">{viewModal.note}</div></SectionBox>}
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Payment Mode</div><div className="font-bold">{viewItem.paymentMode||"—"}</div></div>
+              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
+            </div>
+            {viewItem.note&&<SectionBox title="Note" icon="📝" color="gray"><div className="text-sm">{viewItem.note}</div></SectionBox>}
           </div>
         </Modal>
       )}
@@ -756,328 +571,230 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   );
 }
 
-// ─── SITE REPORT (WorkerReport) ────────────────────────────────────────────────
-function WorkerReport({ user }) {
-  const [reports, setReports] = useState([]);
-  const [workers, setWorkers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [editModal, setEditModal] = useState(null);
-  const [viewModal, setViewModal] = useState(null);
+function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, workers, extraWorkTypes, materialTypes, calcTotal }) {
+  const [f, setF] = useState({...initData});
+  const [ewForm, setEwForm] = useState({name:"",qty:"1",rate:""});
+  const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:""});
+  const [saving, setSaving] = useState(false);
 
-  const MATERIAL_TYPES = ["Interlock Paving","Kerbstone","Hollow Block","Solid Block","Coping Stone","Retaining Wall Block","Grass Block","Other"];
-
-  const emptyForm = { startingDate:today(), siteName:"", phoneNo:"", workerName:"", totalArea:"", workingCost:"", extraWork:"", extraMaterial:"", totalWorkingArea:"", totalAmount:"", note:"", paymentMode:"Cash", upiId:"", bankName:"", bankBranch:"", bankAccount:"", amountReceivedBy:"", materialSupply:"", materialType:"", signatures:{supervisor:false,office:false,admin:false} };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(()=>{
-    Promise.all([api("GET","/workerreport"),api("GET","/workers")]).then(([d,w])=>{
-      setReports(Array.isArray(d)?d:[]);
-      setWorkers(Array.isArray(w)?w:[]);
-      setLoading(false);
-    });
-  },[]);
-
-  const save = async () => {
-    if (!form.workerName) return;
-    const item = await api("POST","/workerreport",{...form,addedBy:user.name});
-    if (item._id) { setReports(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+  const updateCalc = (updates) => {
+    const nf = {...f,...updates};
+    const total = calcTotal(nf);
+    const pending = Math.max(0, total-(+(nf.advancePaid||0)));
+    setF({...nf, baseWorkCost:String(+(nf.workSize||0)*(+(nf.ratePerUnit||0))), totalCost:String(total), pendingAmount:String(pending)});
   };
 
-  const saveEdit = async () => {
-    await api("PUT",`/workerreport/${editModal._id}`,editModal);
-    setReports(p=>p.map(r=>r._id===editModal._id?{...r,...editModal}:r));
-    if (viewModal?._id===editModal._id) setViewModal({...viewModal,...editModal});
-    setEditModal(null);
+  const addEW = () => {
+    if (!ewForm.name||!ewForm.rate) return;
+    const total = +(ewForm.qty||1)*(+(ewForm.rate)||0);
+    const updated = [...(f.extraWork||[]), {...ewForm,total}];
+    const totalCost = calcTotal({...f,extraWork:updated});
+    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    setEwForm({name:"",qty:"1",rate:""});
   };
 
-  const signReport = async (id, role) => {
-    const report = reports.find(r=>r._id===id);
-    const updatedSigs = {...(report.signatures||{}),[role]:true};
-    await api("PUT",`/workerreport/${id}`,{signatures:updatedSigs});
-    setReports(p=>p.map(r=>r._id===id?{...r,signatures:updatedSigs}:r));
-    if (viewModal?._id===id) setViewModal(v=>({...v,signatures:updatedSigs}));
+  const removeEW = (i) => {
+    const updated = f.extraWork.filter((_,j)=>j!==i);
+    const totalCost = calcTotal({...f,extraWork:updated});
+    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
   };
 
-  const downloadReport = (r) => {
-    const payInfo = r.paymentMode==="GPay"||r.paymentMode==="UPI"?`UPI ID: ${r.upiId||"—"}`:r.paymentMode==="Bank"?`Bank: ${r.bankName||"—"} / Branch: ${r.bankBranch||"—"} / Acc: ${r.bankAccount||"—"}`:"";
-    const lines = ["════════════════════════","PK INTERLOCK — SITE REPORT","════════════════════════",`Site: ${r.siteName||"—"}`,`Phone: ${r.phoneNo||"—"}`,`Date: ${r.startingDate}`,`Worker: ${r.workerName}`,"────────────────────────",`Total Area: ${r.totalArea} sqft`,`Working Cost: ${CURRENCY}${r.workingCost||0}`,`Extra Work: ${r.extraWork||"—"}`,`Extra Material: ${r.extraMaterial||"—"}`,`Total Working Area: ${r.totalWorkingArea} sqft`,`Total Amount: ${CURRENCY}${r.totalAmount||0}`,"────────────────────────",`Note: ${r.note||"—"}`,"────────────────────────","PAYMENTS",`Mode: ${r.paymentMode}`,payInfo,`Received By: ${r.amountReceivedBy||"—"}`,"────────────────────────",`Material Type: ${r.materialType||"—"}`,`Material Supply: ${r.materialSupply||"—"}`,"────────────────────────","SIGNATURES",`Supervisor: ${r.signatures?.supervisor?"✓ Signed":"Pending"}`,`Office: ${r.signatures?.office?"✓ Signed":"Pending"}`,`Admin: ${r.signatures?.admin?"✓ Signed":"Pending"}`,"════════════════════════"].filter(l=>l!=="");
-    const blob = new Blob([lines.join("\n")],{type:"text/plain"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.download=`SiteReport_${r.workerName}_${r.startingDate}.txt`; a.click(); URL.revokeObjectURL(url);
+  const addEM = () => {
+    if (!emForm.name||!emForm.qty) return;
+    const total = +(emForm.qty||0)*(+(emForm.rate)||0);
+    const updated = [...(f.extraMaterials||[]), {...emForm,total}];
+    const totalCost = calcTotal({...f,extraMaterials:updated});
+    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    setEmForm({name:"",qty:"",unit:"nos",rate:""});
   };
 
-  const PaymentFields = ({f,setF})=><>
-    <Select label="Payment Mode" value={f.paymentMode} options={["Cash","Bank","GPay","UPI"]} onChange={e=>setF({...f,paymentMode:e.target.value,upiId:"",bankName:"",bankBranch:"",bankAccount:""})} />
-    {(f.paymentMode==="GPay"||f.paymentMode==="UPI")&&<Input label="UPI ID" value={f.upiId||""} onChange={e=>setF({...f,upiId:e.target.value})} placeholder="example@upi" />}
-    {f.paymentMode==="Bank"&&<><Input label="Bank Name" value={f.bankName||""} onChange={e=>setF({...f,bankName:e.target.value})} /><Input label="Branch" value={f.bankBranch||""} onChange={e=>setF({...f,bankBranch:e.target.value})} /><Input label="Account Number" value={f.bankAccount||""} onChange={e=>setF({...f,bankAccount:e.target.value})} /></>}
-    <Input label="Amount Received By" value={f.amountReceivedBy||""} onChange={e=>setF({...f,amountReceivedBy:e.target.value})} placeholder="Name" />
-  </>;
+  const removeEM = (i) => {
+    const updated = f.extraMaterials.filter((_,j)=>j!==i);
+    const totalCost = calcTotal({...f,extraMaterials:updated});
+    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+  };
 
-  const FormBody = ({f,setF})=>(
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        <Input label="Site Name" value={f.siteName} onChange={e=>setF({...f,siteName:e.target.value})} placeholder="Site name" />
-        <Input label="Phone No" type="tel" value={f.phoneNo} onChange={e=>setF({...f,phoneNo:e.target.value})} placeholder="Contact" />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Input label="Starting Date" type="date" value={f.startingDate} onChange={e=>setF({...f,startingDate:e.target.value})} />
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={f.workerName} onChange={e=>setF({...f,workerName:e.target.value})}>
-            <option value="">Select worker</option>
-            {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-          </select>
-        </div>
-      </div>
-      <SectionBox title="Area & Cost" icon="📐" color="blue">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Total Area (sqft)" type="number" value={f.totalArea} onChange={e=>setF({...f,totalArea:e.target.value})} />
-          <Input label={`Working Cost(${CURRENCY})`} type="number" value={f.workingCost} onChange={e=>setF({...f,workingCost:e.target.value})} />
-          <Input label="Total Working Area (sqft)" type="number" value={f.totalWorkingArea} onChange={e=>setF({...f,totalWorkingArea:e.target.value})} />
-          <Input label={`Total Amount(${CURRENCY})`} type="number" value={f.totalAmount} onChange={e=>setF({...f,totalAmount:e.target.value})} />
-        </div>
-      </SectionBox>
-      <SectionBox title="Extra" icon="➕" color="orange">
-        <Textarea label="Extra Work" value={f.extraWork} onChange={e=>setF({...f,extraWork:e.target.value})} placeholder="Any extra work done..." />
-        <Textarea label="Extra Material" value={f.extraMaterial} onChange={e=>setF({...f,extraMaterial:e.target.value})} placeholder="Extra materials used..." />
-      </SectionBox>
-      <Textarea label="📝 Note" value={f.note} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any notes..." />
-      <SectionBox title="Payments" icon="💳" color="purple">
-        <PaymentFields f={f} setF={setF} />
-      </SectionBox>
-      <SectionBox title="Material" icon="🧱" color="teal">
-        <Select label="Material Type" value={f.materialType||""} options={["",...MATERIAL_TYPES]} onChange={e=>setF({...f,materialType:e.target.value})} />
-        <Textarea label="Material Supply Details" value={f.materialSupply} onChange={e=>setF({...f,materialSupply:e.target.value})} placeholder="Materials supplied..." />
-      </SectionBox>
-    </div>
-  );
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(f);
+    setSaving(false);
+  };
 
-  if (loading) return <Loader />;
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🏗️ Site Report</h2>
-        {(user.role==="supervisor"||user.role==="admin")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{reports.length}</div><div className="text-xs text-gray-400">Total</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(+(r.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Amount</div></div>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{reports.filter(r=>r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin).length}</div><div className="text-xs text-gray-400">Signed</div></div>
-      </div>
+    <Modal title={title} onClose={onClose} wide>
       <div className="space-y-3">
-        {reports.length===0&&<EmptyState icon="📋" text="No site reports yet" />}
-        {reports.map(r=>{
-          const allSigned=r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin;
-          return (
-            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 cursor-pointer" onClick={()=>setViewModal(r)}>
-                  <div className="flex items-center gap-2 flex-wrap"><span className="font-black text-gray-900">{r.workerName}</span><Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>{allSigned&&<Badge color="green">✅ Signed</Badge>}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
-                  <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}{r.materialType?` · 🧱 ${r.materialType}`:""}</div>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  {(user.role==="supervisor"||user.role==="admin")&&<button onClick={()=>setEditModal({...r})} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
-                  <button onClick={()=>downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
-                </div>
-              </div>
-              <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                <div className="bg-gray-50 rounded-lg p-1.5 text-center"><div className="font-black">{r.totalWorkingArea||"0"} sqft</div><div className="text-gray-400">Area</div></div>
-                <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Cost</div></div>
-                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total</div></div>
-              </div>
-              <div className="mt-2 flex gap-1">
-                {["supervisor","office","admin"].map(role=>(
-                  <div key={role} className={`flex-1 text-center py-1 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>
-                    {r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {modal&&<Modal title="Add Site Report" onClose={()=>setModal(false)}><FormBody f={form} setF={setForm} /><div className="mt-3"><button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button></div></Modal>}
-      {editModal&&<Modal title="Edit Site Report" onClose={()=>setEditModal(null)}><FormBody f={editModal} setF={setEditModal} /><div className="mt-3"><button onClick={saveEdit} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold hover:bg-blue-600">Save Changes</button></div></Modal>}
-      {viewModal&&(
-        <Modal title="Site Report Details" onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>downloadReport(viewModal)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button></div>
-            <div className="grid grid-cols-2 gap-2">
-              {[["Site Name",viewModal.siteName],["Phone No",viewModal.phoneNo],["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
-                <div key={l} className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-sm">{v||"—"}</div></div>
-              ))}
-              {(viewModal.paymentMode==="GPay"||viewModal.paymentMode==="UPI")&&viewModal.upiId&&<div className="col-span-2 bg-purple-50 rounded-xl p-2"><div className="text-xs text-gray-400">UPI ID</div><div className="font-bold">{viewModal.upiId}</div></div>}
-              {viewModal.paymentMode==="Bank"&&<div className="col-span-2 bg-blue-50 rounded-xl p-2 grid grid-cols-3 gap-1"><div><div className="text-xs text-gray-400">Bank</div><div className="font-bold text-xs">{viewModal.bankName||"—"}</div></div><div><div className="text-xs text-gray-400">Branch</div><div className="font-bold text-xs">{viewModal.bankBranch||"—"}</div></div><div><div className="text-xs text-gray-400">Account</div><div className="font-bold text-xs">{viewModal.bankAccount||"—"}</div></div></div>}
+
+        <SectionBox title="Customer Details" icon="👤" color="blue">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Customer Name *" value={f.customerName||""} onChange={e=>setF({...f,customerName:e.target.value})} placeholder="Full name" />
+            <Input label="Phone" type="tel" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} placeholder="Number" />
+          </div>
+          <Input label="Site Location" value={f.siteLocation||""} onChange={e=>setF({...f,siteLocation:e.target.value})} placeholder="Address / area" />
+        </SectionBox>
+
+        <SectionBox title="Work Details" icon="🧱" color="amber">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type</label>
+            <input list="il-list" value={f.interlockType||""} onChange={e=>{
+              const it=interlockTypes.find(x=>x.name===e.target.value);
+              const rate=f.workUnit==="sqm"?(it?.pricePerSqm||""):(it?.pricePerSqft||"");
+              updateCalc({interlockType:e.target.value, ratePerUnit:rate?String(rate):f.ratePerUnit});
+            }} placeholder="Select or type interlock type..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
+            <datalist id="il-list">{interlockTypes.map(i=><option key={i._id} value={i.name}/>)}</datalist>
+          </div>
+          <Input label="Color / Specification" value={f.interlockColor||""} onChange={e=>setF({...f,interlockColor:e.target.value})} placeholder="e.g. Grey, Natural" />
+          <div className="grid grid-cols-3 gap-2">
+            <Select label="Unit" value={f.workUnit||"sqft"} options={["sqft","sqm"]} onChange={e=>updateCalc({workUnit:e.target.value})} />
+            <Input label="Work Size" type="number" value={f.workSize||""} onChange={e=>updateCalc({workSize:e.target.value})} placeholder="0" />
+            <Input label={`Rate(${CURRENCY})`} type="number" value={f.ratePerUnit||""} onChange={e=>updateCalc({ratePerUnit:e.target.value})} placeholder="0" />
+          </div>
+          <div className="bg-white rounded-xl p-2 text-center border border-amber-200">
+            <div className="text-xs text-gray-400">Base Cost</div>
+            <div className="font-black text-amber-700 text-lg">{CURRENCY}{fmt(+(f.workSize||0)*(+(f.ratePerUnit||0)))}</div>
+          </div>
+        </SectionBox>
+
+        <SectionBox title="Select Workers" icon="👷" color="teal">
+          <div className="flex flex-wrap gap-1">
+            {workers.map(w=>(
+              <button key={w._id} type="button" onClick={()=>{
+                const sel=f.selectedWorkers||[];
+                setF({...f,selectedWorkers:sel.includes(w.name)?sel.filter(x=>x!==w.name):[...sel,w.name]});
+              }} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(f.selectedWorkers||[]).includes(w.name)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>
+                {w.name}
+              </button>
+            ))}
+            {workers.length===0&&<div className="text-xs text-gray-400">No workers — add from Workers menu first</div>}
+          </div>
+        </SectionBox>
+
+        <SectionBox title="Extra Work" icon="➕" color="orange">
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Work Type (select or type)</label>
+              <input list="ew-list" value={ewForm.name} onChange={e=>{
+                const et=extraWorkTypes.find(x=>x.name===e.target.value);
+                setEwForm({...ewForm,name:e.target.value,rate:et?String(et.rate):ewForm.rate});
+              }} placeholder="e.g. Excavation, Leveling, Cutting..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-gray-50" />
+              <datalist id="ew-list">{extraWorkTypes.map(e=><option key={e._id} value={e.name}/>)}</datalist>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-400">Total Area</div></div>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.workingCost)||0)}</div><div className="text-xs text-gray-400">Working Cost</div></div>
-              <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">Total Area</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total Amount</div></div>
+              <Input label="Qty" type="number" value={ewForm.qty} onChange={e=>setEwForm({...ewForm,qty:e.target.value})} placeholder="1" />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={ewForm.rate} onChange={e=>setEwForm({...ewForm,rate:e.target.value})} placeholder="0" />
             </div>
-            {viewModal.materialType&&<div className="bg-teal-50 border border-teal-200 rounded-xl p-2"><div className="text-xs font-bold text-teal-600 mb-1">🧱 Material Type</div><div className="text-sm font-bold">{viewModal.materialType}</div></div>}
-            {viewModal.extraWork&&<div className="bg-orange-50 border border-orange-200 rounded-xl p-2"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm">{viewModal.extraWork}</div></div>}
-            {viewModal.extraMaterial&&<div className="bg-orange-50 border border-orange-200 rounded-xl p-2"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material</div><div className="text-sm">{viewModal.extraMaterial}</div></div>}
-            {viewModal.note&&<div className="bg-gray-50 rounded-xl p-2"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm">{viewModal.note}</div></div>}
-            {viewModal.materialSupply&&<div className="bg-teal-50 rounded-xl p-2"><div className="text-xs font-bold text-teal-600 mb-1">📦 Material Supply</div><div className="text-sm">{viewModal.materialSupply}</div></div>}
-            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
-              <div className="text-xs font-bold text-gray-600 uppercase mb-3">✍️ Signatures</div>
-              <div className="grid grid-cols-3 gap-2">
-                {["supervisor","office","admin"].map(role=>(
-                  <div key={role} className={`rounded-xl border p-2 text-center ${viewModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
-                    <div className="text-xl mb-1">{viewModal.signatures?.[role]?"✅":"⭕"}</div>
-                    <div className="text-xs font-bold capitalize">{role}</div>
-                    {!viewModal.signatures?.[role]&&(user.role===role||user.role==="admin")&&<button onClick={()=>signReport(viewModal._id,role)} className="mt-1 bg-green-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold w-full">Sign</button>}
-                    {viewModal.signatures?.[role]&&<div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
-                  </div>
-                ))}
+            {ewForm.name&&ewForm.rate&&(
+              <div className="flex justify-between bg-orange-50 rounded-xl px-3 py-2 text-xs">
+                <span className="text-gray-500">Preview cost:</span>
+                <span className="font-black text-orange-700">{CURRENCY}{fmt(+(ewForm.qty||1)*(+(ewForm.rate)||0))}</span>
               </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
-function DailyReport({ user }) {
-  const [reports, setReports] = useState([]);
-  const [workers, setWorkers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-
-  const emptyForm = { date:today(), newSite:"", runningSite:"", workersDetail:"", materialSupply:"", complaints:"", payments:"", dayNote:"", expenses:"", workerPayments:[] };
-  const [form, setForm] = useState(emptyForm);
-  const [wpForm, setWpForm] = useState({ workerName:"", amount:"", date:today(), note:"" });
-
-  useEffect(()=>{
-    Promise.all([api("GET","/dailyreport"),api("GET","/workers")]).then(([d,w])=>{
-      setReports(Array.isArray(d)?d:[]);
-      setWorkers(Array.isArray(w)?w:[]);
-      setLoading(false);
-    });
-  },[]);
-
-  const addWP = () => {
-    if (!wpForm.workerName||!wpForm.amount) return;
-    setForm(f=>({...f,workerPayments:[...(f.workerPayments||[]),{...wpForm,amount:+wpForm.amount}]}));
-    setWpForm({workerName:"",amount:"",date:today(),note:""});
-  };
-
-  const save = async () => {
-    if (!form.date) return;
-    if (form.workerPayments?.length>0) {
-      for (const wp of form.workerPayments) await api("POST","/workerpayments",{...wp,addedBy:user.name,reportDate:form.date});
-    }
-    const item = await api("POST","/dailyreport",{...form,addedBy:user.name});
-    setReports(p=>[item,...p].sort((a,b)=>(b.date||"").localeCompare(a.date||"")));
-    setModal(false); setForm(emptyForm);
-  };
-
-  const sections = [
-    {key:"newSite",icon:"🆕",label:"New Site",color:"blue"},{key:"runningSite",icon:"🔄",label:"Running Sites",color:"teal"},
-    {key:"workersDetail",icon:"👷",label:"Workers Detail",color:"amber"},{key:"materialSupply",icon:"🧱",label:"Material Supply",color:"orange"},
-    {key:"complaints",icon:"⚠️",label:"Complaints",color:"red"},{key:"payments",icon:"💰",label:"Payments",color:"green"},
-    {key:"dayNote",icon:"📝",label:"Day Note",color:"gray"},{key:"expenses",icon:"💸",label:"Expenses",color:"purple"},
-  ];
-
-  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📋 Supervisor Report</h2>
-        <button onClick={()=>{setForm(emptyForm);setWpForm({workerName:"",amount:"",date:today(),note:""});setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
-      </div>
-      <div className="space-y-3">
-        {reports.length===0&&<EmptyState icon="📋" text="No reports yet" />}
-        {reports.map(r=>{
-          const filled=sections.filter(s=>r[s.key]);
-          const hasWP=r.workerPayments?.length>0;
-          return (
-            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div onClick={()=>setViewModal(r)} className="flex-1 cursor-pointer">
-                  <div className="font-black text-gray-900">📅 {r.date}</div>
-                  <div className="text-xs text-gray-400">By: {r.addedBy}{hasWP?` · 💸 ${r.workerPayments.length} payment${r.workerPayments.length>1?"s":""}`:""}</div>
-                </div>
-                <button onClick={()=>setViewModal(r)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">View</button>
-              </div>
-              <div className="mt-2 flex gap-1 flex-wrap">
-                {hasWP&&<span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-50 text-green-700 border border-green-200">💸 Payments</span>}
-                {filled.map(s=>{const c=colorMap[s.color];return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;})}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {modal&&(
-        <Modal title="Daily Report" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <SectionBox title="Worker Payments" icon="💸" color="green">
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="text-xs font-semibold text-gray-600 mb-1 block">Worker</label>
-                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" value={wpForm.workerName} onChange={e=>setWpForm({...wpForm,workerName:e.target.value})}>
-                    <option value="">Select</option>{workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-                  </select>
-                </div>
-                <Input label={`Amount(${CURRENCY})`} type="number" value={wpForm.amount} onChange={e=>setWpForm({...wpForm,amount:e.target.value})} />
-                <Input label="Date" type="date" value={wpForm.date} onChange={e=>setWpForm({...wpForm,date:e.target.value})} />
-                <Input label="Note" value={wpForm.note} onChange={e=>setWpForm({...wpForm,note:e.target.value})} placeholder="Optional" />
-              </div>
-              <button onClick={addWP} className="w-full bg-green-500 text-white py-1.5 rounded-xl text-xs font-bold hover:bg-green-600 mt-1">+ Add Payment</button>
-              {form.workerPayments?.map((wp,i)=>(
-                <div key={i} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-green-200 text-xs">
-                  <span><span className="font-bold">{wp.workerName}</span> · {wp.date} · <span className="font-black text-green-700">{CURRENCY}{wp.amount}</span>{wp.note?` · ${wp.note}`:""}</span>
-                  <button onClick={()=>setForm(f=>({...f,workerPayments:f.workerPayments.filter((_,j)=>j!==i)}))} className="text-red-400 hover:text-red-600 ml-2">✕</button>
-                </div>
-              ))}
-            </SectionBox>
-            {sections.map(s=>{const c=colorMap[s.color];return(
-              <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
-                <div className={`text-xs font-bold ${c.label} mb-1.5`}>{s.icon} {s.label}</div>
-                <textarea rows={3} value={form[s.key]} onChange={e=>setForm({...form,[s.key]:e.target.value})} placeholder={`Write ${s.label.toLowerCase()} here...`} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400" />
-              </div>
-            );})}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title={`Report — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
-            {viewModal.workerPayments?.length>0&&(
-              <SectionBox title="Worker Payments" icon="💸" color="green">
-                {viewModal.workerPayments.map((wp,i)=>(
-                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
-                    <span><span className="font-bold">{wp.workerName}</span>{wp.note?` — ${wp.note}`:""}</span>
-                    <span><span className="text-gray-400">{wp.date}</span> · <span className="font-black text-green-700">{CURRENCY}{fmt(wp.amount)}</span></span>
-                  </div>
-                ))}
-                <div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt(viewModal.workerPayments.reduce((a,w)=>a+(+w.amount||0),0))}</div>
-              </SectionBox>
             )}
-            {sections.filter(s=>viewModal[s.key]).map(s=>{const c=colorMap[s.color];return(
-              <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
-                <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
-                <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewModal[s.key]}</div>
-              </div>
-            );})}
+            <button type="button" onClick={addEW} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add Extra Work to Total</button>
           </div>
-        </Modal>
-      )}
-    </div>
+          {(f.extraWork||[]).length>0&&(
+            <div className="mt-2 space-y-1">
+              {(f.extraWork||[]).map((e,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs">
+                  <span className="font-bold flex-1">{e.name}</span>
+                  <span className="mx-2 text-gray-500">{e.qty||1} x {CURRENCY}{e.rate}</span>
+                  <span className="font-black text-orange-700">{CURRENCY}{fmt(e.total)}</span>
+                  <button type="button" onClick={()=>removeEW(i)} className="text-red-400 hover:text-red-600 font-black ml-2 text-base leading-none">×</button>
+                </div>
+              ))}
+              <div className="text-xs font-black text-orange-700 text-right pr-1">
+                Extra Work Total: {CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}
+              </div>
+            </div>
+          )}
+        </SectionBox>
+
+        <SectionBox title="Extra Materials" icon="🧱" color="purple">
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Material (select or type)</label>
+              <input list="em-list" value={emForm.name} onChange={e=>{
+                const mt=materialTypes.find(x=>x.name===e.target.value);
+                setEmForm({...emForm,name:e.target.value,unit:mt?mt.unit:emForm.unit,rate:mt?String(mt.price):emForm.rate});
+              }} placeholder="e.g. Cement, Sand, Chips..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-gray-50" />
+              <datalist id="em-list">{materialTypes.map(m=><option key={m._id} value={m.name}/>)}</datalist>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Qty" type="number" value={emForm.qty} onChange={e=>setEmForm({...emForm,qty:e.target.value})} placeholder="0" />
+              <Select label="Unit" value={emForm.unit||"nos"} options={["nos","bag","kg","ton","litre","sqft","sqm","load"]} onChange={e=>setEmForm({...emForm,unit:e.target.value})} />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={emForm.rate} onChange={e=>setEmForm({...emForm,rate:e.target.value})} placeholder="0" />
+            </div>
+            {emForm.name&&emForm.qty&&(
+              <div className="flex justify-between bg-purple-50 rounded-xl px-3 py-2 text-xs">
+                <span className="text-gray-500">Preview cost:</span>
+                <span className="font-black text-purple-700">{CURRENCY}{fmt(+(emForm.qty||0)*(+(emForm.rate)||0))}</span>
+              </div>
+            )}
+            <button type="button" onClick={addEM} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add Material to Total</button>
+          </div>
+          {(f.extraMaterials||[]).length>0&&(
+            <div className="mt-2 space-y-1">
+              {(f.extraMaterials||[]).map((e,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs">
+                  <span className="font-bold flex-1">{e.name}</span>
+                  <span className="mx-2 text-gray-500">{e.qty} {e.unit} x {CURRENCY}{e.rate}</span>
+                  <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span>
+                  <button type="button" onClick={()=>removeEM(i)} className="text-red-400 hover:text-red-600 font-black ml-2 text-base leading-none">×</button>
+                </div>
+              ))}
+              <div className="text-xs font-black text-purple-700 text-right pr-1">
+                Materials Total: {CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}
+              </div>
+            </div>
+          )}
+        </SectionBox>
+
+        <SectionBox title="Costing Summary" icon="💰" color="green">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Other Material Cost" type="number" value={f.materialCost||""} onChange={e=>updateCalc({materialCost:e.target.value})} placeholder="0" />
+            <Input label="Labour Cost" type="number" value={f.laborCost||""} onChange={e=>updateCalc({laborCost:e.target.value})} placeholder="0" />
+          </div>
+          <div className="bg-white rounded-xl border border-green-200 p-3 space-y-1 text-sm">
+            <div className="flex justify-between text-gray-500"><span>Base Cost</span><span>{CURRENCY}{fmt(+(f.workSize||0)*(+(f.ratePerUnit||0)))}</span></div>
+            {(f.extraWork||[]).length>0&&<div className="flex justify-between text-orange-600"><span>Extra Work</span><span>{CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+            {(f.extraMaterials||[]).length>0&&<div className="flex justify-between text-purple-600"><span>Extra Materials</span><span>{CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+            {+(f.materialCost||0)>0&&<div className="flex justify-between text-gray-500"><span>Material Cost</span><span>{CURRENCY}{fmt(f.materialCost)}</span></div>}
+            {+(f.laborCost||0)>0&&<div className="flex justify-between text-gray-500"><span>Labour Cost</span><span>{CURRENCY}{fmt(f.laborCost)}</span></div>}
+            <div className="flex justify-between border-t pt-1 font-black text-green-700 text-base"><span>TOTAL</span><span>{CURRENCY}{fmt(+(f.totalCost||0))}</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Advance Paid" type="number" value={f.advancePaid||""} onChange={e=>updateCalc({advancePaid:e.target.value})} placeholder="0" />
+            <div className="bg-red-50 rounded-xl p-2 border border-red-200 text-center">
+              <div className="text-xs text-gray-400">Pending</div>
+              <div className="font-black text-red-600">{CURRENCY}{fmt(+(f.pendingAmount||0))}</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Select label="Payment Mode" value={f.paymentMode||"Cash"} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setF({...f,paymentMode:e.target.value})} />
+            <Select label="Payment Status" value={f.paymentStatus||"pending"} options={["pending","partial","paid"]} onChange={e=>setF({...f,paymentStatus:e.target.value})} />
+          </div>
+        </SectionBox>
+
+        <SectionBox title="Timeline & Status" icon="📅" color="gray">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Start Date" type="date" value={f.startDate||""} onChange={e=>setF({...f,startDate:e.target.value})} />
+            <Input label="End Date" type="date" value={f.endDate||""} onChange={e=>setF({...f,endDate:e.target.value})} />
+          </div>
+          <Select label="Status" value={f.status||"running"} options={["pending","running","completed","cancelled"]} onChange={e=>setF({...f,status:e.target.value})} />
+          <Textarea label="Note" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any additional notes..." />
+        </SectionBox>
+
+        <button type="button" onClick={handleSave} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base disabled:opacity-60">
+          {saving?"Saving...":title==="New Site"?"Create Site":"Save Changes"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
-// ─── WORKERS ──────────────────────────────────────────────────────────────────
+
 function Workers({ user }) {
   const [workers, setWorkers] = useState([]);
   const [payments, setPayments] = useState([]);
