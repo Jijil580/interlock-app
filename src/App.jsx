@@ -804,7 +804,7 @@ function WorkerReport({ user }) {
   const [editModal, setEditModal] = useState(null);
   const [viewModal, setViewModal] = useState(null);
   const MATERIAL_TYPES = ["Interlock Paving","Kerbstone","Hollow Block","Solid Block","Coping Stone","Retaining Wall Block","Grass Block","Other"];
-  const emptyForm = { startingDate:today(), siteName:"", phoneNo:"", workerName:"", totalArea:"", workingCost:"", extraWork:"", extraMaterial:"", totalWorkingArea:"", totalAmount:"", note:"", paymentMode:"Cash", upiId:"", bankName:"", bankBranch:"", bankAccount:"", amountReceivedBy:"", materialSupply:"", materialType:"", signatures:{supervisor:false,office:false,admin:false} };
+  const emptyForm = { startingDate:today(), siteName:"", phoneNo:"", workerName:"", totalArea:"", workingCost:"", extraWorkItems:[], extraMaterialItems:[], totalWorkingArea:"", totalAmount:"", note:"", paymentMode:"Cash", upiId:"", bankName:"", bankBranch:"", bankAccount:"", amountReceivedBy:"", materialSupply:"", materialType:"", signatures:{supervisor:false,office:false,admin:false} };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(()=>{
@@ -851,6 +851,33 @@ function WorkerReport({ user }) {
     <Input label="Amount Received By" value={f.amountReceivedBy||""} onChange={e=>setF({...f,amountReceivedBy:e.target.value})} placeholder="Name" />
   </>;
 
+  const calcWRTotal = (f) => {
+    const base = +(f.totalArea||0) * +(f.workingCost||0);
+    const ew = (f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const em = (f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    return base + ew + em;
+  };
+
+  const [ewItem, setEwItem] = useState({name:"",cost:""});
+  const [emItem, setEmItem] = useState({name:"",qty:"",unit:"nos",rate:""});
+
+  const addEWItem = (f, setF) => {
+    if (!ewItem.name||!ewItem.cost) return;
+    const updated = [...(f.extraWorkItems||[]), {name:ewItem.name, cost:+ewItem.cost}];
+    const total = calcWRTotal({...f, extraWorkItems:updated});
+    setF({...f, extraWorkItems:updated, totalAmount:String(total)});
+    setEwItem({name:"",cost:""});
+  };
+
+  const addEMItem = (f, setF) => {
+    if (!emItem.name||!emItem.qty) return;
+    const itemTotal = +(emItem.qty||0)*(+(emItem.rate)||0);
+    const updated = [...(f.extraMaterialItems||[]), {...emItem, total:itemTotal}];
+    const total = calcWRTotal({...f, extraMaterialItems:updated});
+    setF({...f, extraMaterialItems:updated, totalAmount:String(total)});
+    setEmItem({name:"",qty:"",unit:"nos",rate:""});
+  };
+
   const FormBody = ({f,setF})=>(
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
@@ -867,23 +894,85 @@ function WorkerReport({ user }) {
           </select>
         </div>
       </div>
+
       <SectionBox title="Area & Cost" icon="📐" color="blue">
         <div className="grid grid-cols-2 gap-2">
-          <Input label="Total Area (sqft)" type="number" value={f.totalArea} onChange={e=>setF({...f,totalArea:e.target.value})} />
-          <Input label={`Working Cost(${CURRENCY})`} type="number" value={f.workingCost} onChange={e=>setF({...f,workingCost:e.target.value})} />
-          <Input label="Total Working Area (sqft)" type="number" value={f.totalWorkingArea} onChange={e=>setF({...f,totalWorkingArea:e.target.value})} />
-          <Input label={`Total Amount(${CURRENCY})`} type="number" value={f.totalAmount} onChange={e=>setF({...f,totalAmount:e.target.value})} />
+          <Input label="Total Area (sqft)" type="number" value={f.totalArea||""} onChange={e=>{
+            const base=+(e.target.value||0)*(+(f.workingCost||0));
+            const ew=(f.extraWorkItems||[]).reduce((a,x)=>a+(+(x.cost)||0),0);
+            const em=(f.extraMaterialItems||[]).reduce((a,x)=>a+(+(x.total)||0),0);
+            setF({...f,totalArea:e.target.value,totalWorkingArea:e.target.value,totalAmount:String(base+ew+em)});
+          }} />
+          <Input label={`Rate per sqft (${CURRENCY})`} type="number" value={f.workingCost||""} onChange={e=>{
+            const base=+(f.totalArea||0)*(+(e.target.value||0));
+            const ew=(f.extraWorkItems||[]).reduce((a,x)=>a+(+(x.cost)||0),0);
+            const em=(f.extraMaterialItems||[]).reduce((a,x)=>a+(+(x.total)||0),0);
+            setF({...f,workingCost:e.target.value,totalAmount:String(base+ew+em)});
+          }} />
+        </div>
+        <div className="bg-white rounded-xl p-2 border border-blue-200 text-center">
+          <div className="text-xs text-gray-400">Base Cost ({f.totalArea||0} sqft × {CURRENCY}{f.workingCost||0})</div>
+          <div className="font-black text-blue-700 text-lg">{CURRENCY}{fmt(+(f.totalArea||0)*(+(f.workingCost||0)))}</div>
         </div>
       </SectionBox>
-      <SectionBox title="Extra" icon="➕" color="orange">
-        <Textarea label="Extra Work" value={f.extraWork} onChange={e=>setF({...f,extraWork:e.target.value})} placeholder="Any extra work done..." />
-        <Textarea label="Extra Material" value={f.extraMaterial} onChange={e=>setF({...f,extraMaterial:e.target.value})} placeholder="Extra materials used..." />
+
+      <SectionBox title="Extra Work" icon="➕" color="orange">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Work Name" value={ewItem.name} onChange={e=>setEwItem({...ewItem,name:e.target.value})} placeholder="e.g. Excavation" />
+          <Input label={`Cost (${CURRENCY})`} type="number" value={ewItem.cost} onChange={e=>setEwItem({...ewItem,cost:e.target.value})} placeholder="0" />
+        </div>
+        <button onClick={()=>addEWItem(f,setF)} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add Extra Work</button>
+        {(f.extraWorkItems||[]).map((e,i)=>(
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs">
+            <span className="font-bold flex-1">{e.name}</span>
+            <span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost)}</span>
+            <button onClick={()=>{
+              const updated=(f.extraWorkItems||[]).filter((_,j)=>j!==i);
+              const total=calcWRTotal({...f,extraWorkItems:updated});
+              setF({...f,extraWorkItems:updated,totalAmount:String(total)});
+            }} className="text-red-400 hover:text-red-600 font-black ml-2 text-base">×</button>
+          </div>
+        ))}
+        {(f.extraWorkItems||[]).length>0&&<div className="text-xs font-black text-orange-700 text-right">Extra Work: {CURRENCY}{fmt((f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.cost)||0),0))}</div>}
       </SectionBox>
+
+      <SectionBox title="Extra Material" icon="🧱" color="purple">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Material Name" value={emItem.name} onChange={e=>setEmItem({...emItem,name:e.target.value})} placeholder="e.g. Cement" />
+          <Select label="Unit" value={emItem.unit} options={["nos","bag","kg","ton","litre","load","sqft"]} onChange={e=>setEmItem({...emItem,unit:e.target.value})} />
+          <Input label="Qty" type="number" value={emItem.qty} onChange={e=>setEmItem({...emItem,qty:e.target.value})} placeholder="0" />
+          <Input label={`Rate (${CURRENCY})`} type="number" value={emItem.rate} onChange={e=>setEmItem({...emItem,rate:e.target.value})} placeholder="0" />
+        </div>
+        {emItem.name&&emItem.qty&&<div className="bg-purple-50 rounded-xl px-3 py-2 text-xs flex justify-between"><span>Preview:</span><span className="font-black text-purple-700">{CURRENCY}{fmt(+(emItem.qty||0)*(+(emItem.rate)||0))}</span></div>}
+        <button onClick={()=>addEMItem(f,setF)} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add Extra Material</button>
+        {(f.extraMaterialItems||[]).map((e,i)=>(
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs">
+            <span className="font-bold flex-1">{e.name} ({e.qty} {e.unit})</span>
+            <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span>
+            <button onClick={()=>{
+              const updated=(f.extraMaterialItems||[]).filter((_,j)=>j!==i);
+              const total=calcWRTotal({...f,extraMaterialItems:updated});
+              setF({...f,extraMaterialItems:updated,totalAmount:String(total)});
+            }} className="text-red-400 hover:text-red-600 font-black ml-2 text-base">×</button>
+          </div>
+        ))}
+        {(f.extraMaterialItems||[]).length>0&&<div className="text-xs font-black text-purple-700 text-right">Materials: {CURRENCY}{fmt((f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
+      </SectionBox>
+
+      <SectionBox title="Total Summary" icon="💰" color="green">
+        <div className="space-y-1 text-sm">
+          <div className="flex justify-between"><span className="text-gray-500">Base ({f.totalArea||0} sqft × {CURRENCY}{f.workingCost||0})</span><span className="font-bold">{CURRENCY}{fmt(+(f.totalArea||0)*(+(f.workingCost||0)))}</span></div>
+          {(f.extraWorkItems||[]).length>0&&<div className="flex justify-between text-orange-600"><span>Extra Work</span><span className="font-bold">{CURRENCY}{fmt((f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.cost)||0),0))}</span></div>}
+          {(f.extraMaterialItems||[]).length>0&&<div className="flex justify-between text-purple-600"><span>Extra Materials</span><span className="font-bold">{CURRENCY}{fmt((f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+          <div className="flex justify-between border-t pt-1 font-black text-green-700 text-lg"><span>TOTAL</span><span>{CURRENCY}{fmt(+(f.totalAmount||0))}</span></div>
+        </div>
+      </SectionBox>
+
       <Textarea label="📝 Note" value={f.note} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any notes..." />
       <SectionBox title="Payments" icon="💳" color="purple">
         <PaymentFields f={f} setF={setF} />
       </SectionBox>
-      <SectionBox title="Material" icon="🧱" color="teal">
+      <SectionBox title="Material Supply" icon="🧱" color="teal">
         <Select label="Material Type" value={f.materialType||""} options={["",...MATERIAL_TYPES]} onChange={e=>setF({...f,materialType:e.target.value})} />
         <Textarea label="Material Supply Details" value={f.materialSupply} onChange={e=>setF({...f,materialSupply:e.target.value})} placeholder="Materials supplied..." />
       </SectionBox>
@@ -1121,7 +1210,7 @@ function Workers({ user }) {
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
-  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", rateType:"sqft", rateAmount:"" };
+  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site", workLocationType:"Outside Site", paymentType:"day", customPaymentType:"", rateAmount:"" };
   const [workerForm, setWorkerForm] = useState(emptyForm);
 
   const canEdit = user.role==="admin"||user.role==="user";
@@ -1242,7 +1331,7 @@ function Workers({ user }) {
         {workers.map(w=>(
           <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
             <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div>{w.rateAmount>0&&<div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount)}/{w.rateType||"sqft"}</div>}</div>
+              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="flex gap-1 mt-0.5"><Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge><Badge color="gray">{w.workLocationType||"Outside Site"}</Badge></div>{w.rateAmount>0&&<div className="text-xs text-amber-600 font-semibold mt-0.5">{CURRENCY}{fmt(w.rateAmount)} / {w.paymentType||"day"}</div>}</div>
               <span className="text-gray-300 text-xl">›</span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
@@ -1260,9 +1349,12 @@ function Workers({ user }) {
             <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
             <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
             <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
-            <SectionBox title="Work Rate" icon="💰" color="amber">
-              <Select label="Rate Type" value={workerForm.rateType} options={["sqft","sqm","day","hour","fixed"]} onChange={e=>setWorkerForm({...workerForm,rateType:e.target.value})} />
-              <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} placeholder="e.g. 25" />
+            <Select label="Worker Category" value={workerForm.workerCategory||"Site"} options={["Production","Site"]} onChange={e=>setWorkerForm({...workerForm,workerCategory:e.target.value})} />
+            <Select label="Work Location" value={workerForm.workLocationType||"Outside Site"} options={["Factory","Outside Site"]} onChange={e=>setWorkerForm({...workerForm,workLocationType:e.target.value})} />
+            <SectionBox title="Payment Type" icon="💰" color="amber">
+              <Select label="Payment Type" value={workerForm.paymentType||"day"} options={["Per Piece","Per Hour","Per Day","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value,customPaymentType:""})} />
+              {workerForm.paymentType==="Other"&&<Input label="Custom Payment Type" value={workerForm.customPaymentType||""} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load, per truck..." />}
+              <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} placeholder="e.g. 500" />
             </SectionBox>
             <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add Worker</button>
           </div>
@@ -1931,19 +2023,330 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
 }
 
 // ─── NAV CONFIG ───────────────────────────────────────────────────────────────
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+function Suppliers({ user }) {
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [search, setSearch] = useState("");
+  const MATERIAL_OPTIONS = ["Cement","Stone","Sand","Blocks","Chips","Steel","Tiles","Other"];
+  const emptyForm = { name:"", location:"", phone:"", materials:[], customMaterial:"", note:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(()=>{ api("GET","/suppliers").then(d=>{ setSuppliers(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
+
+  const toggleMaterial = (mat) => {
+    const mats = form.materials||[];
+    setForm({...form, materials: mats.includes(mat)?mats.filter(x=>x!==mat):[...mats,mat]});
+  };
+
+  const save = async () => {
+    if (!form.name) return;
+    const mats = [...(form.materials||[])];
+    if (form.customMaterial) mats.push(form.customMaterial);
+    const data = {...form, materials:mats};
+    if (editItem) {
+      await api("PUT",`/suppliers/${editItem._id}`,data);
+      setSuppliers(p=>p.map(x=>x._id===editItem._id?{...x,...data}:x));
+    } else {
+      const item = await api("POST","/suppliers",{...data,addedBy:user.name});
+      if (item._id) setSuppliers(p=>[...p,item]);
+    }
+    setModal(false); setEditItem(null); setForm(emptyForm);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete supplier?")) return;
+    await api("DELETE",`/suppliers/${id}`);
+    setSuppliers(p=>p.filter(x=>x._id!==id));
+  };
+
+  const openEdit = (s) => { setForm({...s,customMaterial:""}); setEditItem(s); setModal(true); };
+
+  const filtered = suppliers.filter(s=>!search||(s.name||"").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏪 Suppliers</h2>
+        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search supplier..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="space-y-3">
+        {filtered.length===0&&<EmptyState icon="🏪" text="No suppliers yet" />}
+        {filtered.map(s=>(
+          <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <div className="font-black text-gray-900">{s.name}</div>
+                <div className="text-xs text-gray-400">📍 {s.location||"—"} · 📞 {s.phone||"—"}</div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {(s.materials||[]).map(m=><Badge key={m} color="teal">{m}</Badge>)}
+                </div>
+              </div>
+              {(user.role==="admin"||user.role==="user")&&(
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={()=>openEdit(s)} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
+                  <button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
+                </div>
+              )}
+            </div>
+            {s.note&&<div className="text-xs text-gray-400 mt-1">{s.note}</div>}
+          </div>
+        ))}
+      </div>
+      {modal&&(
+        <Modal title={editItem?"Edit Supplier":"Add Supplier"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
+          <div className="space-y-3">
+            <Input label="Supplier Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Company or person name" />
+            <Input label="Location" value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City / area" />
+            <Input label="Phone Number" type="tel" value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="Contact number" />
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-2">Materials Supplied</label>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {MATERIAL_OPTIONS.filter(m=>m!=="Other").map(m=>(
+                  <button key={m} type="button" onClick={()=>toggleMaterial(m)} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(form.materials||[]).includes(m)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>{m}</button>
+                ))}
+              </div>
+              <Input label="Other / Custom Material" value={form.customMaterial||""} onChange={e=>setForm({...form,customMaterial:e.target.value})} placeholder="Type custom material name..." />
+            </div>
+            <Textarea label="Note" value={form.note||""} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Additional notes..." />
+            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save Changes":"Add Supplier"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── PRODUCTION SITE ──────────────────────────────────────────────────────────
+function ProductionSite({ user }) {
+  const [entries, setEntries] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [viewModal, setViewModal] = useState(null);
+  const [filterDate, setFilterDate] = useState(today());
+
+  useEffect(()=>{
+    Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
+      setEntries(Array.isArray(e)?e:[]);
+      setWorkers((Array.isArray(w)?w:[]).filter(x=>x.workerCategory==="Production"||!x.workerCategory));
+      setLoading(false);
+    });
+  },[]);
+
+  const emptyForm = { date:today(), workType:"", notes:"", attendance:[] };
+  const [form, setForm] = useState(emptyForm);
+
+  const initAttendance = () => {
+    const att = workers.map(w=>({ workerId:w._id, workerName:w.name, status:"present", workDone:"", workUnit:w.paymentType||"day", rate:w.rateAmount||0, total:0 }));
+    setForm({...emptyForm, date:today(), attendance:att});
+    setModal(true);
+  };
+
+  const updateAtt = (i, field, val) => {
+    const att = [...form.attendance];
+    att[i] = {...att[i],[field]:val};
+    if (field==="workDone"||field==="rate") {
+      att[i].total = +(att[i].workDone||0)*(+(att[i].rate||0));
+    }
+    setForm({...form,attendance:att});
+  };
+
+  const save = async () => {
+    const totalCost = form.attendance.reduce((a,x)=>a+(+(x.total)||0),0);
+    const item = await api("POST","/productionsite",{...form,totalCost,addedBy:user.name});
+    if (item._id) { setEntries(p=>[item,...p]); setModal(false); }
+  };
+
+  const filtered = entries.filter(e=>!filterDate||e.date===filterDate);
+  const presentCount = (e) => (e.attendance||[]).filter(a=>a.status==="present").length;
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
+        <button onClick={initAttendance} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Daily Entry</button>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Input label="" type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} />
+        <button onClick={()=>setFilterDate("")} className="text-xs text-gray-400 hover:text-gray-600 whitespace-nowrap">Clear</button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{entries.length}</div><div className="text-xs text-gray-400">Entries</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(entries.reduce((a,e)=>a+(+(e.totalCost)||0),0))}</div><div className="text-xs text-gray-400">Total Cost</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
+      </div>
+      <div className="space-y-3">
+        {filtered.length===0&&<EmptyState icon="🏭" text="No entries found" />}
+        {filtered.map(e=>(
+          <div key={e._id} onClick={()=>setViewModal(e)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-black text-gray-900">📅 {e.date}</div>
+                <div className="text-xs text-gray-400">👷 {presentCount(e)} present · By: {e.addedBy}</div>
+                {e.workType&&<div className="text-xs text-gray-500">{e.workType}</div>}
+              </div>
+              <div className="text-right">
+                <div className="font-black text-green-700">{CURRENCY}{fmt(e.totalCost||0)}</div>
+                <Badge color="green">{presentCount(e)}/{(e.attendance||[]).length}</Badge>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {modal&&(
+        <Modal title="Daily Production Entry" onClose={()=>setModal(false)} wide>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+              <Input label="Work Type" value={form.workType||""} onChange={e=>setForm({...form,workType:e.target.value})} placeholder="e.g. Block Making" />
+            </div>
+            <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+            <div className="text-xs font-bold text-gray-600 uppercase">👷 Worker Attendance & Work</div>
+            {form.attendance.length===0&&<div className="text-xs text-gray-400 text-center py-4">No production workers found. Add workers with category "Production" first.</div>}
+            {form.attendance.map((a,i)=>(
+              <div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-sm text-gray-900">{a.workerName}</div>
+                  <div className="flex gap-1">
+                    {["present","absent"].map(s=>(
+                      <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-2 py-1 rounded-lg text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s.charAt(0).toUpperCase()+s.slice(1)}</button>
+                    ))}
+                  </div>
+                </div>
+                {a.status==="present"&&(
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
+                    <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs/hrs" />
+                    <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
+                  </div>
+                )}
+                {a.status==="present"&&a.workDone>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
+              </div>
+            ))}
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <div className="text-xs text-gray-400">Total Cost</div>
+              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(form.attendance.reduce((a,x)=>a+(+(x.workDone||0)*(+(x.rate||0))),0))}</div>
+            </div>
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Entry</button>
+          </div>
+        </Modal>
+      )}
+      {viewModal&&(
+        <Modal title={`Production Entry — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.workType||""}</div>
+            {(viewModal.attendance||[]).map((a,i)=>(
+              <div key={i} className={`rounded-xl border p-3 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-sm">{a.workerName}</div>
+                  <Badge color={a.status==="present"?"green":"red"}>{a.status}</Badge>
+                </div>
+                {a.status==="present"&&a.workDone>0&&(
+                  <div className="text-xs text-gray-600 mt-1">{a.workDone} {a.workUnit} × {CURRENCY}{a.rate} = <span className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</span></div>
+                )}
+              </div>
+            ))}
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <div className="text-xs text-gray-400">Total Cost</div>
+              <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(viewModal.totalCost||0)}</div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ATTENDANCE REPORTS ───────────────────────────────────────────────────────
+function AttendanceReports({ user }) {
+  const [entries, setEntries] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedWorker, setSelectedWorker] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  useEffect(()=>{
+    Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
+      setEntries(Array.isArray(e)?e:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const allAttendance = entries.flatMap(e=>(e.attendance||[]).map(a=>({...a,date:e.date,entryId:e._id})));
+  const filtered = allAttendance.filter(a=>{
+    if (selectedWorker && a.workerName!==selectedWorker) return false;
+    if (fromDate && a.date<fromDate) return false;
+    if (toDate && a.date>toDate) return false;
+    return true;
+  });
+
+  const totalDays = new Set(filtered.filter(a=>a.status==="present").map(a=>a.date)).size;
+  const totalEarnings = filtered.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
+  const totalWork = filtered.reduce((a,x)=>a+(+(x.workDone)||0),0);
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📊 Attendance Reports</h2>
+      <div className="space-y-2">
+        <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" value={selectedWorker} onChange={e=>setSelectedWorker(e.target.value)}>
+          <option value="">All Workers</option>
+          {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+        </select>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(totalWork)}</div><div className="text-xs text-gray-400">Total Output</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarnings)}</div><div className="text-xs text-gray-400">Earnings</div></div>
+      </div>
+      <div className="space-y-2">
+        {filtered.length===0&&<EmptyState icon="📊" text="No attendance records found" />}
+        {filtered.filter(a=>a.status==="present").sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=>(
+          <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex items-center justify-between">
+            <div>
+              <div className="font-bold text-sm text-gray-900">{a.workerName}</div>
+              <div className="text-xs text-gray-400">📅 {a.date}</div>
+              {a.workDone>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}
+            </div>
+            <div className="text-right">
+              <div className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</div>
+              <Badge color="green">Present</Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 const NAV = {
   admin: [
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
+    { id:"productionsite", label:"Production Site", icon:"🏭" },
     { id:"masterdata", label:"Master Data", icon:"⚙️" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"workers", label:"Workers", icon:"👷" },
+    { id:"attendance", label:"Attendance", icon:"📊" },
     { id:"workerreport", label:"Site Report", icon:"📋" },
     { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
     { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"stock", label:"Stock", icon:"📦" },
     { id:"raw", label:"Raw Material", icon:"🧱" },
-    { id:"production", label:"Production", icon:"🏭" },
     { id:"sales", label:"Sales", icon:"💰" },
     { id:"users", label:"Users", icon:"👥" },
     { id:"reports", label:"Reports", icon:"📈" },
@@ -1953,15 +2356,18 @@ const NAV = {
     { id:"workerreport", label:"Site Report", icon:"📋" },
     { id:"dailyreport", label:"Daily Report", icon:"📝" },
     { id:"workers", label:"Workers", icon:"👷" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"workplan", label:"Work Planning", icon:"📅" },
   ],
   user: [
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
+    { id:"productionsite", label:"Production Site", icon:"🏭" },
+    { id:"attendance", label:"Attendance", icon:"📊" },
     { id:"workers", label:"Workers", icon:"👷" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
-    { id:"production", label:"Production", icon:"🏭" },
     { id:"stock", label:"Stock", icon:"📦" },
   ],
 };
@@ -2010,6 +2416,9 @@ export default function App() {
       case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
       case "masterdata": return <MasterData />;
       case "workers": return <Workers user={currentUser} />;
+      case "suppliers": return <Suppliers user={currentUser} />;
+      case "productionsite": return <ProductionSite user={currentUser} />;
+      case "attendance": return <AttendanceReports user={currentUser} />;
       case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
