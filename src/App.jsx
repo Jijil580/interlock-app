@@ -2263,70 +2263,428 @@ function ProductionSite({ user }) {
   );
 }
 
-// ─── ATTENDANCE REPORTS ───────────────────────────────────────────────────────
+// ─── ATTENDANCE MANAGEMENT ───────────────────────────────────────────────────
 function AttendanceReports({ user }) {
-  const [entries, setEntries] = useState([]);
   const [workers, setWorkers] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [siteReports, setSiteReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedWorker, setSelectedWorker] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [tab, setTab] = useState("mark"); // mark | reports | ledger
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [markDate, setMarkDate] = useState(today());
+  const [attendance, setAttendance] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [filterWorker, setFilterWorker] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
 
   useEffect(()=>{
-    Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
-      setEntries(Array.isArray(e)?e:[]);
+    Promise.all([
+      api("GET","/workers"),
+      api("GET","/productionsite"),
+      api("GET","/workerpayments"),
+      api("GET","/workerreport"),
+    ]).then(([w,e,p,sr])=>{
       setWorkers(Array.isArray(w)?w:[]);
+      setEntries(Array.isArray(e)?e:[]);
+      setPayments(Array.isArray(p)?p:[]);
+      setSiteReports(Array.isArray(sr)?sr:[]);
       setLoading(false);
     });
   },[]);
 
-  const allAttendance = entries.flatMap(e=>(e.attendance||[]).map(a=>({...a,date:e.date,entryId:e._id})));
-  const filtered = allAttendance.filter(a=>{
-    if (selectedWorker && a.workerName!==selectedWorker) return false;
-    if (fromDate && a.date<fromDate) return false;
-    if (toDate && a.date>toDate) return false;
-    return true;
-  });
+  // Init attendance for selected date
+  const initMark = () => {
+    // check if already marked
+    const existing = entries.find(e=>e.date===markDate);
+    if (existing) {
+      setAttendance(existing.attendance||[]);
+    } else {
+      setAttendance(workers.map(w=>({
+        workerId:w._id, workerName:w.name, status:"present",
+        workDone:"", workUnit:w.paymentType||"day", rate:+(w.rateAmount||0), total:0
+      })));
+    }
+  };
 
-  const totalDays = new Set(filtered.filter(a=>a.status==="present").map(a=>a.date)).size;
-  const totalEarnings = filtered.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
-  const totalWork = filtered.reduce((a,x)=>a+(+(x.workDone)||0),0);
+  useEffect(()=>{ if (workers.length>0) initMark(); },[markDate, workers]);
+
+  const updateAtt = (i, field, val) => {
+    const att = [...attendance];
+    att[i] = {...att[i],[field]:val};
+    if (field==="workDone"||field==="rate") att[i].total = +(att[i].workDone||0)*(+(att[i].rate||0));
+    setAttendance(att);
+  };
+
+  const saveAttendance = async () => {
+    setSaving(true);
+    const totalCost = attendance.reduce((a,x)=>a+(+(x.total)||0),0);
+    const existing = entries.find(e=>e.date===markDate);
+    let item;
+    if (existing) {
+      item = await api("PUT",`/productionsite/${existing._id}`,{attendance,totalCost});
+      setEntries(p=>p.map(x=>x._id===existing._id?{...x,attendance,totalCost}:x));
+    } else {
+      item = await api("POST","/productionsite",{date:markDate,attendance,totalCost,addedBy:user.name});
+      if (item._id) setEntries(p=>[item,...p]);
+    }
+    setSaving(false);
+    alert(`✅ Attendance saved for ${markDate}`);
+  };
+
+  // Worker ledger calculations
+  const getWorkerLedger = (wname) => {
+    const allAtt = entries.flatMap(e=>(e.attendance||[]).filter(a=>a.workerName===wname).map(a=>({...a,date:e.date})));
+    const presentDays = allAtt.filter(a=>a.status==="present");
+    const totalDays = presentDays.length;
+    const totalWork = presentDays.reduce((a,x)=>a+(+(x.workDone)||0),0);
+    const totalEarned = presentDays.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
+    const siteWork = siteReports.filter(r=>r.workerName===wname);
+    const totalPaid = payments.filter(p=>p.workerName===wname).reduce((a,p)=>a+(+(p.amount)||0),0);
+    const pending = Math.max(0, totalEarned - totalPaid);
+    return { allAtt:presentDays.sort((a,b)=>b.date.localeCompare(a.date)), totalDays, totalWork, totalEarned, totalPaid, pending, siteWork };
+  };
+
+  if (loading) return <Loader />;
+
+  // Worker Ledger View
+  if (selectedWorker) {
+    const w = selectedWorker;
+    const { allAtt, totalDays, totalWork, totalEarned, totalPaid, pending, siteWork } = getWorkerLedger(w.name);
+    const wPayments = payments.filter(p=>p.workerName===w.name).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
+          <h2 className="font-black text-gray-900">👷 {w.name}</h2>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{w.role}</div></div>
+            <div><div className="text-xs text-gray-400">Category</div><div className="font-bold">{w.workerCategory||"Site"}</div></div>
+            <div><div className="text-xs text-gray-400">Payment Type</div><div className="font-bold">{w.paymentType||"day"}</div></div>
+            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(w.rateAmount||0)}</div></div>
+            <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{w.phone||"—"}</div></div>
+            <div><div className="text-xs text-gray-400">Location</div><div className="font-bold">{w.workLocationType||"—"}</div></div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(totalWork)}</div><div className="text-xs text-gray-400">Total Output</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Total Earned</div></div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
+        </div>
+        <div className={`rounded-2xl border p-3 text-center ${pending>0?"bg-red-50 border-red-200":"bg-green-50 border-green-200"}`}>
+          <div className="text-xs text-gray-400">Pending Balance</div>
+          <div className={`text-2xl font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div>
+        </div>
+
+        <div className="flex gap-1">
+          {["attendance","payments","sites"].map(t=>(
+            <button key={t} onClick={()=>setTab(t)} className={`flex-1 py-1.5 rounded-xl text-xs font-bold ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+              {t==="attendance"?"📅 Attendance":t==="payments"?"💸 Payments":"🏗️ Sites"}
+            </button>
+          ))}
+        </div>
+
+        {tab==="attendance"&&(
+          <div className="space-y-2">
+            {allAtt.length===0&&<EmptyState icon="📅" text="No attendance records" />}
+            {allAtt.map((a,i)=>(
+              <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
+                <div><div className="font-bold text-sm">📅 {a.date}</div>{a.workDone>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div>
+                <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab==="payments"&&(
+          <div className="space-y-2">
+            {wPayments.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
+            {wPayments.map((p,i)=>(
+              <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
+                <div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div><div className="text-xs text-gray-400">By: {p.addedBy}</div></div>
+                <Badge color="green">Paid</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab==="sites"&&(
+          <div className="space-y-2">
+            {siteWork.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
+            {siteWork.map(r=>(
+              <div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between">
+                <div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div>
+                <div className="text-right"><div className="font-black text-teal-700">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📊 Attendance & Workers</h2>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {["mark","reports","ledger"].map(t=>(
+          <button key={t} onClick={()=>setTab(t)} className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-colors ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+            {t==="mark"?"✅ Mark Attendance":t==="reports"?"📊 Reports":"👷 Worker Ledger"}
+          </button>
+        ))}
+      </div>
+
+      {/* MARK ATTENDANCE */}
+      {tab==="mark"&&(
+        <div className="space-y-3">
+          <div className="bg-white rounded-2xl border shadow-sm p-4">
+            <Input label="Select Date" type="date" value={markDate} onChange={e=>setMarkDate(e.target.value)} />
+          </div>
+          {workers.length===0&&<EmptyState icon="👷" text="No workers found. Add workers first." />}
+          {attendance.map((a,i)=>(
+            <div key={i} className={`rounded-2xl border p-3 space-y-2 transition-colors ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-black text-gray-900">{a.workerName}</div>
+                  <div className="text-xs text-gray-400">{workers.find(w=>w.name===a.workerName)?.role||""} · {a.workUnit}</div>
+                </div>
+                <div className="flex gap-1">
+                  {["present","absent"].map(s=>(
+                    <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>
+                      {s==="present"?"✓ Present":"✗ Absent"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {a.status==="present"&&(
+                <div className="grid grid-cols-3 gap-2">
+                  <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
+                  <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs/hrs/sqft" />
+                  <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
+                </div>
+              )}
+              {a.status==="present"&&+(a.workDone||0)>0&&(
+                <div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>
+              )}
+            </div>
+          ))}
+          {workers.length>0&&(
+            <button onClick={saveAttendance} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-60">
+              {saving?"Saving...":"💾 Save Attendance"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* REPORTS */}
+      {tab==="reports"&&(
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" value={filterWorker} onChange={e=>setFilterWorker(e.target.value)}>
+              <option value="">All Workers</option>
+              {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="From" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
+              <Input label="To" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
+            </div>
+          </div>
+          {(()=>{
+            const allAtt = entries.flatMap(e=>(e.attendance||[]).map(a=>({...a,date:e.date})));
+            const filtered = allAtt.filter(a=>{
+              if (filterWorker && a.workerName!==filterWorker) return false;
+              if (filterFrom && a.date<filterFrom) return false;
+              if (filterTo && a.date>filterTo) return false;
+              return true;
+            });
+            const present = filtered.filter(a=>a.status==="present");
+            const totalEarned = present.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
+            return (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(present.map(a=>a.date)).size}</div><div className="text-xs text-gray-400">Work Days</div></div>
+                  <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(present.reduce((a,x)=>a+(+(x.workDone)||0),0))}</div><div className="text-xs text-gray-400">Total Output</div></div>
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Earnings</div></div>
+                </div>
+                {present.sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=>(
+                  <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
+                    <div><div className="font-bold text-sm">{a.workerName}</div><div className="text-xs text-gray-400">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div>
+                    <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(a.total)||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div>
+                  </div>
+                ))}
+                {present.length===0&&<EmptyState icon="📊" text="No records found" />}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* WORKER LEDGER */}
+      {tab==="ledger"&&(
+        <div className="space-y-3">
+          {workers.length===0&&<EmptyState icon="👷" text="No workers found" />}
+          {workers.map(w=>{
+            const {totalDays,totalEarned,totalPaid,pending} = getWorkerLedger(w.name);
+            return (
+              <div key={w._id} onClick={()=>{setSelectedWorker(w);setTab("attendance");}}
+                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-black text-gray-900">{w.name}</div>
+                    <div className="text-xs text-gray-400">{w.role} · <Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge></div>
+                    <div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div>
+                  </div>
+                  <span className="text-gray-300 text-xl">›</span>
+                </div>
+                <div className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-gray-400">Days</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-gray-400">Earned</div></div>
+                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className={`rounded-lg p-1.5 text-center ${pending>0?"bg-red-50":"bg-green-50"}`}><div className={`font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SUPERVISOR WORK VIEW (Enhanced) ─────────────────────────────────────────
+function SupervisorWorkView({ user }) {
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [viewItem, setViewItem] = useState(null);
+  const [viewDailyModal, setViewDailyModal] = useState(null);
+  const [filter, setFilter] = useState("all");
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks((Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name||user.role==="admin"));
+      setDailyReports((Array.isArray(dr)?dr:[]).filter(d=>d.addedBy===user.name||user.role==="admin"));
+      setLoading(false);
+    });
+  },[]);
+
+  const approveSite = async (id) => {
+    await api("PUT",`/sitework/${id}`,{status:"completed",paymentStatus:"paid"});
+    setSiteWorks(p=>p.map(x=>x._id===id?{...x,status:"completed"}:x));
+    if (viewItem?._id===id) setViewItem(v=>({...v,status:"completed"}));
+  };
+
+  const filtered = siteWorks.filter(s=>filter==="all"||s.status===filter);
+  const statusColor = {running:"amber",completed:"green",pending:"gray",cancelled:"red"};
+
+  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
+  const sections = [{key:"newSite",icon:"🆕",label:"New Site",color:"blue"},{key:"runningSite",icon:"🔄",label:"Running",color:"teal"},{key:"workersDetail",icon:"👷",label:"Workers",color:"amber"},{key:"materialSupply",icon:"🧱",label:"Materials",color:"orange"},{key:"complaints",icon:"⚠️",label:"Complaints",color:"red"},{key:"payments",icon:"💰",label:"Payments",color:"green"},{key:"dayNote",icon:"📝",label:"Day Note",color:"gray"},{key:"expenses",icon:"💸",label:"Expenses",color:"purple"}];
 
   if (loading) return <Loader />;
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📊 Attendance Reports</h2>
-      <div className="space-y-2">
-        <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" value={selectedWorker} onChange={e=>setSelectedWorker(e.target.value)}>
-          <option value="">All Workers</option>
-          {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-        </select>
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
-          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
-        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(totalWork)}</div><div className="text-xs text-gray-400">Total Output</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarnings)}</div><div className="text-xs text-gray-400">Earnings</div></div>
-      </div>
-      <div className="space-y-2">
-        {filtered.length===0&&<EmptyState icon="📊" text="No attendance records found" />}
-        {filtered.filter(a=>a.status==="present").sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=>(
-          <div key={i} className="bg-white rounded-xl border border-gray-100 shadow-sm p-3 flex items-center justify-between">
-            <div>
-              <div className="font-bold text-sm text-gray-900">{a.workerName}</div>
-              <div className="text-xs text-gray-400">📅 {a.date}</div>
-              {a.workDone>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}
-            </div>
-            <div className="text-right">
-              <div className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</div>
-              <Badge color="green">Present</Badge>
-            </div>
-          </div>
+      <h2 className="text-xl font-black text-gray-900">📋 {user.role==="admin"?"All Submitted Work":"My Submitted Work"}</h2>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {["all","running","pending","completed"].map(s=>(
+          <button key={s} onClick={()=>setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold ${filter===s?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?siteWorks.length:siteWorks.filter(x=>x.status===s).length})
+          </button>
         ))}
       </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-2 text-center"><div className="font-black text-gray-700">{siteWorks.filter(s=>s.status==="pending").length}</div><div className="text-xs text-gray-400">Pending</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-xs text-gray-400">Completed</div></div>
+      </div>
+      <div className="space-y-3">
+        {filtered.length===0&&<EmptyState icon="📋" text="No submitted work" />}
+        {filtered.map(s=>{
+          const relatedReports = dailyReports.filter(d=>d.addedBy===s.addedBy);
+          return (
+            <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 cursor-pointer" onClick={()=>setViewItem(s)}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-gray-900">{s.customerName}</span>
+                    <Badge color={statusColor[s.status]||"gray"}>{s.status||"pending"}</Badge>
+                    {s.status!=="completed"&&user.role==="admin"&&<Badge color="red">Pending Approval</Badge>}
+                  </div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate}</div>
+                  <div className="text-xs text-gray-400">By: {s.addedBy||"—"} · 🧱 {s.interlockType||"—"}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.totalCost||s.totalAmount)||0)}</div>
+                  <div className="text-xs text-red-500">{+(s.pendingAmount||0)>0?`Pending: ${CURRENCY}${fmt(s.pendingAmount)}`:""}</div>
+                </div>
+              </div>
+              <div className="mt-2 flex gap-1 flex-wrap">
+                <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
+                {relatedReports.length>0&&<button onClick={()=>setViewDailyModal(relatedReports[0])} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">📝 Daily Reports ({relatedReports.length})</button>}
+                {user.role==="admin"&&s.status!=="completed"&&<button onClick={()=>approveSite(s._id)} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-1.5 rounded-xl text-xs font-bold">✅ Approve</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {viewItem&&(
+        <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
+              <Badge color={viewItem.paymentStatus==="paid"?"green":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
+              {user.role==="admin"&&viewItem.status!=="completed"&&<button onClick={()=>approveSite(viewItem._id)} className="ml-auto bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold">✅ Approve & Complete</button>}
+            </div>
+            <SectionBox title="Customer" icon="👤" color="blue">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewItem.customerName||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewItem.phone||"—"}</div></div>
+                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewItem.siteLocation||"—"}</div></div>
+              </div>
+            </SectionBox>
+            <SectionBox title="Work Details" icon="🧱" color="amber">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewItem.interlockType||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewItem.workSize} {viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewItem.ratePerUnit}/{viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
+              </div>
+            </SectionBox>
+            {(viewItem.extraWork||[]).length>0&&(
+              <SectionBox title="Extra Work" icon="➕" color="orange">
+                {(viewItem.extraWork||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty||1}×)</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+              </SectionBox>
+            )}
+            {(viewItem.extraMaterials||[]).length>0&&(
+              <SectionBox title="Extra Materials" icon="🧱" color="purple">
+                {(viewItem.extraMaterials||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty} {e.unit})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+              </SectionBox>
+            )}
+            <SectionBox title="Costing" icon="💰" color="green">
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between"><span>Base</span><span>{CURRENCY}{fmt(+(viewItem.workSize||0)*(+(viewItem.ratePerUnit||0)))}</span></div>
+                <div className="flex justify-between font-black text-green-700 border-t pt-1"><span>TOTAL</span><span>{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
+                <div className="flex justify-between"><span>Advance</span><span>{CURRENCY}{fmt(viewItem.advancePaid||0)}</span></div>
+                <div className="flex justify-between text-red-600 font-black"><span>Pending</span><span>{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
+              </div>
+            </SectionBox>
+          </div>
+        </Modal>
+      )}
+      {viewDailyModal&&(
+        <Modal title="Daily Reports" onClose={()=>setViewDailyModal(null)}>
+          <div className="space-y-3">
+            {dailyReports.filter(d=>d.addedBy===viewDailyModal.addedBy).map(r=>(
+              <div key={r._id} className="bg-white rounded-xl border p-3">
+                <div className="font-black text-gray-900">📅 {r.date}</div>
+                {sections.filter(s=>r[s.key]).map(s=>{const c=colorMap[s.color];return <div key={s.key} className={`${c.bg} border ${c.border} rounded-lg p-2 mt-1`}><div className={`text-xs font-bold ${c.label}`}>{s.icon} {s.label}</div><div className="text-xs text-gray-700">{r[s.key]}</div></div>;})}
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -2343,6 +2701,7 @@ const NAV = {
     { id:"attendance", label:"Attendance", icon:"📊" },
     { id:"workerreport", label:"Site Report", icon:"📋" },
     { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
+    { id:"supervisorwork", label:"Sup. Work", icon:"📋" },
     { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"stock", label:"Stock", icon:"📦" },
@@ -2353,8 +2712,9 @@ const NAV = {
   ],
   supervisor: [
     { id:"sitework", label:"Site Work", icon:"🏗️" },
-    { id:"workerreport", label:"Site Report", icon:"📋" },
-    { id:"dailyreport", label:"Daily Report", icon:"📝" },
+    { id:"supervisorwork", label:"Submitted Work", icon:"📋" },
+    { id:"workerreport", label:"Site Report", icon:"📝" },
+    { id:"dailyreport", label:"Daily Report", icon:"📋" },
     { id:"workers", label:"Workers", icon:"👷" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
@@ -2419,6 +2779,7 @@ export default function App() {
       case "suppliers": return <Suppliers user={currentUser} />;
       case "productionsite": return <ProductionSite user={currentUser} />;
       case "attendance": return <AttendanceReports user={currentUser} />;
+      case "supervisorwork": return <SupervisorWorkView user={currentUser} />;
       case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
