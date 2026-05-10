@@ -1070,1353 +1070,179 @@ function WorkerReport({ user }) {
 
 // ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
 function DailyReport({ user }) {
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [workers, setWorkers] = useState([]);
   const [reports, setReports] = useState([]);
-  const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const emptyForm = { date:today(), newSite:"", runningSite:"", workersDetail:"", materialSupply:"", complaints:"", payments:"", dayNote:"", expenses:"", workerPayments:[] };
-  const [form, setForm] = useState(emptyForm);
-  const [wpForm, setWpForm] = useState({ workerName:"", amount:"", date:today(), note:"" });
+  const [activeTab, setActiveTab] = useState("running");
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [addReportModal, setAddReportModal] = useState(false);
+  const [viewReportModal, setViewReportModal] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  const emptyReport = {
+    siteName:"", siteId:"", date:today(), siteStatus:"running",
+    workersCount:"", totalArea:"", completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"",
+    materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"", materialRemarks:"",
+    extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"", extraWorkRemarks:"",
+    payments:[], complaints:"", actionTaken:"", complaintRemarks:"",
+  };
+  const [form, setForm] = useState(emptyReport);
+  const [payForm, setPayForm] = useState({ type:"Worker Payment", mode:"Cash", amount:"", paidTo:"", remarks:"" });
 
   useEffect(()=>{
-    Promise.all([api("GET","/dailyreport"),api("GET","/workers")]).then(([d,w])=>{
-      setReports(Array.isArray(d)?d:[]);
+    Promise.all([api("GET","/sitework"),api("GET","/workers"),api("GET","/dailyreport")]).then(([sw,w,dr])=>{
+      const mySites = (Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name||user.role==="admin");
+      setSiteWorks(mySites);
       setWorkers(Array.isArray(w)?w:[]);
+      setReports(Array.isArray(dr)?dr:[]);
       setLoading(false);
     });
   },[]);
 
-  const addWP = () => {
-    if (!wpForm.workerName||!wpForm.amount) return;
-    setForm(f=>({...f,workerPayments:[...(f.workerPayments||[]),{...wpForm,amount:+wpForm.amount}]}));
-    setWpForm({workerName:"",amount:"",date:today(),note:""});
+  const addPayment = () => {
+    if (!payForm.amount) return;
+    setForm(f=>({...f,payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount}]}));
+    setPayForm({type:"Worker Payment",mode:"Cash",amount:"",paidTo:"",remarks:""});
   };
 
   const save = async () => {
-    if (!form.date) return;
-    if (form.workerPayments?.length>0) {
-      for (const wp of form.workerPayments) await api("POST","/workerpayments",{...wp,addedBy:user.name,reportDate:form.date});
+    if (!form.siteName||!form.date) return;
+    // Save payments to workerpayments collection
+    for (const p of (form.payments||[])) {
+      if (p.type==="Worker Payment") {
+        await api("POST","/workerpayments",{workerName:p.paidTo,amount:p.amount,date:form.date,note:p.remarks,addedBy:user.name,reportDate:form.date});
+      }
     }
-    const item = await api("POST","/dailyreport",{...form,addedBy:user.name});
-    setReports(p=>[item,...p].sort((a,b)=>(b.date||"").localeCompare(a.date||"")));
-    setModal(false); setForm(emptyForm);
+    const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
+    const item = await api("POST","/dailyreport",{...form,totalPayments,addedBy:user.name});
+    setReports(p=>[item,...p]);
+    setAddReportModal(false);
+    setForm(emptyReport);
   };
 
-  const sections = [
-    {key:"newSite",icon:"🆕",label:"New Site",color:"blue"},{key:"runningSite",icon:"🔄",label:"Running Sites",color:"teal"},
-    {key:"workersDetail",icon:"👷",label:"Workers Detail",color:"amber"},{key:"materialSupply",icon:"🧱",label:"Material Supply",color:"orange"},
-    {key:"complaints",icon:"⚠️",label:"Complaints",color:"red"},{key:"payments",icon:"💰",label:"Payments",color:"green"},
-    {key:"dayNote",icon:"📝",label:"Day Note",color:"gray"},{key:"expenses",icon:"💸",label:"Expenses",color:"purple"},
+  const openAddReport = (site) => {
+    setForm({...emptyReport, siteName:site.customerName, siteId:site._id, interlockType:site.interlockType||"", totalArea:site.workSize||"", siteStatus:site.status||"running"});
+    setAddReportModal(true);
+  };
+
+  const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+
+  const planned = siteWorks.filter(s=>s.status==="pending");
+  const running = siteWorks.filter(s=>s.status==="running");
+  const completed = siteWorks.filter(s=>s.status==="completed");
+
+  const tabs = [
+    {id:"planned",label:"Planned",icon:"📋",count:planned.length,color:"gray"},
+    {id:"running",label:"Running",icon:"🔄",count:running.length,color:"amber"},
+    {id:"completed",label:"Completed",icon:"✅",count:completed.length,color:"green"},
   ];
-  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📋 Supervisor Report</h2>
-        <button onClick={()=>{setForm(emptyForm);setWpForm({workerName:"",amount:"",date:today(),note:""});setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
-      </div>
-      <div className="space-y-3">
-        {reports.length===0&&<EmptyState icon="📋" text="No reports yet" />}
-        {reports.map(r=>{
-          const filled=sections.filter(s=>r[s.key]);
-          const hasWP=r.workerPayments?.length>0;
-          return (
-            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div onClick={()=>setViewModal(r)} className="flex-1 cursor-pointer">
-                  <div className="font-black text-gray-900">📅 {r.date}</div>
-                  <div className="text-xs text-gray-400">By: {r.addedBy}{hasWP?` · 💸 ${r.workerPayments.length} payment${r.workerPayments.length>1?"s":""}`:""}</div>
-                </div>
-                <button onClick={()=>setViewModal(r)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">View</button>
-              </div>
-              <div className="mt-2 flex gap-1 flex-wrap">
-                {hasWP&&<span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-green-50 text-green-700 border border-green-200">💸 Payments</span>}
-                {filled.map(s=>{const c=colorMap[s.color];return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full font-semibold ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;})}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {modal&&(
-        <Modal title="Daily Report" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <SectionBox title="Worker Payments" icon="💸" color="green">
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="text-xs font-semibold text-gray-600 mb-1 block">Worker</label>
-                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" value={wpForm.workerName} onChange={e=>setWpForm({...wpForm,workerName:e.target.value})}>
-                    <option value="">Select</option>{workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-                  </select>
-                </div>
-                <Input label={`Amount(${CURRENCY})`} type="number" value={wpForm.amount} onChange={e=>setWpForm({...wpForm,amount:e.target.value})} />
-                <Input label="Date" type="date" value={wpForm.date} onChange={e=>setWpForm({...wpForm,date:e.target.value})} />
-                <Input label="Note" value={wpForm.note} onChange={e=>setWpForm({...wpForm,note:e.target.value})} placeholder="Optional" />
-              </div>
-              <button onClick={addWP} className="w-full bg-green-500 text-white py-1.5 rounded-xl text-xs font-bold hover:bg-green-600 mt-1">+ Add Payment</button>
-              {form.workerPayments?.map((wp,i)=>(
-                <div key={i} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-green-200 text-xs">
-                  <span><span className="font-bold">{wp.workerName}</span> · {wp.date} · <span className="font-black text-green-700">{CURRENCY}{wp.amount}</span>{wp.note?` · ${wp.note}`:""}</span>
-                  <button onClick={()=>setForm(f=>({...f,workerPayments:f.workerPayments.filter((_,j)=>j!==i)}))} className="text-red-400 hover:text-red-600 ml-2">✕</button>
-                </div>
-              ))}
-            </SectionBox>
-            {sections.map(s=>{const c=colorMap[s.color];return(
-              <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
-                <div className={`text-xs font-bold ${c.label} mb-1.5`}>{s.icon} {s.label}</div>
-                <textarea rows={3} value={form[s.key]} onChange={e=>setForm({...form,[s.key]:e.target.value})} placeholder={`Write ${s.label.toLowerCase()} here...`} className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-400" />
-              </div>
-            );})}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title={`Report — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
-            {viewModal.workerPayments?.length>0&&(
-              <SectionBox title="Worker Payments" icon="💸" color="green">
-                {viewModal.workerPayments.map((wp,i)=>(
-                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
-                    <span><span className="font-bold">{wp.workerName}</span>{wp.note?` — ${wp.note}`:""}</span>
-                    <span><span className="text-gray-400">{wp.date}</span> · <span className="font-black text-green-700">{CURRENCY}{fmt(wp.amount)}</span></span>
-                  </div>
-                ))}
-                <div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt(viewModal.workerPayments.reduce((a,w)=>a+(+w.amount||0),0))}</div>
-              </SectionBox>
-            )}
-            {sections.filter(s=>viewModal[s.key]).map(s=>{const c=colorMap[s.color];return(
-              <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}>
-                <div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div>
-                <div className="text-sm text-gray-800 whitespace-pre-wrap">{viewModal[s.key]}</div>
-              </div>
-            );})}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-
-function Workers({ user }) {
-  const [workers, setWorkers] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [siteReports, setSiteReports] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [addModal, setAddModal] = useState(false);
-  const [editModal, setEditModal] = useState(null);
-  const [selectedWorker, setSelectedWorker] = useState(null);
-  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site", workLocationType:"Outside Site", paymentType:"day", customPaymentType:"", rateAmount:"" };
-  const [workerForm, setWorkerForm] = useState(emptyForm);
-
-  const canEdit = user.role==="admin"||user.role==="user";
-
-  useEffect(()=>{
-    Promise.all([api("GET","/workers"),api("GET","/workerpayments"),api("GET","/workerreport")]).then(([w,p,sr])=>{
-      setWorkers(Array.isArray(w)?w:[]);
-      setPayments(Array.isArray(p)?p:[]);
-      setSiteReports(Array.isArray(sr)?sr:[]);
-      setLoading(false);
-    });
-  },[]);
-
-  const addWorker = async () => {
-    if (!workerForm.name) return;
-    const w = await api("POST","/workers",{...workerForm,rateAmount:+workerForm.rateAmount||0,addedBy:user.name});
-    if (w._id) { setWorkers(p=>[...p,w]); setAddModal(false); setWorkerForm(emptyForm); }
-  };
-
-  const saveEdit = async () => {
-    await api("PUT",`/workers/${editModal._id}`,editModal);
-    setWorkers(p=>p.map(x=>x._id===editModal._id?{...x,...editModal}:x));
-    if (selectedWorker?._id===editModal._id) setSelectedWorker({...selectedWorker,...editModal});
-    setEditModal(null);
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete worker?")) return;
-    await api("DELETE",`/workers/${id}`);
-    setWorkers(p=>p.filter(x=>x._id!==id));
-    setSelectedWorker(null);
-  };
-
-  const wPayments = (n) => payments.filter(p=>p.workerName===n).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-  const totalPaid = (n) => wPayments(n).reduce((a,p)=>a+(+(p.amount)||0),0);
-  const totalSqft = (n) => siteReports.filter(r=>r.workerName===n).reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0);
-  const totalDays = (n) => new Set(siteReports.filter(r=>r.workerName===n).map(r=>r.startingDate).filter(Boolean)).size;
 
   if (loading) return <Loader />;
 
-  if (selectedWorker) {
-    const wp = wPayments(selectedWorker.name);
-    const sqft = totalSqft(selectedWorker.name);
-    const days = totalDays(selectedWorker.name);
-    const paid = totalPaid(selectedWorker.name);
-    const sites = siteReports.filter(r=>r.workerName===selectedWorker.name);
+  // Site Detail View
+  if (selectedSite) {
+    const siteReports = getSiteReports(selectedSite).sort((a,b)=>b.date.localeCompare(a.date));
+    const totalCompleted = siteReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalPayments = siteReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const allPayments = siteReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allMaterials = siteReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtraWork = siteReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+    const allComplaints = siteReports.filter(r=>r.complaints).map(r=>({complaint:r.complaints,action:r.actionTaken,date:r.date}));
+
+    const dateReport = selectedDate ? siteReports.find(r=>r.date===selectedDate) : null;
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
-          {canEdit&&<div className="flex gap-1"><button onClick={()=>setEditModal({...selectedWorker})} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">✏️ Edit</button><button onClick={()=>del(selectedWorker._id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          <button onClick={()=>openAddReport(selectedSite)} className="bg-amber-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-600">+ Daily Report</button>
         </div>
+
         <div className="bg-white rounded-2xl border shadow-sm p-4">
-          <div className="font-black text-xl text-gray-900 mb-2">👷 {selectedWorker.name}</div>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{selectedWorker.role}</div></div>
-            <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{selectedWorker.phone||"—"}</div></div>
-            <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold">{selectedWorker.address||"—"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate Type</div><div className="font-bold capitalize">{selectedWorker.rateType||"sqft"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(selectedWorker.rateAmount||0)}/{selectedWorker.rateType||"sqft"}</div></div>
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="font-black text-xl text-gray-900">{selectedSite.customerName}</div>
+              <div className="text-sm text-gray-500">📍 {selectedSite.siteLocation||"—"}</div>
+              <div className="text-xs text-gray-400">📞 {selectedSite.phone||"—"} · 🧱 {selectedSite.interlockType||"—"}</div>
+            </div>
+            <Badge color={selectedSite.status==="completed"?"green":selectedSite.status==="running"?"amber":"gray"}>{selectedSite.status||"pending"}</Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{selectedSite.workSize||"—"} sqft</div><div className="text-gray-400">Total Area</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{totalCompleted} sqft</div><div className="text-gray-400">Completed</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{days}</div><div className="text-xs text-gray-400">Work Days</div></div>
-          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(sqft)}</div><div className="text-xs text-gray-400">sqft</div></div>
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+
+        {/* Date selector */}
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 Filter by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+            <option value="">All Dates ({siteReports.length} reports)</option>
+            {siteReports.map(r=><option key={r._id} value={r.date}>{r.date}</option>)}
+          </select>
         </div>
-        <div>
-          <div className="font-black text-gray-800 mb-2">💸 Payment History</div>
-          {wp.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
-          {wp.map((p,i)=>(
-            <div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between items-center">
-              <div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div><div className="text-xs text-gray-400">By: {p.addedBy}</div></div>
-              <Badge color="green">Paid</Badge>
-            </div>
-          ))}
-        </div>
-        <div>
-          <div className="font-black text-gray-800 mb-2">🏗️ Site Work History</div>
-          {sites.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
-          {sites.map(r=>(
-            <div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between">
-              <div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div>
-              <div className="text-right"><div className="font-black text-teal-700 text-sm">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div>
-            </div>
-          ))}
-        </div>
-        {editModal&&<Modal title="Edit Worker" onClose={()=>setEditModal(null)}>
+
+        {/* Date-specific view */}
+        {dateReport ? (
           <div className="space-y-3">
-            <Input label="Name" value={editModal.name||""} onChange={e=>setEditModal({...editModal,name:e.target.value})} />
-            <Input label="Phone" type="tel" value={editModal.phone||""} onChange={e=>setEditModal({...editModal,phone:e.target.value})} />
-            <Input label="Address" value={editModal.address||""} onChange={e=>setEditModal({...editModal,address:e.target.value})} />
-            <Select label="Role" value={editModal.role||"Labourer"} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setEditModal({...editModal,role:e.target.value})} />
-            <SectionBox title="Work Rate" icon="💰" color="amber">
-              <Select label="Rate Type" value={editModal.rateType||"sqft"} options={["sqft","sqm","day","hour","fixed"]} onChange={e=>setEditModal({...editModal,rateType:e.target.value})} />
-              <Input label={`Rate (${CURRENCY})`} type="number" value={editModal.rateAmount||""} onChange={e=>setEditModal({...editModal,rateAmount:+e.target.value})} />
-            </SectionBox>
-            <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-2.5 rounded-xl font-bold hover:bg-blue-600">Save Changes</button>
-          </div>
-        </Modal>}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">👷 Workers</h2>
-        {canEdit&&<button onClick={()=>setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center shadow-sm"><div className="font-black">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid</div></div>
-        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))} sqft</div><div className="text-xs text-gray-400">Work Done</div></div>
-      </div>
-      <div className="space-y-3">
-        {workers.length===0&&<EmptyState icon="👷" text="No workers added yet" />}
-        {workers.map(w=>(
-          <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-            <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="flex gap-1 mt-0.5"><Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge><Badge color="gray">{w.workLocationType||"Outside Site"}</Badge></div>{w.rateAmount>0&&<div className="text-xs text-amber-600 font-semibold mt-0.5">{CURRENCY}{fmt(w.rateAmount)} / {w.paymentType||"day"}</div>}</div>
-              <span className="text-gray-300 text-xl">›</span>
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Activity on {selectedDate}</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||"0"}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||"0"} sqft</div><div className="text-gray-400">Done Today</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
             </div>
-            <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-              <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays(w.name)}</div><div className="text-gray-400">Days</div></div>
-              <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{fmt(totalSqft(w.name))} sqft</div><div className="text-gray-400">Work</div></div>
-              <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid(w.name))}</div><div className="text-gray-400">Paid</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {addModal&&(
-        <Modal title="Add Worker" onClose={()=>setAddModal(false)}>
-          <div className="space-y-3">
-            <Input label="Worker Name *" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm,name:e.target.value})} placeholder="Full name" />
-            <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
-            <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
-            <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
-            <Select label="Worker Category" value={workerForm.workerCategory||"Site"} options={["Production","Site"]} onChange={e=>setWorkerForm({...workerForm,workerCategory:e.target.value})} />
-            <Select label="Work Location" value={workerForm.workLocationType||"Outside Site"} options={["Factory","Outside Site"]} onChange={e=>setWorkerForm({...workerForm,workLocationType:e.target.value})} />
-            <SectionBox title="Payment Type" icon="💰" color="amber">
-              <Select label="Payment Type" value={workerForm.paymentType||"day"} options={["Per Piece","Per Hour","Per Day","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value,customPaymentType:""})} />
-              {workerForm.paymentType==="Other"&&<Input label="Custom Payment Type" value={workerForm.customPaymentType||""} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load, per truck..." />}
-              <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} placeholder="e.g. 500" />
-            </SectionBox>
-            <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add Worker</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── PURCHASES ────────────────────────────────────────────────────────────────
-function Purchases({ user }) {
-  const [purchases, setPurchases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const [search, setSearch] = useState("");
-
-  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", paymentMode:"Cash", vehicleNumber:"", vehicleType:"", driverName:"", driverPhone:"", deliveryAddress:"", note:"" };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(()=>{ api("GET","/purchases").then(d=>{ setPurchases(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
-
-  const save = async () => {
-    if (!form.supplierName||!form.itemName) return;
-    const total = +form.quantity*(+form.unitPrice)||+form.totalAmount||0;
-    const item = await api("POST","/purchases",{...form,totalAmount:total,addedBy:user.name});
-    if (item._id) { setPurchases(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  const filtered = purchases.filter(p=>!search||(p.supplierName||"").toLowerCase().includes(search.toLowerCase())||(p.itemName||"").toLowerCase().includes(search.toLowerCase()));
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search supplier / item..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{purchases.length}</div><div className="text-xs text-gray-400">Total</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(purchases.reduce((a,p)=>a+(+(p.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Spent</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(purchases.map(p=>p.supplierName).filter(Boolean)).size}</div><div className="text-xs text-gray-400">Suppliers</div></div>
-      </div>
-      <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🛒" text="No purchases yet" />}
-        {filtered.map(p=>(
-          <div key={p._id} onClick={()=>setViewModal(p)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 flex-wrap"><span className="font-black text-gray-900">{p.itemName}</span><Badge color={p.itemType==="Material"?"teal":"blue"}>{p.itemType}</Badge></div>
-                <div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div>
-                {p.vehicleNumber&&<div className="text-xs text-gray-400">🚛 {p.vehicleNumber}{p.vehicleType?` (${p.vehicleType})`:""}</div>}
-              </div>
-              <div className="text-right shrink-0"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount)||0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Add Purchase" onClose={()=>setModal(false)} wide>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <SectionBox title="Supplier Details" icon="🏪" color="blue">
-              <Input label="Supplier Name *" value={form.supplierName} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Company / Person" />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Phone" type="tel" value={form.supplierPhone} onChange={e=>setForm({...form,supplierPhone:e.target.value})} />
-                <Input label="Address" value={form.supplierAddress} onChange={e=>setForm({...form,supplierAddress:e.target.value})} />
-              </div>
-            </SectionBox>
-            <SectionBox title="Item Details" icon="📦" color="amber">
-              <Input label="Item Name *" value={form.itemName} onChange={e=>setForm({...form,itemName:e.target.value})} placeholder="What was purchased" />
-              <Select label="Item Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e=>setForm({...form,itemType:e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,totalAmount:String(+e.target.value*(+(form.unitPrice)||0))})} />
-                <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-                <Input label={`Unit Price(${CURRENCY})`} type="number" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:e.target.value,totalAmount:String(+e.target.value*(+(form.quantity)||0))})} />
-                <Input label={`Total(${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value})} />
-              </div>
-            </SectionBox>
-            <SectionBox title="Vehicle Details (Optional)" icon="🚛" color="gray">
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Vehicle No" value={form.vehicleNumber} onChange={e=>setForm({...form,vehicleNumber:e.target.value})} placeholder="KL 01 AB 1234" />
-                <Select label="Type" value={form.vehicleType} options={["","Lorry","Tipper","Van","Auto","Other"]} onChange={e=>setForm({...form,vehicleType:e.target.value})} />
-                <Input label="Driver Name" value={form.driverName} onChange={e=>setForm({...form,driverName:e.target.value})} />
-                <Input label="Driver Phone" type="tel" value={form.driverPhone} onChange={e=>setForm({...form,driverPhone:e.target.value})} />
-              </div>
-              <Input label="Delivery Address" value={form.deliveryAddress} onChange={e=>setForm({...form,deliveryAddress:e.target.value})} />
-            </SectionBox>
-            <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title="Purchase Details" onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
-            <SectionBox title="Supplier" icon="🏪" color="blue">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.supplierName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.supplierPhone||"—"}</div></div>
-                <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold">{viewModal.supplierAddress||"—"}</div></div>
-              </div>
-            </SectionBox>
-            <SectionBox title="Item" icon="📦" color="amber">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Item</div><div className="font-bold">{viewModal.itemName}</div></div>
-                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewModal.itemType}</div></div>
-                <div><div className="text-xs text-gray-400">Qty</div><div className="font-bold">{viewModal.quantity} {viewModal.unit}</div></div>
-                <div><div className="text-xs text-gray-400">Unit Price</div><div className="font-bold">{CURRENCY}{fmt(+(viewModal.unitPrice)||0)}</div></div>
-              </div>
-              <div className="bg-red-50 rounded-xl p-2 text-center mt-2"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total</div></div>
-            </SectionBox>
-            {(viewModal.vehicleNumber||viewModal.driverName)&&(
-              <SectionBox title="Vehicle" icon="🚛" color="gray">
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><div className="text-xs text-gray-400">Vehicle No</div><div className="font-bold">{viewModal.vehicleNumber||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewModal.vehicleType||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Driver</div><div className="font-bold">{viewModal.driverName||"—"}</div></div>
-                  <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.driverPhone||"—"}</div></div>
-                </div>
-              </SectionBox>
-            )}
-            <div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">Payment</div><div className="font-bold">{viewModal.paymentMode}</div></div>
-            {viewModal.note&&<div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">Note</div><div className="text-sm">{viewModal.note}</div></div>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── SUPERVISOR OVERVIEW (Admin) ───────────────────────────────────────────────
-function SupervisorReports({ allUsers }) {
-  const [selectedSupervisor, setSelectedSupervisor] = useState("");
-  const [workerReports, setWorkerReports] = useState([]);
-  const [dailyReports, setDailyReports] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("supervisor");
-  const [viewDailyModal, setViewDailyModal] = useState(null);
-  const [viewSiteModal, setViewSiteModal] = useState(null);
-
-  const supervisors = allUsers.filter(u=>u.role==="supervisor");
-
-  useEffect(()=>{
-    if (!selectedSupervisor) return;
-    setLoading(true);
-    Promise.all([api("GET","/workerreport"),api("GET","/dailyreport")]).then(([wr,dr])=>{
-      setWorkerReports((Array.isArray(wr)?wr:[]).filter(x=>x.addedBy===selectedSupervisor));
-      setDailyReports((Array.isArray(dr)?dr:[]).filter(x=>x.addedBy===selectedSupervisor).sort((a,b)=>(b.date||"").localeCompare(a.date||"")));
-      setLoading(false);
-    });
-  },[selectedSupervisor]);
-
-  const signSiteReport = async (id, role) => {
-    const report = workerReports.find(r=>r._id===id);
-    const updatedSigs = {...(report.signatures||{}),[role]:true};
-    await api("PUT",`/workerreport/${id}`,{signatures:updatedSigs});
-    setWorkerReports(p=>p.map(r=>r._id===id?{...r,signatures:updatedSigs}:r));
-    if (viewSiteModal?._id===id) setViewSiteModal(v=>({...v,signatures:updatedSigs}));
-  };
-
-  const sections = [{key:"newSite",icon:"🆕",label:"New Site",color:"blue"},{key:"runningSite",icon:"🔄",label:"Running Sites",color:"teal"},{key:"workersDetail",icon:"👷",label:"Workers",color:"amber"},{key:"materialSupply",icon:"🧱",label:"Materials",color:"orange"},{key:"complaints",icon:"⚠️",label:"Complaints",color:"red"},{key:"payments",icon:"💰",label:"Payments",color:"green"},{key:"dayNote",icon:"📝",label:"Day Note",color:"gray"},{key:"expenses",icon:"💸",label:"Expenses",color:"purple"}];
-  const colorMap = {blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"},teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"},amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"},orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"},red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"},green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"},gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"},purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"}};
-
-  return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
-      <div className="bg-white rounded-2xl border shadow-sm p-4">
-        <Select label="Select Supervisor" value={selectedSupervisor} options={[{value:"",label:"-- Select --"},...supervisors.map(s=>({value:s.name,label:`${s.name} (@${s.username})`}))]} onChange={e=>{setSelectedSupervisor(e.target.value);setActiveTab("supervisor");}} />
-      </div>
-      {!selectedSupervisor&&<EmptyState icon="👆" text="Select a supervisor to view their reports" />}
-      {loading&&<Loader />}
-      {selectedSupervisor&&!loading&&(
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{dailyReports.length}</div><div className="text-xs text-gray-400">Daily Reports</div></div>
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{workerReports.length}</div><div className="text-xs text-gray-400">Site Reports</div></div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={()=>setActiveTab("supervisor")} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab==="supervisor"?"bg-amber-500 text-white shadow":"bg-white border border-gray-200 text-gray-600"}`}>📋 Daily Reports</button>
-            <button onClick={()=>setActiveTab("site")} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab==="site"?"bg-amber-500 text-white shadow":"bg-white border border-gray-200 text-gray-600"}`}>🏗️ Site Reports</button>
-          </div>
-          {activeTab==="supervisor"&&(
-            <div className="space-y-3">
-              {dailyReports.length===0&&<EmptyState icon="📋" text="No daily reports" />}
-              {dailyReports.map(r=>(
-                <div key={r._id} onClick={()=>setViewDailyModal(r)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                  <div className="font-black text-gray-900">📅 {r.date}</div>
-                  <div className="text-xs text-gray-400">By: {r.addedBy}</div>
-                  <div className="mt-1 flex gap-1 flex-wrap">
-                    {sections.filter(s=>r[s.key]).map(s=>{const c=colorMap[s.color];return <span key={s.key} className={`text-xs px-2 py-0.5 rounded-full ${c.bg} ${c.label} border ${c.border}`}>{s.icon} {s.label}</span>;})}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {activeTab==="site"&&(
-            <div className="space-y-3">
-              {workerReports.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
-              {workerReports.map(r=>(
-                <div key={r._id} onClick={()=>setViewSiteModal(r)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                  <div className="flex items-start justify-between">
-                    <div><div className="font-black">{r.workerName}</div><div className="text-xs text-gray-400">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div></div>
-                    <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div>
-                  </div>
-                  <div className="mt-1 flex gap-1">
-                    {["supervisor","office","admin"].map(role=><div key={role} className={`flex-1 text-center py-1 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>{r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}</div>)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-      {viewDailyModal&&(
-        <Modal title={`Report — ${viewDailyModal.date}`} onClose={()=>setViewDailyModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewDailyModal.addedBy}</div>
-            {viewDailyModal.workerPayments?.length>0&&(
-              <SectionBox title="Worker Payments" icon="💸" color="green">
-                {viewDailyModal.workerPayments.map((wp,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span className="font-bold">{wp.workerName}</span><span>{wp.date} · {CURRENCY}{fmt(wp.amount)}</span></div>)}
-              </SectionBox>
-            )}
-            {sections.filter(s=>viewDailyModal[s.key]).map(s=>{const c=colorMap[s.color];return <div key={s.key} className={`${c.bg} border ${c.border} rounded-xl p-3`}><div className={`text-xs font-bold ${c.label} mb-1`}>{s.icon} {s.label}</div><div className="text-sm whitespace-pre-wrap">{viewDailyModal[s.key]}</div></div>;})}
-          </div>
-        </Modal>
-      )}
-      {viewSiteModal&&(
-        <Modal title="Site Report Details" onClose={()=>setViewSiteModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewSiteModal.addedBy}</div>
-            <div className="grid grid-cols-2 gap-2">
-              {[["Site",viewSiteModal.siteName],["Phone",viewSiteModal.phoneNo],["Date",viewSiteModal.startingDate],["Worker",viewSiteModal.workerName],["Payment",viewSiteModal.paymentMode],["Received By",viewSiteModal.amountReceivedBy]].map(([l,v])=>(
-                <div key={l} className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-sm">{v||"—"}</div></div>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewSiteModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-400">Total Area</div></div>
-              <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(viewSiteModal.workingCost)||0)}</div><div className="text-xs text-gray-400">Working Cost</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewSiteModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">Working Area</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(viewSiteModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total Amount</div></div>
-            </div>
-            <div className="bg-gray-50 rounded-2xl p-3">
-              <div className="text-xs font-bold text-gray-600 uppercase mb-2">✍️ Signatures</div>
-              <div className="grid grid-cols-3 gap-2">
-                {["supervisor","office","admin"].map(role=>(
-                  <div key={role} className={`rounded-xl border p-2 text-center ${viewSiteModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
-                    <div className="text-xl">{viewSiteModal.signatures?.[role]?"✅":"⭕"}</div>
-                    <div className="text-xs font-bold capitalize">{role}</div>
-                    {!viewSiteModal.signatures?.[role]&&<button onClick={()=>signSiteReport(viewSiteModal._id,role)} className="mt-1 bg-green-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold w-full">Sign</button>}
-                    {viewSiteModal.signatures?.[role]&&<div className="text-xs text-green-600 mt-1">Signed ✓</div>}
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} — {dateReport.materialQty} (Supplier: {dateReport.supplierName||"—"})</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty} · {CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span>
+                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
                   </div>
                 ))}
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── WORK PLANNING ────────────────────────────────────────────────────────────
-function WorkPlanning({ siteWorks, user }) {
-  const [plans, setPlans] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), siteName:"", task:"", workers:"", materials:"", note:"", status:"planned" };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(()=>{ api("GET","/workplan").then(d=>{ setPlans(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
-
-  const save = async () => {
-    if (!form.siteName) return;
-    const item = await api("POST","/workplan",{...form,addedBy:user.name});
-    if (item._id) { setPlans(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  const updateStatus = async (id, status) => {
-    await api("PUT",`/workplan/${id}`,{status});
-    setPlans(p=>p.map(x=>x._id===id?{...x,status}:x));
-  };
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
-      </div>
-      <div className="space-y-3">
-        {plans.length===0&&<EmptyState icon="📅" text="No work plans yet" />}
-        {plans.map(p=>(
-          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="font-black text-gray-900">{p.siteName}</div>
-                <div className="text-xs text-gray-400">📅 {p.date} · By: {p.addedBy}</div>
-                {p.task&&<div className="text-sm text-gray-600 mt-1">{p.task}</div>}
-                {p.workers&&<div className="text-xs text-gray-400 mt-0.5">👷 {p.workers}</div>}
-                {p.materials&&<div className="text-xs text-gray-400">🧱 {p.materials}</div>}
-              </div>
-              <Badge color={p.status==="done"?"green":p.status==="planned"?"blue":"amber"}>{p.status}</Badge>
-            </div>
-            <div className="mt-2 flex gap-1">
-              {["planned","in-progress","done"].map(s=>(
-                <button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"}`}>{s}</button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Add Work Plan" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Input label="Site Name *" value={form.siteName} onChange={e=>setForm({...form,siteName:e.target.value})} placeholder="Site / project name" />
-            <Textarea label="Tasks" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} placeholder="Work to be done..." />
-            <Input label="Workers" value={form.workers} onChange={e=>setForm({...form,workers:e.target.value})} placeholder="Worker names" />
-            <Input label="Materials Needed" value={form.materials} onChange={e=>setForm({...form,materials:e.target.value})} placeholder="Required materials" />
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Add Plan</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── STOCK ────────────────────────────────────────────────────────────────────
-function Stock({ stock, setStock, user }) {
-  const [modal, setModal] = useState(false);
-  const [editItem, setEditItem] = useState(null);
-  const emptyForm = { name:"", quantity:0, unit:"nos", minStock:0, price:0 };
-  const [form, setForm] = useState(emptyForm);
-
-  const save = async () => {
-    if (editItem) {
-      await api("PUT",`/stock/${editItem._id}`,form);
-      setStock(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x));
-      setEditItem(null);
-    } else {
-      const item = await api("POST","/stock",form);
-      if (item._id) setStock(p=>[...p,item]);
-    }
-    setModal(false); setForm(emptyForm);
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete?")) return;
-    await api("DELETE",`/stock/${id}`);
-    setStock(p=>p.filter(x=>x._id!==id));
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📦 Stock</h2>
-        {user.role==="admin"&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <div className="space-y-2">
-        {stock.length===0&&<EmptyState icon="📦" text="No stock items" />}
-        {stock.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-black text-gray-900">{s.name}</div>
-                <div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>
-                {s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}
-              </div>
-              {user.role==="admin"&&(
-                <div className="flex gap-1">
-                  <button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
-                  <button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
-                </div>
-              )}
-            </div>
-            {s.minStock>0&&s.quantity<=s.minStock&&<div className="mt-1"><Badge color="red">⚠️ Low Stock</Badge></div>}
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title={editItem?"Edit Stock":"Add Stock"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
-          <div className="space-y-3">
-            <Input label="Item Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
-              <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save":"Add"}</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── RAW MATERIAL ────────────────────────────────────────────────────────────
-function RawMaterial({ raw, setRaw, user }) {
-  const [modal, setModal] = useState(false);
-  const [editItem, setEditItem] = useState(null);
-  const emptyForm = { name:"", quantity:0, unit:"bag", price:0, supplier:"" };
-  const [form, setForm] = useState(emptyForm);
-
-  const save = async () => {
-    if (editItem) {
-      await api("PUT",`/raw/${editItem._id}`,form);
-      setRaw(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x));
-      setEditItem(null);
-    } else {
-      const item = await api("POST","/raw",form);
-      if (item._id) setRaw(p=>[...p,item]);
-    }
-    setModal(false); setForm(emptyForm);
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete?")) return;
-    await api("DELETE",`/raw/${id}`);
-    setRaw(p=>p.filter(x=>x._id!==id));
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🧱 Raw Material</h2>
-        {user.role==="admin"&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <div className="space-y-2">
-        {raw.length===0&&<EmptyState icon="🧱" text="No raw materials" />}
-        {raw.map(r=>(
-          <div key={r._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-black text-gray-900">{r.name}</div>
-                <div className="text-sm text-gray-600">{r.quantity} {r.unit}</div>
-                {r.supplier&&<div className="text-xs text-gray-400">Supplier: {r.supplier}</div>}
-                {r.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(r.price)}/unit</div>}
-              </div>
-              {user.role==="admin"&&(
-                <div className="flex gap-1">
-                  <button onClick={()=>{setForm({...r});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
-                  <button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title={editItem?"Edit":"Add Raw Material"} onClose={()=>{setModal(false);setEditItem(null);}}>
-          <div className="space-y-3">
-            <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
-              <Select label="Unit" value={form.unit} options={["bag","kg","ton","litre","load","nos"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
-              <Input label="Supplier" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})} />
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save":"Add"}</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── PRODUCTION ───────────────────────────────────────────────────────────────
-function Production({ production, setProduction, stock, user }) {
-  const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), product:"", target:0, produced:0, status:"pending", note:"" };
-  const [form, setForm] = useState(emptyForm);
-
-  const save = async () => {
-    const canApprove = user.role==="admin";
-    const item = await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:canApprove?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
-    if (item._id) { setProduction(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🏭 Production</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Log</button>
-      </div>
-      <div className="space-y-3">
-        {production.length===0&&<EmptyState icon="🏭" text="No production logs" />}
-        {production.map(p=>(
-          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-black text-gray-900">{p.product}</div>
-                <div className="text-xs text-gray-400">📅 {p.date} · By: {p.supervisor}</div>
-                <div className="text-sm text-gray-600 mt-0.5">Target: {p.target} · Produced: <span className="font-bold text-green-700">{p.produced}</span></div>
-              </div>
-              <Badge color={p.status==="approved"?"green":p.status==="rejected"?"red":"yellow"}>{p.status}</Badge>
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Log Production" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Target" type="number" value={form.target} onChange={e=>setForm({...form,target:+e.target.value})} />
-              <Input label="Produced" type="number" value={form.produced} onChange={e=>setForm({...form,produced:+e.target.value})} />
-            </div>
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── SALES ────────────────────────────────────────────────────────────────────
-function Sales({ sales, setSales, stock, user }) {
-  const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), product:"", quantity:0, price:0, total:0, customer:"", paymentMode:"Cash" };
-  const [form, setForm] = useState(emptyForm);
-
-  const save = async () => {
-    const total = +form.quantity*(+form.price);
-    const item = await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
-    if (item._id) { setSales(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
-      </div>
-      <StatCard label="Total Sales" value={`${CURRENCY}${fmt(sales.reduce((a,s)=>a+(+(s.total)||0),0))}`} icon="💰" color="green" />
-      <div className="space-y-2">
-        {sales.length===0&&<EmptyState icon="💰" text="No sales yet" />}
-        {sales.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div>
-              <div className="font-black text-gray-900">{s.product}</div>
-              <div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div>
-              <div className="text-sm text-gray-600">{s.quantity} units × {CURRENCY}{s.price}</div>
-            </div>
-            <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div><Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode}</Badge></div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Record Sale" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
-            <Input label="Customer" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,total:+e.target.value*(+form.price)})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value,total:+form.quantity*(+e.target.value)})} />
-            </div>
-            <Select label="Payment" value={form.paymentMode} options={["Cash","Bank","GPay","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── USERS ────────────────────────────────────────────────────────────────────
-function Users({ currentUser, allUsers, setAllUsers }) {
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ name:"", username:"", password:"", role:"user" });
-  const [saveError, setSaveError] = useState("");
-
-  const save = async () => {
-    if (!form.name||!form.username||!form.password) { setSaveError("All fields required"); return; }
-    setSaveError("");
-    const user = await api("POST","/users",form);
-    if (user._id) { setAllUsers(p=>[...p,user]); setModal(false); setForm({name:"",username:"",password:"",role:"user"}); }
-    else setSaveError(user.message||"Failed to add user");
-  };
-
-  const toggleActive = async (u) => {
-    if (u._id===currentUser._id) return;
-    await api("PUT",`/users/${u._id}`,{active:!u.active});
-    setAllUsers(p=>p.map(x=>x._id===u._id?{...x,active:!x.active}:x));
-  };
-
-  const roleColor = {admin:"purple",supervisor:"green",user:"blue"};
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">👥 Users</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add User</button>
-      </div>
-      <div className="space-y-2">
-        {allUsers.map(u=>(
-          <div key={u._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2"><span className="font-black text-gray-900">{u.name}</span><Badge color={roleColor[u.role]||"gray"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div>
-              <div className="text-xs text-gray-400">@{u.username}</div>
-            </div>
-            {u._id!==currentUser._id&&(
-              <button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${u.active?"bg-red-50 text-red-600 border-red-200 hover:bg-red-100":"bg-green-50 text-green-600 border-green-200 hover:bg-green-100"}`}>
-                {u.active?"Deactivate":"Activate"}
-              </button>
+              </SectionBox>
             )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-500 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
           </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Add User" onClose={()=>{setModal(false);setSaveError("");}}>
+        ) : (
           <div className="space-y-3">
-            <Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <Input label="Username" value={form.username} onChange={e=>setForm({...form,username:e.target.value})} />
-            <Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
-            <Select label="Role" value={form.role} options={["admin","supervisor","user"]} onChange={e=>setForm({...form,role:e.target.value})} />
-            {saveError&&<div className="text-xs text-red-600 font-semibold bg-red-50 rounded-xl p-3">{saveError}</div>}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add User</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── REPORTS ──────────────────────────────────────────────────────────────────
-function Reports({ production, sales, stock, raw, siteWorks }) {
-  const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
-  const totalSiteIncome = siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0);
-  const totalPending = siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0);
-  const completed = siteWorks.filter(s=>s.status==="completed").length;
-  const running = siteWorks.filter(s=>s.status==="running").length;
-
-  return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalSiteIncome)}`} icon="💰" color="green" />
-        <StatCard label="Pending Payment" value={`${CURRENCY}${fmt(totalPending)}`} icon="⏳" color="red" />
-        <StatCard label="Sales Revenue" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="blue" />
-        <StatCard label="Completed Sites" value={completed} icon="✅" color="teal" />
-      </div>
-      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <div className="font-black text-gray-900 mb-3">📊 Site Work Summary</div>
-        {[["Running",running,"amber"],["Completed",completed,"green"],["Total Sites",siteWorks.length,"blue"],["Total Income",`${CURRENCY}${fmt(totalSiteIncome)}`,"green"],["Pending",`${CURRENCY}${fmt(totalPending)}`,"red"]].map(([l,v,c])=>(
-          <div key={l} className="flex justify-between items-center py-2 border-b border-gray-50">
-            <span className="text-sm text-gray-600">{l}</span>
-            <span className={`font-black text-${c}-700`}>{v}</span>
-          </div>
-        ))}
-      </div>
-      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <div className="font-black text-gray-900 mb-3">🏭 Production Summary</div>
-        <div className="flex justify-between py-2 border-b"><span className="text-sm text-gray-600">Total Logs</span><span className="font-black">{production.length}</span></div>
-        <div className="flex justify-between py-2"><span className="text-sm text-gray-600">Total Produced</span><span className="font-black text-green-700">{fmt(production.reduce((a,p)=>a+(+(p.produced)||0),0))}</span></div>
-      </div>
-    </div>
-  );
-}
-
-// ─── NAV CONFIG ───────────────────────────────────────────────────────────────
-// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
-function Suppliers({ user }) {
-  const [suppliers, setSuppliers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [editItem, setEditItem] = useState(null);
-  const [search, setSearch] = useState("");
-  const MATERIAL_OPTIONS = ["Cement","Stone","Sand","Blocks","Chips","Steel","Tiles","Other"];
-  const emptyForm = { name:"", location:"", phone:"", materials:[], customMaterial:"", note:"" };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(()=>{ api("GET","/suppliers").then(d=>{ setSuppliers(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
-
-  const toggleMaterial = (mat) => {
-    const mats = form.materials||[];
-    setForm({...form, materials: mats.includes(mat)?mats.filter(x=>x!==mat):[...mats,mat]});
-  };
-
-  const save = async () => {
-    if (!form.name) return;
-    const mats = [...(form.materials||[])];
-    if (form.customMaterial) mats.push(form.customMaterial);
-    const data = {...form, materials:mats};
-    if (editItem) {
-      await api("PUT",`/suppliers/${editItem._id}`,data);
-      setSuppliers(p=>p.map(x=>x._id===editItem._id?{...x,...data}:x));
-    } else {
-      const item = await api("POST","/suppliers",{...data,addedBy:user.name});
-      if (item._id) setSuppliers(p=>[...p,item]);
-    }
-    setModal(false); setEditItem(null); setForm(emptyForm);
-  };
-
-  const del = async (id) => {
-    if (!window.confirm("Delete supplier?")) return;
-    await api("DELETE",`/suppliers/${id}`);
-    setSuppliers(p=>p.filter(x=>x._id!==id));
-  };
-
-  const openEdit = (s) => { setForm({...s,customMaterial:""}); setEditItem(s); setModal(true); };
-
-  const filtered = suppliers.filter(s=>!search||(s.name||"").toLowerCase().includes(search.toLowerCase()));
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🏪 Suppliers</h2>
-        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search supplier..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
-      <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🏪" text="No suppliers yet" />}
-        {filtered.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="font-black text-gray-900">{s.name}</div>
-                <div className="text-xs text-gray-400">📍 {s.location||"—"} · 📞 {s.phone||"—"}</div>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {(s.materials||[]).map(m=><Badge key={m} color="teal">{m}</Badge>)}
-                </div>
-              </div>
-              {(user.role==="admin"||user.role==="user")&&(
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={()=>openEdit(s)} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
-                  <button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
-                </div>
-              )}
-            </div>
-            {s.note&&<div className="text-xs text-gray-400 mt-1">{s.note}</div>}
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title={editItem?"Edit Supplier":"Add Supplier"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
-          <div className="space-y-3">
-            <Input label="Supplier Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Company or person name" />
-            <Input label="Location" value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City / area" />
-            <Input label="Phone Number" type="tel" value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="Contact number" />
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-2">Materials Supplied</label>
-              <div className="flex flex-wrap gap-1 mb-2">
-                {MATERIAL_OPTIONS.filter(m=>m!=="Other").map(m=>(
-                  <button key={m} type="button" onClick={()=>toggleMaterial(m)} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(form.materials||[]).includes(m)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>{m}</button>
-                ))}
-              </div>
-              <Input label="Other / Custom Material" value={form.customMaterial||""} onChange={e=>setForm({...form,customMaterial:e.target.value})} placeholder="Type custom material name..." />
-            </div>
-            <Textarea label="Note" value={form.note||""} onChange={e=>setForm({...form,note:e.target.value})} placeholder="Additional notes..." />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save Changes":"Add Supplier"}</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── PRODUCTION SITE ──────────────────────────────────────────────────────────
-function ProductionSite({ user }) {
-  const [entries, setEntries] = useState([]);
-  const [workers, setWorkers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const [filterDate, setFilterDate] = useState(today());
-
-  useEffect(()=>{
-    Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
-      setEntries(Array.isArray(e)?e:[]);
-      setWorkers((Array.isArray(w)?w:[]).filter(x=>x.workerCategory==="Production"||!x.workerCategory));
-      setLoading(false);
-    });
-  },[]);
-
-  const emptyForm = { date:today(), workType:"", notes:"", attendance:[] };
-  const [form, setForm] = useState(emptyForm);
-
-  const initAttendance = () => {
-    const att = workers.map(w=>({ workerId:w._id, workerName:w.name, status:"present", workDone:"", workUnit:w.paymentType||"day", rate:w.rateAmount||0, total:0 }));
-    setForm({...emptyForm, date:today(), attendance:att});
-    setModal(true);
-  };
-
-  const updateAtt = (i, field, val) => {
-    const att = [...form.attendance];
-    att[i] = {...att[i],[field]:val};
-    if (field==="workDone"||field==="rate") {
-      att[i].total = +(att[i].workDone||0)*(+(att[i].rate||0));
-    }
-    setForm({...form,attendance:att});
-  };
-
-  const save = async () => {
-    const totalCost = form.attendance.reduce((a,x)=>a+(+(x.total)||0),0);
-    const item = await api("POST","/productionsite",{...form,totalCost,addedBy:user.name});
-    if (item._id) { setEntries(p=>[item,...p]); setModal(false); }
-  };
-
-  const filtered = entries.filter(e=>!filterDate||e.date===filterDate);
-  const presentCount = (e) => (e.attendance||[]).filter(a=>a.status==="present").length;
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
-        <button onClick={initAttendance} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Daily Entry</button>
-      </div>
-      <div className="flex gap-2 items-center">
-        <Input label="" type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} />
-        <button onClick={()=>setFilterDate("")} className="text-xs text-gray-400 hover:text-gray-600 whitespace-nowrap">Clear</button>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{entries.length}</div><div className="text-xs text-gray-400">Entries</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(entries.reduce((a,e)=>a+(+(e.totalCost)||0),0))}</div><div className="text-xs text-gray-400">Total Cost</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
-      </div>
-      <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🏭" text="No entries found" />}
-        {filtered.map(e=>(
-          <div key={e._id} onClick={()=>setViewModal(e)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-black text-gray-900">📅 {e.date}</div>
-                <div className="text-xs text-gray-400">👷 {presentCount(e)} present · By: {e.addedBy}</div>
-                {e.workType&&<div className="text-xs text-gray-500">{e.workType}</div>}
-              </div>
-              <div className="text-right">
-                <div className="font-black text-green-700">{CURRENCY}{fmt(e.totalCost||0)}</div>
-                <Badge color="green">{presentCount(e)}/{(e.attendance||[]).length}</Badge>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Daily Production Entry" onClose={()=>setModal(false)} wide>
-          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📊 Site Overview (All Time)</div>
             <div className="grid grid-cols-2 gap-2">
-              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-              <Input label="Work Type" value={form.workType||""} onChange={e=>setForm({...form,workType:e.target.value})} placeholder="e.g. Block Making" />
+              <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black text-gray-900">{siteReports.length}</div><div className="text-xs text-gray-400">Daily Reports</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPayments)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
             </div>
-            <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
-            <div className="text-xs font-bold text-gray-600 uppercase">👷 Worker Attendance & Work</div>
-            {form.attendance.length===0&&<div className="text-xs text-gray-400 text-center py-4">No production workers found. Add workers with category "Production" first.</div>}
-            {form.attendance.map((a,i)=>(
-              <div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
+            {allMaterials.length>0&&(
+              <SectionBox title="Material History" icon="🧱" color="teal">
+                {allMaterials.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}
+              </SectionBox>
+            )}
+            {allExtraWork.length>0&&(
+              <SectionBox title="Extra Work History" icon="➕" color="orange">
+                {allExtraWork.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc} ({e.qty})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}
+              </SectionBox>
+            )}
+            {allPayments.length>0&&(
+              <SectionBox title="Payment History" icon="💰" color="green">
+                {allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
+              </SectionBox>
+            )}
+            {allComplaints.length>0&&(
+              <SectionBox title="Complaints" icon="⚠️" color="red">
+                {allComplaints.map((c,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{c.date} · {c.complaint}</div>{c.action&&<div className="text-gray-400">Action: {c.action}</div>}</div>)}
+              </SectionBox>
+            )}
+            <div className="text-xs font-black text-gray-500 uppercase mt-2">📅 Daily Reports</div>
+            {siteReports.length===0&&<EmptyState icon="📋" text="No reports submitted yet" />}
+            {siteReports.map(r=>(
+              <div key={r._id} onClick={()=>setViewReportModal(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
-                  <div className="font-bold text-sm text-gray-900">{a.workerName}</div>
-                  <div className="flex gap-1">
-                    {["present","absent"].map(s=>(
-                      <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-2 py-1 rounded-lg text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s.charAt(0).toUpperCase()+s.slice(1)}</button>
-                    ))}
-                  </div>
+                  <div><div className="font-black text-gray-900">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft done</div></div>
+                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={r.siteStatus==="completed"?"green":r.siteStatus==="running"?"amber":"gray"}>{r.siteStatus}</Badge></div>
                 </div>
-                {a.status==="present"&&(
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
-                    <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs/hrs" />
-                    <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
-                  </div>
-                )}
-                {a.status==="present"&&a.workDone>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
-              </div>
-            ))}
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-gray-400">Total Cost</div>
-              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(form.attendance.reduce((a,x)=>a+(+(x.workDone||0)*(+(x.rate||0))),0))}</div>
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Entry</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title={`Production Entry — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.workType||""}</div>
-            {(viewModal.attendance||[]).map((a,i)=>(
-              <div key={i} className={`rounded-xl border p-3 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-sm">{a.workerName}</div>
-                  <Badge color={a.status==="present"?"green":"red"}>{a.status}</Badge>
-                </div>
-                {a.status==="present"&&a.workDone>0&&(
-                  <div className="text-xs text-gray-600 mt-1">{a.workDone} {a.workUnit} × {CURRENCY}{a.rate} = <span className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</span></div>
-                )}
-              </div>
-            ))}
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-gray-400">Total Cost</div>
-              <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(viewModal.totalCost||0)}</div>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── ATTENDANCE MANAGEMENT ───────────────────────────────────────────────────
-function AttendanceReports({ user }) {
-  const [workers, setWorkers] = useState([]);
-  const [entries, setEntries] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [siteReports, setSiteReports] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("mark"); // mark | reports | ledger
-  const [selectedWorker, setSelectedWorker] = useState(null);
-  const [markDate, setMarkDate] = useState(today());
-  const [attendance, setAttendance] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [filterWorker, setFilterWorker] = useState("");
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
-
-  useEffect(()=>{
-    Promise.all([
-      api("GET","/workers"),
-      api("GET","/productionsite"),
-      api("GET","/workerpayments"),
-      api("GET","/workerreport"),
-    ]).then(([w,e,p,sr])=>{
-      setWorkers(Array.isArray(w)?w:[]);
-      setEntries(Array.isArray(e)?e:[]);
-      setPayments(Array.isArray(p)?p:[]);
-      setSiteReports(Array.isArray(sr)?sr:[]);
-      setLoading(false);
-    });
-  },[]);
-
-  // Init attendance for selected date
-  const initMark = () => {
-    // check if already marked
-    const existing = entries.find(e=>e.date===markDate);
-    if (existing) {
-      setAttendance(existing.attendance||[]);
-    } else {
-      setAttendance(workers.map(w=>({
-        workerId:w._id, workerName:w.name, status:"present",
-        workDone:"", workUnit:w.paymentType||"day", rate:+(w.rateAmount||0), total:0
-      })));
-    }
-  };
-
-  useEffect(()=>{ if (workers.length>0) initMark(); },[markDate, workers]);
-
-  const updateAtt = (i, field, val) => {
-    const att = [...attendance];
-    att[i] = {...att[i],[field]:val};
-    if (field==="workDone"||field==="rate") att[i].total = +(att[i].workDone||0)*(+(att[i].rate||0));
-    setAttendance(att);
-  };
-
-  const saveAttendance = async () => {
-    setSaving(true);
-    const totalCost = attendance.reduce((a,x)=>a+(+(x.total)||0),0);
-    const existing = entries.find(e=>e.date===markDate);
-    let item;
-    if (existing) {
-      item = await api("PUT",`/productionsite/${existing._id}`,{attendance,totalCost});
-      setEntries(p=>p.map(x=>x._id===existing._id?{...x,attendance,totalCost}:x));
-    } else {
-      item = await api("POST","/productionsite",{date:markDate,attendance,totalCost,addedBy:user.name});
-      if (item._id) setEntries(p=>[item,...p]);
-    }
-    setSaving(false);
-    alert(`✅ Attendance saved for ${markDate}`);
-  };
-
-  // Worker ledger calculations
-  const getWorkerLedger = (wname) => {
-    const allAtt = entries.flatMap(e=>(e.attendance||[]).filter(a=>a.workerName===wname).map(a=>({...a,date:e.date})));
-    const presentDays = allAtt.filter(a=>a.status==="present");
-    const totalDays = presentDays.length;
-    const totalWork = presentDays.reduce((a,x)=>a+(+(x.workDone)||0),0);
-    const totalEarned = presentDays.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
-    const siteWork = siteReports.filter(r=>r.workerName===wname);
-    const totalPaid = payments.filter(p=>p.workerName===wname).reduce((a,p)=>a+(+(p.amount)||0),0);
-    const pending = Math.max(0, totalEarned - totalPaid);
-    return { allAtt:presentDays.sort((a,b)=>b.date.localeCompare(a.date)), totalDays, totalWork, totalEarned, totalPaid, pending, siteWork };
-  };
-
-  if (loading) return <Loader />;
-
-  // Worker Ledger View
-  if (selectedWorker) {
-    const w = selectedWorker;
-    const { allAtt, totalDays, totalWork, totalEarned, totalPaid, pending, siteWork } = getWorkerLedger(w.name);
-    const wPayments = payments.filter(p=>p.workerName===w.name).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
-          <h2 className="font-black text-gray-900">👷 {w.name}</h2>
-        </div>
-        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{w.role}</div></div>
-            <div><div className="text-xs text-gray-400">Category</div><div className="font-bold">{w.workerCategory||"Site"}</div></div>
-            <div><div className="text-xs text-gray-400">Payment Type</div><div className="font-bold">{w.paymentType||"day"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(w.rateAmount||0)}</div></div>
-            <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{w.phone||"—"}</div></div>
-            <div><div className="text-xs text-gray-400">Location</div><div className="font-bold">{w.workLocationType||"—"}</div></div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
-          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(totalWork)}</div><div className="text-xs text-gray-400">Total Output</div></div>
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Total Earned</div></div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
-        </div>
-        <div className={`rounded-2xl border p-3 text-center ${pending>0?"bg-red-50 border-red-200":"bg-green-50 border-green-200"}`}>
-          <div className="text-xs text-gray-400">Pending Balance</div>
-          <div className={`text-2xl font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div>
-        </div>
-
-        <div className="flex gap-1">
-          {["attendance","payments","sites"].map(t=>(
-            <button key={t} onClick={()=>setTab(t)} className={`flex-1 py-1.5 rounded-xl text-xs font-bold ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-              {t==="attendance"?"📅 Attendance":t==="payments"?"💸 Payments":"🏗️ Sites"}
-            </button>
-          ))}
-        </div>
-
-        {tab==="attendance"&&(
-          <div className="space-y-2">
-            {allAtt.length===0&&<EmptyState icon="📅" text="No attendance records" />}
-            {allAtt.map((a,i)=>(
-              <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
-                <div><div className="font-bold text-sm">📅 {a.date}</div>{a.workDone>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div>
-                <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div>
-              </div>
-            ))}
-          </div>
-        )}
-        {tab==="payments"&&(
-          <div className="space-y-2">
-            {wPayments.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
-            {wPayments.map((p,i)=>(
-              <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
-                <div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div><div className="text-xs text-gray-400">By: {p.addedBy}</div></div>
-                <Badge color="green">Paid</Badge>
-              </div>
-            ))}
-          </div>
-        )}
-        {tab==="sites"&&(
-          <div className="space-y-2">
-            {siteWork.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
-            {siteWork.map(r=>(
-              <div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between">
-                <div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div>
-                <div className="text-right"><div className="font-black text-teal-700">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div>
               </div>
             ))}
           </div>
@@ -2425,136 +1251,376 @@ function AttendanceReports({ user }) {
     );
   }
 
+  // Main site list
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📊 Attendance & Workers</h2>
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {["mark","reports","ledger"].map(t=>(
-          <button key={t} onClick={()=>setTab(t)} className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-colors ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-            {t==="mark"?"✅ Mark Attendance":t==="reports"?"📊 Reports":"👷 Worker Ledger"}
+      <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
+      <div className="flex gap-1">
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab===t.id?"bg-amber-500 text-white shadow":"bg-white border border-gray-200 text-gray-600"}`}>
+            {t.icon} {t.label} ({t.count})
           </button>
         ))}
       </div>
 
-      {/* MARK ATTENDANCE */}
-      {tab==="mark"&&(
+      {activeTab==="planned"&&(
         <div className="space-y-3">
-          <div className="bg-white rounded-2xl border shadow-sm p-4">
-            <Input label="Select Date" type="date" value={markDate} onChange={e=>setMarkDate(e.target.value)} />
-          </div>
-          {workers.length===0&&<EmptyState icon="👷" text="No workers found. Add workers first." />}
-          {attendance.map((a,i)=>(
-            <div key={i} className={`rounded-2xl border p-3 space-y-2 transition-colors ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-black text-gray-900">{a.workerName}</div>
-                  <div className="text-xs text-gray-400">{workers.find(w=>w.name===a.workerName)?.role||""} · {a.workUnit}</div>
-                </div>
-                <div className="flex gap-1">
-                  {["present","absent"].map(s=>(
-                    <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>
-                      {s==="present"?"✓ Present":"✗ Absent"}
-                    </button>
-                  ))}
-                </div>
+          {planned.length===0&&<EmptyState icon="📋" text="No planned sites" />}
+          {planned.map(s=>(
+            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-start justify-between">
+                <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div><div className="text-xs text-gray-400">📅 Start: {s.startDate||"—"} · {s.workSize||"—"} sqft</div><div className="text-xs text-gray-400">🧱 {s.interlockType||"—"}</div></div>
+                <Badge color="gray">Planned</Badge>
               </div>
-              {a.status==="present"&&(
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
-                  <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs/hrs/sqft" />
-                  <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
-                </div>
-              )}
-              {a.status==="present"&&+(a.workDone||0)>0&&(
-                <div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>
-              )}
             </div>
           ))}
-          {workers.length>0&&(
-            <button onClick={saveAttendance} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-60">
-              {saving?"Saving...":"💾 Save Attendance"}
-            </button>
-          )}
         </div>
       )}
 
-      {/* REPORTS */}
-      {tab==="reports"&&(
+      {activeTab==="running"&&(
         <div className="space-y-3">
-          <div className="space-y-2">
-            <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" value={filterWorker} onChange={e=>setFilterWorker(e.target.value)}>
-              <option value="">All Workers</option>
-              {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-            </select>
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="From" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
-              <Input label="To" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
-            </div>
-          </div>
-          {(()=>{
-            const allAtt = entries.flatMap(e=>(e.attendance||[]).map(a=>({...a,date:e.date})));
-            const filtered = allAtt.filter(a=>{
-              if (filterWorker && a.workerName!==filterWorker) return false;
-              if (filterFrom && a.date<filterFrom) return false;
-              if (filterTo && a.date>filterTo) return false;
-              return true;
-            });
-            const present = filtered.filter(a=>a.status==="present");
-            const totalEarned = present.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
+          {running.length===0&&<EmptyState icon="🔄" text="No running sites" />}
+          {running.map(s=>{
+            const sr = getSiteReports(s);
+            const completed = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+            const workerCount = sr.length>0?(sr[sr.length-1].workersCount||0):0;
             return (
-              <>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(present.map(a=>a.date)).size}</div><div className="text-xs text-gray-400">Work Days</div></div>
-                  <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(present.reduce((a,x)=>a+(+(x.workDone)||0),0))}</div><div className="text-xs text-gray-400">Total Output</div></div>
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Earnings</div></div>
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between">
+                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
+                  <Badge color="amber">Running</Badge>
                 </div>
-                {present.sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=>(
-                  <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
-                    <div><div className="font-bold text-sm">{a.workerName}</div><div className="text-xs text-gray-400">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div>
-                    <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(a.total)||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div>
-                  </div>
-                ))}
-                {present.length===0&&<EmptyState icon="📊" text="No records found" />}
-              </>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* WORKER LEDGER */}
-      {tab==="ledger"&&(
-        <div className="space-y-3">
-          {workers.length===0&&<EmptyState icon="👷" text="No workers found" />}
-          {workers.map(w=>{
-            const {totalDays,totalEarned,totalPaid,pending} = getWorkerLedger(w.name);
-            return (
-              <div key={w._id} onClick={()=>{setSelectedWorker(w);setTab("attendance");}}
-                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-black text-gray-900">{w.name}</div>
-                    <div className="text-xs text-gray-400">{w.role} · <Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge></div>
-                    <div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div>
-                  </div>
-                  <span className="text-gray-300 text-xl">›</span>
-                </div>
-                <div className="mt-2 grid grid-cols-4 gap-1 text-xs">
-                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-gray-400">Days</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-gray-400">Earned</div></div>
-                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
-                  <div className={`rounded-lg p-1.5 text-center ${pending>0?"bg-red-50":"bg-green-50"}`}><div className={`font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{workerCount}</div><div className="text-gray-400">Workers</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{completed}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {activeTab==="completed"&&(
+        <div className="space-y-3">
+          {completed.length===0&&<EmptyState icon="✅" text="No completed sites" />}
+          {completed.map(s=>{
+            const sr = getSiteReports(s);
+            const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+            const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+            return (
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between">
+                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.endDate||"—"}</div></div>
+                  <Badge color="green">Done</Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Completed</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add Daily Report Modal */}
+      {addReportModal&&(
+        <Modal title={`Daily Report — ${form.siteName}`} onClose={()=>setAddReportModal(false)} wide>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+              <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
+            </div>
+
+            <SectionBox title="Work Progress" icon="📐" color="blue">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Workers Today" type="number" value={form.workersCount||""} onChange={e=>setForm({...form,workersCount:e.target.value})} placeholder="0" />
+                <Input label="Total Area (sqft)" type="number" value={form.totalArea||""} onChange={e=>setForm({...form,totalArea:e.target.value})} placeholder="0" />
+                <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
+                <Input label="Total Completed (sqft)" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} placeholder="Type of interlock" />
+              <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
+            </SectionBox>
+
+            <SectionBox title="Materials & Equipment" icon="🧱" color="teal">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Materials Unloaded" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
+                <Input label="Quantity" value={form.materialQty||""} onChange={e=>setForm({...form,materialQty:e.target.value})} placeholder="e.g. 50 bags" />
+                <Input label="Equipment Used" value={form.equipment||""} onChange={e=>setForm({...form,equipment:e.target.value})} placeholder="e.g. JCB, Mixer" />
+                <Input label="Supplier Name" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier" />
+              </div>
+              <Textarea label="Remarks" value={form.materialRemarks||""} onChange={e=>setForm({...form,materialRemarks:e.target.value})} placeholder="Additional remarks..." />
+            </SectionBox>
+
+            <SectionBox title="Extra Work" icon="➕" color="orange">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Description" value={form.extraWorkDesc||""} onChange={e=>setForm({...form,extraWorkDesc:e.target.value})} placeholder="Extra work done" />
+                <Input label="Qty / Sqft" value={form.extraWorkQty||""} onChange={e=>setForm({...form,extraWorkQty:e.target.value})} placeholder="Quantity" />
+                <Input label={`Cost (${CURRENCY})`} type="number" value={form.extraWorkCost||""} onChange={e=>setForm({...form,extraWorkCost:e.target.value})} placeholder="0" />
+              </div>
+              <Textarea label="Remarks" value={form.extraWorkRemarks||""} onChange={e=>setForm({...form,extraWorkRemarks:e.target.value})} />
+            </SectionBox>
+
+            <SectionBox title="Payments & Expenses" icon="💰" color="green">
+              <div className="space-y-2">
+                <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Client Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
+                <Select label="Payment Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+                  <Input label="Paid To / From" value={payForm.paidTo} onChange={e=>setPayForm({...payForm,paidTo:e.target.value})} placeholder="Name" />
+                </div>
+                <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
+                <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
+                {(form.payments||[]).map((p,i)=>(
+                  <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs">
+                    <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
+                    <span className="font-black text-green-700 mx-2">{CURRENCY}{fmt(p.amount)}</span>
+                    <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black">×</button>
+                  </div>
+                ))}
+                {(form.payments||[]).length>0&&<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>}
+              </div>
+            </SectionBox>
+
+            <SectionBox title="Complaints & Issues" icon="⚠️" color="red">
+              <Textarea label="Complaint Description" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues or complaints..." />
+              <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="What was done about it..." />
+            </SectionBox>
+
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">Submit Daily Report</button>
+          </div>
+        </Modal>
+      )}
+
+      {viewReportModal&&(
+        <Modal title={`Report — ${viewReportModal.date}`} onClose={()=>setViewReportModal(null)}>
+          <div className="space-y-3">
+            <div className="text-xs text-gray-400">By: {viewReportModal.addedBy} · {viewReportModal.siteStatus}</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewReportModal.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewReportModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewReportModal.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
+            </div>
+            {viewReportModal.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{viewReportModal.dayNotes}</div></SectionBox>}
+            {viewReportModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewReportModal.materialsUnloaded} · {viewReportModal.materialQty}</div><div className="text-xs text-gray-400">Supplier: {viewReportModal.supplierName||"—"}</div></SectionBox>}
+            {viewReportModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewReportModal.extraWorkDesc} · {viewReportModal.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(viewReportModal.extraWorkCost||0)}</div></SectionBox>}
+            {(viewReportModal.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {viewReportModal.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
+                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {viewReportModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewReportModal.complaints}</div>{viewReportModal.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {viewReportModal.actionTaken}</div>}</SectionBox>}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
-// ─── SUPERVISOR WORK VIEW (Enhanced) ─────────────────────────────────────────
+function SupervisorReports({ allUsers }) {
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("running");
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [filterSite, setFilterSite] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+
+  const supervisors = allUsers.filter(u=>u.role==="supervisor");
+
+  useEffect(()=>{
+    if (!selectedSupervisor) return;
+    setLoading(true);
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks((Array.isArray(sw)?sw:[]).filter(x=>x.addedBy===selectedSupervisor));
+      setDailyReports((Array.isArray(dr)?dr:[]).filter(x=>x.addedBy===selectedSupervisor));
+      setLoading(false);
+    });
+  },[selectedSupervisor]);
+
+  const getSiteReports = (site) => {
+    let r = dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+    if (filterDate) r = r.filter(x=>x.date===filterDate);
+    return r.sort((a,b)=>b.date.localeCompare(a.date));
+  };
+
+  const planned = siteWorks.filter(s=>s.status==="pending");
+  const running = siteWorks.filter(s=>s.status==="running");
+  const completed = siteWorks.filter(s=>s.status==="completed");
+  const tabs = [{id:"planned",label:"Planned",count:planned.length},{id:"running",label:"Running",count:running.length},{id:"completed",label:"Completed",count:completed.length}];
+
+  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
+
+  const approveSite = async (id) => {
+    await api("PUT",`/sitework/${id}`,{status:"completed"});
+    setSiteWorks(p=>p.map(x=>x._id===id?{...x,status:"completed"}:x));
+    if (selectedSite?._id===id) setSelectedSite(s=>({...s,status:"completed"}));
+  };
+
+  if (selectedSite) {
+    const siteReports = getSiteReports(selectedSite);
+    const allPayments = siteReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allMaterials = siteReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = siteReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+    const totalCompleted = siteReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalPaid = siteReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const dateReport = selectedDate?siteReports.find(r=>r.date===selectedDate):null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          {selectedSite.status!=="completed"&&<button onClick={()=>approveSite(selectedSite._id)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">✅ Approve & Complete</button>}
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="flex items-start justify-between">
+            <div><div className="font-black text-xl">{selectedSite.customerName}</div><div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy}</div><div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div></div>
+            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{siteReports.length}</div><div className="text-gray-400">Reports</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalCompleted} sqft</div><div className="text-gray-400">Done</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 Select Date to View Activity</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+            <option value="">All Dates</option>
+            {siteReports.map(r=><option key={r._id} value={r.date}>{r.date}</option>)}
+          </select>
+        </div>
+
+        {dateReport?(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Activity on {selectedDate}</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done Today</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
+            </div>
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc}</div><div className="font-bold text-orange-700 text-xs">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
+              </SectionBox>
+            )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+          </div>
+        ):(
+          <div className="space-y-3">
+            {allMaterials.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMaterials.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
+            {allPayments.length>0&&<SectionBox title="Payment History" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports</div>
+            {siteReports.length===0&&<EmptyState icon="📋" text="No reports yet" />}
+            {siteReports.map(r=>(
+              <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black text-gray-900">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={r.siteStatus==="completed"?"green":"amber"}>{r.siteStatus}</Badge></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+        <Select label="Select Supervisor" value={selectedSupervisor} options={[{value:"",label:"-- Select --"},...supervisors.map(s=>({value:s.name,label:`${s.name} (@${s.username})`}))]} onChange={e=>{setSelectedSupervisor(e.target.value);setSelectedSite(null);}} />
+        {selectedSupervisor&&(
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Filter by Date" type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} />
+            <button onClick={()=>setFilterDate("")} className="text-xs text-gray-400 hover:text-gray-600 mt-5">Clear</button>
+          </div>
+        )}
+      </div>
+
+      {!selectedSupervisor&&<EmptyState icon="👆" text="Select a supervisor to view their work" />}
+      {loading&&<Loader />}
+
+      {selectedSupervisor&&!loading&&(
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-gray-50 border rounded-xl p-2 text-center"><div className="font-black">{planned.length}</div><div className="text-xs text-gray-400">Planned</div></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{running.length}</div><div className="text-xs text-gray-400">Running</div></div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{completed.length}</div><div className="text-xs text-gray-400">Completed</div></div>
+          </div>
+          <div className="flex gap-1">
+            {tabs.map(t=>(
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+                {t.label} ({t.count})
+              </button>
+            ))}
+          </div>
+          <div className="space-y-3">
+            {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites" />:planned.map(s=>(
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="font-black text-gray-900">{s.customerName}</div>
+                <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div>
+                <div className="text-xs text-gray-400">{s.workSize||"—"} sqft · 🧱 {s.interlockType||"—"}</div>
+              </div>
+            )))}
+            {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites" />:running.map(s=>{
+              const sr=getSiteReports(s);
+              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              return (
+                <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                  <div className="flex items-start justify-between">
+                    <div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
+                    <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                    <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
+                    <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                    <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
+                  </div>
+                </div>
+              );
+            }))}
+            {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites" />:completed.map(s=>{
+              const sr=getSiteReports(s);
+              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+              return (
+                <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                  <div className="font-black">{s.customerName}</div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div>
+                  <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                    <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Completed</div></div>
+                    <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Received</div></div>
+                    <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                  </div>
+                </div>
+              );
+            }))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SupervisorWorkView({ user }) {
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
