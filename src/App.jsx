@@ -98,6 +98,195 @@ function SectionBox({ title, icon, color = "gray", children }) {
   );
 }
 
+
+// ─── DEVICE FINGERPRINT ───────────────────────────────────────────────────────
+function getDeviceId() {
+  let id = localStorage.getItem("pk_device_id");
+  if (!id) {
+    id = "dev_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem("pk_device_id", id);
+  }
+  return id;
+}
+
+function getDeviceInfo() {
+  const ua = navigator.userAgent;
+  const deviceId = getDeviceId();
+  let deviceName = "Unknown Device";
+  let browser = "Unknown Browser";
+
+  // Detect device
+  if (/iPhone/.test(ua)) deviceName = "iPhone";
+  else if (/iPad/.test(ua)) deviceName = "iPad";
+  else if (/Samsung|SM-/.test(ua)) deviceName = "Samsung Galaxy";
+  else if (/Redmi|Mi /.test(ua)) deviceName = "Xiaomi/Redmi";
+  else if (/OnePlus/.test(ua)) deviceName = "OnePlus";
+  else if (/Pixel/.test(ua)) deviceName = "Google Pixel";
+  else if (/Android/.test(ua)) deviceName = "Android Phone";
+  else if (/Windows/.test(ua)) deviceName = "Windows PC";
+  else if (/Mac/.test(ua)) deviceName = "Mac";
+
+  // Detect browser
+  if (/Chrome\//.test(ua) && !/Chromium|Edge/.test(ua)) browser = "Chrome";
+  else if (/Firefox/.test(ua)) browser = "Firefox";
+  else if (/Safari/.test(ua) && !/Chrome/.test(ua)) browser = "Safari";
+  else if (/Edge/.test(ua)) browser = "Edge";
+
+  const isMobile = /Mobi|Android|iPhone|iPad/.test(ua);
+
+  return { deviceId, deviceName, browser, isMobile, userAgent: ua.slice(0, 100), loginTime: new Date().toLocaleString("en-IN") };
+}
+
+// ─── DEVICE PENDING SCREEN ────────────────────────────────────────────────────
+function DevicePendingScreen({ username, deviceInfo, onRetry }) {
+  const [status, setStatus] = useState("pending"); // pending | approved | rejected
+  const [checking, setChecking] = useState(false);
+
+  const checkStatus = async () => {
+    setChecking(true);
+    const devices = await api("GET", "/devices");
+    const myDevice = Array.isArray(devices) && devices.find(d => d.deviceId === deviceInfo.deviceId && d.username === username);
+    if (myDevice?.status === "approved") setStatus("approved");
+    else if (myDevice?.status === "rejected") setStatus("rejected");
+    else setStatus("pending");
+    setChecking(false);
+    if (myDevice?.status === "approved") setTimeout(onRetry, 1000);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-amber-900 flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center">
+        {status === "approved" ? (
+          <>
+            <div className="text-6xl mb-4">✅</div>
+            <h2 className="text-xl font-black text-green-700 mb-2">Device Approved!</h2>
+            <p className="text-gray-500 text-sm">Logging you in...</p>
+          </>
+        ) : status === "rejected" ? (
+          <>
+            <div className="text-6xl mb-4">❌</div>
+            <h2 className="text-xl font-black text-red-600 mb-2">Access Denied</h2>
+            <p className="text-gray-500 text-sm mb-4">Admin has rejected this device. Contact your admin.</p>
+          </>
+        ) : (
+          <>
+            <div className="text-6xl mb-4">📱</div>
+            <h2 className="text-xl font-black text-gray-900 mb-2">New Device Detected</h2>
+            <p className="text-gray-500 text-sm mb-6">Waiting for admin approval to access the app.</p>
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-left mb-6 space-y-1">
+              <div className="text-xs font-bold text-amber-700 mb-2">📋 Device Details</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Device:</span> {deviceInfo.deviceName}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Browser:</span> {deviceInfo.browser}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Type:</span> {deviceInfo.isMobile ? "Mobile" : "Desktop"}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Time:</span> {deviceInfo.loginTime}</div>
+            </div>
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"0ms"}}/>
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"150ms"}}/>
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"300ms"}}/>
+            </div>
+          </>
+        )}
+        <button onClick={checkStatus} disabled={checking} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-60 mt-2">
+          {checking ? "Checking..." : "🔄 Check Approval Status"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DEVICE MANAGEMENT (Admin) ────────────────────────────────────────────────
+function DeviceManagement({ user }) {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("pending");
+
+  useEffect(() => {
+    api("GET", "/devices").then(d => {
+      setDevices(Array.isArray(d) ? d : []);
+      setLoading(false);
+    });
+  }, []);
+
+  const updateDevice = async (id, status) => {
+    await api("PUT", `/devices/${id}`, { status });
+    setDevices(p => p.map(d => d._id === id ? { ...d, status } : d));
+  };
+
+  const deleteDevice = async (id) => {
+    if (!window.confirm("Remove this device?")) return;
+    await api("DELETE", `/devices/${id}`);
+    setDevices(p => p.filter(d => d._id !== id));
+  };
+
+  const pending = devices.filter(d => d.status === "pending");
+  const approved = devices.filter(d => d.status === "approved");
+  const rejected = devices.filter(d => d.status === "rejected");
+
+  const filtered = filter === "pending" ? pending : filter === "approved" ? approved : rejected;
+
+  if (loading) return <Loader />;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📱 Device Management</h2>
+
+      {pending.length > 0 && (
+        <div className="bg-red-50 border border-red-300 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"/>
+            <div className="font-black text-red-700">🔔 {pending.length} Pending Approval{pending.length > 1 ? "s" : ""}</div>
+          </div>
+          <div className="text-xs text-red-600">New devices waiting for your approval!</div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{pending.length}</div><div className="text-xs text-gray-400">Pending</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{approved.length}</div><div className="text-xs text-gray-400">Approved</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{rejected.length}</div><div className="text-xs text-gray-400">Rejected</div></div>
+      </div>
+
+      <div className="flex gap-1">
+        {["pending","approved","rejected"].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${filter===f?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+            {f.charAt(0).toUpperCase()+f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {filtered.length === 0 && <EmptyState icon="📱" text={`No ${filter} devices`} />}
+        {filtered.map(d => (
+          <div key={d._id} className={`bg-white rounded-2xl border shadow-sm p-4 ${d.status==="pending"?"border-amber-300":d.status==="approved"?"border-green-200":"border-red-200"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-gray-900">{d.name}</span>
+                  <Badge color={d.status==="approved"?"green":d.status==="pending"?"amber":"red"}>{d.status}</Badge>
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">👤 {d.username} · {d.role}</div>
+                <div className="text-xs text-gray-400">📱 {d.deviceName} · {d.browser}</div>
+                <div className="text-xs text-gray-400">🕐 {d.loginTime}</div>
+                <div className="text-xs text-gray-300 mt-0.5 font-mono">{d.deviceId?.slice(0,20)}...</div>
+              </div>
+            </div>
+            <div className="mt-3 flex gap-1">
+              {d.status !== "approved" && (
+                <button onClick={() => updateDevice(d._id, "approved")} className="flex-1 bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">✅ Approve</button>
+              )}
+              {d.status !== "rejected" && (
+                <button onClick={() => updateDevice(d._id, "rejected")} className="flex-1 bg-red-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-red-600">❌ Reject</button>
+              )}
+              <button onClick={() => deleteDevice(d._id)} className="bg-gray-100 text-gray-600 px-3 py-2 rounded-xl text-xs font-bold hover:bg-gray-200">🗑️</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 function Login({ onLogin }) {
   const [username, setUsername] = useState("");
@@ -1069,36 +1258,34 @@ function WorkerReport({ user }) {
 }
 
 // ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
+
 function DailyReport({ user }) {
   const [siteWorks, setSiteWorks] = useState([]);
-  const [workers, setWorkers] = useState([]);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("running");
   const [selectedSite, setSelectedSite] = useState(null);
-  const [addReportModal, setAddReportModal] = useState(false);
-  const [viewReportModal, setViewReportModal] = useState(null);
+  const [addModal, setAddModal] = useState(false);
+  const [viewModal, setViewModal] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
-
-  const emptyReport = {
-    siteName:"", siteId:"", date:today(), siteStatus:"running",
-    workersCount:"", totalArea:"", completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"",
-    materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"", materialRemarks:"",
-    extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"", extraWorkRemarks:"",
-    payments:[], complaints:"", actionTaken:"", complaintRemarks:"",
-  };
-  const [form, setForm] = useState(emptyReport);
-  const [payForm, setPayForm] = useState({ type:"Worker Payment", mode:"Cash", amount:"", paidTo:"", remarks:"" });
+  const emptyForm = { siteName:"", siteId:"", date:today(), siteStatus:"running", workersCount:"", totalArea:"", completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"", materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"", extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"", payments:[], complaints:"", actionTaken:"" };
+  const [form, setForm] = useState(emptyForm);
+  const [payForm, setPayForm] = useState({type:"Worker Payment",mode:"Cash",amount:"",paidTo:"",remarks:""});
+  const [siteSearch, setSiteSearch] = useState("");
 
   useEffect(()=>{
-    Promise.all([api("GET","/sitework"),api("GET","/workers"),api("GET","/dailyreport")]).then(([sw,w,dr])=>{
-      const mySites = (Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name||user.role==="admin");
-      setSiteWorks(mySites);
-      setWorkers(Array.isArray(w)?w:[]);
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks(Array.isArray(sw)?sw:[]);
       setReports(Array.isArray(dr)?dr:[]);
       setLoading(false);
     });
   },[]);
+
+  const mySites = siteWorks.filter(s=>user.role==="admin"||s.addedBy===user.name);
+  const planned = mySites.filter(s=>s.status==="pending");
+  const running = mySites.filter(s=>s.status==="running");
+  const completed = mySites.filter(s=>s.status==="completed");
+  const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id).sort((a,b)=>b.date.localeCompare(a.date));
 
   const addPayment = () => {
     if (!payForm.amount) return;
@@ -1108,140 +1295,90 @@ function DailyReport({ user }) {
 
   const save = async () => {
     if (!form.siteName||!form.date) return;
-    // Save payments to workerpayments collection
     for (const p of (form.payments||[])) {
-      if (p.type==="Worker Payment") {
-        await api("POST","/workerpayments",{workerName:p.paidTo,amount:p.amount,date:form.date,note:p.remarks,addedBy:user.name,reportDate:form.date});
-      }
+      if (p.type==="Worker Payment"&&p.paidTo) await api("POST","/workerpayments",{workerName:p.paidTo,amount:p.amount,date:form.date,note:p.remarks,addedBy:user.name});
     }
     const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
     const item = await api("POST","/dailyreport",{...form,totalPayments,addedBy:user.name});
-    setReports(p=>[item,...p]);
-    setAddReportModal(false);
-    setForm(emptyReport);
+    if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setSiteSearch(""); }
   };
 
-  const openAddReport = (site) => {
-    setForm({...emptyReport, siteName:site.customerName, siteId:site._id, interlockType:site.interlockType||"", totalArea:site.workSize||"", siteStatus:site.status||"running"});
-    setAddReportModal(true);
+  const openAdd = (site) => {
+    setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",totalArea:site.workSize||"",siteStatus:site.status||"running"});
+    setSiteSearch(site.customerName);
+    setAddModal(true);
   };
-
-  const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
-
-  const planned = siteWorks.filter(s=>s.status==="pending");
-  const running = siteWorks.filter(s=>s.status==="running");
-  const completed = siteWorks.filter(s=>s.status==="completed");
-
-  const tabs = [
-    {id:"planned",label:"Planned",icon:"📋",count:planned.length,color:"gray"},
-    {id:"running",label:"Running",icon:"🔄",count:running.length,color:"amber"},
-    {id:"completed",label:"Completed",icon:"✅",count:completed.length,color:"green"},
-  ];
 
   if (loading) return <Loader />;
 
-  // Site Detail View
   if (selectedSite) {
-    const siteReports = getSiteReports(selectedSite).sort((a,b)=>b.date.localeCompare(a.date));
-    const totalCompleted = siteReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-    const totalPayments = siteReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-    const allPayments = siteReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
-    const allMaterials = siteReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
-    const allExtraWork = siteReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
-    const allComplaints = siteReports.filter(r=>r.complaints).map(r=>({complaint:r.complaints,action:r.actionTaken,date:r.date}));
-
-    const dateReport = selectedDate ? siteReports.find(r=>r.date===selectedDate) : null;
-
+    const sr = getSiteReports(selectedSite);
+    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          <button onClick={()=>openAddReport(selectedSite)} className="bg-amber-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-600">+ Daily Report</button>
+          <button onClick={()=>openAdd(selectedSite)} className="bg-amber-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">+ Daily Entry</button>
         </div>
-
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
             <div>
-              <div className="font-black text-xl text-gray-900">{selectedSite.customerName}</div>
-              <div className="text-sm text-gray-500">📍 {selectedSite.siteLocation||"—"}</div>
-              <div className="text-xs text-gray-400">📞 {selectedSite.phone||"—"} · 🧱 {selectedSite.interlockType||"—"}</div>
+              <div className="font-black text-xl">{selectedSite.customerName}</div>
+              <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · 📞 {selectedSite.phone||"—"}</div>
+              <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · By: {selectedSite.addedBy||"—"}</div>
             </div>
-            <Badge color={selectedSite.status==="completed"?"green":selectedSite.status==="running"?"amber":"gray"}>{selectedSite.status||"pending"}</Badge>
+            <Badge color={selectedSite.status==="completed"?"green":selectedSite.status==="running"?"amber":"gray"}>{selectedSite.status}</Badge>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{selectedSite.workSize||"—"} sqft</div><div className="text-gray-400">Total Area</div></div>
-            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{totalCompleted} sqft</div><div className="text-gray-400">Completed</div></div>
+          <div className="mt-3 grid grid-cols-4 gap-1 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{selectedSite.workSize||"—"}</div><div className="text-gray-400">Total sqft</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp}</div><div className="text-gray-400">Done</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
             <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
           </div>
         </div>
-
-        {/* Date selector */}
         <div className="bg-white rounded-2xl border shadow-sm p-3">
-          <div className="text-xs font-bold text-gray-500 mb-2">📅 Filter by Date</div>
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates ({siteReports.length} reports)</option>
-            {siteReports.map(r=><option key={r._id} value={r.date}>{r.date}</option>)}
+            <option value="">All Dates ({sr.length} reports)</option>
+            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
         </div>
-
-        {/* Date-specific view */}
-        {dateReport ? (
+        {dateReport?(
           <div className="space-y-3">
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Activity on {selectedDate}</div>
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate}</div>
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||"0"}</div><div className="text-gray-400">Workers</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||"0"} sqft</div><div className="text-gray-400">Done Today</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
             </div>
             {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
-            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} — {dateReport.materialQty} (Supplier: {dateReport.supplierName||"—"})</div></SectionBox>}
-            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty} · {CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
             {(dateReport.payments||[]).length>0&&(
               <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=>(
-                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
-                    <span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span>
-                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
-                  </div>
-                ))}
+                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
+                <div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
               </SectionBox>
             )}
-            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-500 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
           </div>
-        ) : (
+        ):(
           <div className="space-y-3">
-            <div className="text-xs font-black text-gray-500 uppercase">📊 Site Overview (All Time)</div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black text-gray-900">{siteReports.length}</div><div className="text-xs text-gray-400">Daily Reports</div></div>
-              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPayments)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
-            </div>
-            {allMaterials.length>0&&(
-              <SectionBox title="Material History" icon="🧱" color="teal">
-                {allMaterials.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}
-              </SectionBox>
-            )}
-            {allExtraWork.length>0&&(
-              <SectionBox title="Extra Work History" icon="➕" color="orange">
-                {allExtraWork.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc} ({e.qty})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}
-              </SectionBox>
-            )}
-            {allPayments.length>0&&(
-              <SectionBox title="Payment History" icon="💰" color="green">
-                {allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
-              </SectionBox>
-            )}
-            {allComplaints.length>0&&(
-              <SectionBox title="Complaints" icon="⚠️" color="red">
-                {allComplaints.map((c,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{c.date} · {c.complaint}</div>{c.action&&<div className="text-gray-400">Action: {c.action}</div>}</div>)}
-              </SectionBox>
-            )}
-            <div className="text-xs font-black text-gray-500 uppercase mt-2">📅 Daily Reports</div>
-            {siteReports.length===0&&<EmptyState icon="📋" text="No reports submitted yet" />}
-            {siteReports.map(r=>(
-              <div key={r._id} onClick={()=>setViewReportModal(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
+            {allPayments.length>0&&<SectionBox title="Payment History" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work History" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports</div>
+            {sr.length===0&&<EmptyState icon="📋" text="No reports yet" />}
+            {sr.map(r=>(
+              <div key={r._id} onClick={()=>setViewModal(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
-                  <div><div className="font-black text-gray-900">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft done</div></div>
-                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={r.siteStatus==="completed"?"green":r.siteStatus==="running"?"amber":"gray"}>{r.siteStatus}</Badge></div>
+                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div>
+                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus}</Badge></div>
                 </div>
               </div>
             ))}
@@ -1251,174 +1388,112 @@ function DailyReport({ user }) {
     );
   }
 
-  // Main site list
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
+        <button onClick={()=>{setForm(emptyForm);setSiteSearch("");setAddModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
+      </div>
       <div className="flex gap-1">
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setActiveTab(t.id)}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${activeTab===t.id?"bg-amber-500 text-white shadow":"bg-white border border-gray-200 text-gray-600"}`}>
-            {t.icon} {t.label} ({t.count})
-          </button>
+        {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label} ({t.c})</button>
         ))}
       </div>
+      <div className="space-y-3">
+        {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
+          const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"?"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0">+ Entry</button></div></div>);
+        }))}
+        {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
+        )))}
+        {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>(
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div></div>
+        )))}
+      </div>
 
-      {activeTab==="planned"&&(
-        <div className="space-y-3">
-          {planned.length===0&&<EmptyState icon="📋" text="No planned sites" />}
-          {planned.map(s=>(
-            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-              <div className="flex items-start justify-between">
-                <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div><div className="text-xs text-gray-400">📅 Start: {s.startDate||"—"} · {s.workSize||"—"} sqft</div><div className="text-xs text-gray-400">🧱 {s.interlockType||"—"}</div></div>
-                <Badge color="gray">Planned</Badge>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {activeTab==="running"&&(
-        <div className="space-y-3">
-          {running.length===0&&<EmptyState icon="🔄" text="No running sites" />}
-          {running.map(s=>{
-            const sr = getSiteReports(s);
-            const completed = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-            const workerCount = sr.length>0?(sr[sr.length-1].workersCount||0):0;
-            return (
-              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="flex items-start justify-between">
-                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
-                  <Badge color="amber">Running</Badge>
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{workerCount}</div><div className="text-gray-400">Workers</div></div>
-                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{completed}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
-                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {activeTab==="completed"&&(
-        <div className="space-y-3">
-          {completed.length===0&&<EmptyState icon="✅" text="No completed sites" />}
-          {completed.map(s=>{
-            const sr = getSiteReports(s);
-            const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-            const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-            return (
-              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="flex items-start justify-between">
-                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.endDate||"—"}</div></div>
-                  <Badge color="green">Done</Badge>
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Completed</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Received</div></div>
-                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Add Daily Report Modal */}
-      {addReportModal&&(
-        <Modal title={`Daily Report — ${form.siteName}`} onClose={()=>setAddReportModal(false)} wide>
+      {addModal&&(
+        <Modal title="Add Daily Report" onClose={()=>setAddModal(false)} wide>
           <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name * (search or type)</label>
+              <input list="site-list" value={siteSearch} onChange={e=>{
+                setSiteSearch(e.target.value);
+                const found=mySites.find(s=>s.customerName===e.target.value);
+                if(found) setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,totalArea:found.workSize||f.totalArea,siteStatus:found.status||"running"}));
+                else setForm(f=>({...f,siteName:e.target.value,siteId:""}));
+              }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
+              <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
+              {form.siteId&&<div className="text-xs text-green-600 font-semibold mt-1">✓ Linked to existing site</div>}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
               <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
             </div>
-
             <SectionBox title="Work Progress" icon="📐" color="blue">
               <div className="grid grid-cols-2 gap-2">
                 <Input label="Workers Today" type="number" value={form.workersCount||""} onChange={e=>setForm({...form,workersCount:e.target.value})} placeholder="0" />
                 <Input label="Total Area (sqft)" type="number" value={form.totalArea||""} onChange={e=>setForm({...form,totalArea:e.target.value})} placeholder="0" />
                 <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
-                <Input label="Total Completed (sqft)" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
+                <Input label="Total Done Till Date (sqft)" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
               </div>
-              <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} placeholder="Type of interlock" />
+              <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} />
               <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
             </SectionBox>
-
             <SectionBox title="Materials & Equipment" icon="🧱" color="teal">
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Materials Unloaded" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
+                <Input label="Materials" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
                 <Input label="Quantity" value={form.materialQty||""} onChange={e=>setForm({...form,materialQty:e.target.value})} placeholder="e.g. 50 bags" />
-                <Input label="Equipment Used" value={form.equipment||""} onChange={e=>setForm({...form,equipment:e.target.value})} placeholder="e.g. JCB, Mixer" />
-                <Input label="Supplier Name" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier" />
+                <Input label="Equipment" value={form.equipment||""} onChange={e=>setForm({...form,equipment:e.target.value})} placeholder="e.g. Mixer" />
+                <Input label="Supplier" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier name" />
               </div>
-              <Textarea label="Remarks" value={form.materialRemarks||""} onChange={e=>setForm({...form,materialRemarks:e.target.value})} placeholder="Additional remarks..." />
             </SectionBox>
-
             <SectionBox title="Extra Work" icon="➕" color="orange">
               <div className="grid grid-cols-2 gap-2">
                 <Input label="Description" value={form.extraWorkDesc||""} onChange={e=>setForm({...form,extraWorkDesc:e.target.value})} placeholder="Extra work done" />
-                <Input label="Qty / Sqft" value={form.extraWorkQty||""} onChange={e=>setForm({...form,extraWorkQty:e.target.value})} placeholder="Quantity" />
+                <Input label="Qty / Sqft" value={form.extraWorkQty||""} onChange={e=>setForm({...form,extraWorkQty:e.target.value})} />
                 <Input label={`Cost (${CURRENCY})`} type="number" value={form.extraWorkCost||""} onChange={e=>setForm({...form,extraWorkCost:e.target.value})} placeholder="0" />
               </div>
-              <Textarea label="Remarks" value={form.extraWorkRemarks||""} onChange={e=>setForm({...form,extraWorkRemarks:e.target.value})} />
             </SectionBox>
-
             <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <div className="space-y-2">
-                <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Client Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
-                <Select label="Payment Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
-                  <Input label="Paid To / From" value={payForm.paidTo} onChange={e=>setPayForm({...payForm,paidTo:e.target.value})} placeholder="Name" />
-                </div>
-                <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
-                <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
-                {(form.payments||[]).map((p,i)=>(
-                  <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs">
-                    <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
-                    <span className="font-black text-green-700 mx-2">{CURRENCY}{fmt(p.amount)}</span>
-                    <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black">×</button>
-                  </div>
-                ))}
-                {(form.payments||[]).length>0&&<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>}
+              <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Client Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
+              <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+              <div className="grid grid-cols-2 gap-2">
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+                <Input label="Paid To / Received From" value={payForm.paidTo} onChange={e=>setPayForm({...payForm,paidTo:e.target.value})} placeholder="Name" />
               </div>
+              <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
+              {(form.payments||[]).map((p,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs">
+                  <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
+                  <span className="font-black text-green-700 mx-2">{CURRENCY}{fmt(p.amount)}</span>
+                  <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black text-base">×</button>
+                </div>
+              ))}
+              {(form.payments||[]).length>0&&<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>}
             </SectionBox>
-
-            <SectionBox title="Complaints & Issues" icon="⚠️" color="red">
-              <Textarea label="Complaint Description" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues or complaints..." />
-              <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="What was done about it..." />
+            <SectionBox title="Complaints" icon="⚠️" color="red">
+              <Textarea label="Complaint" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues..." />
+              <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
             </SectionBox>
-
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base">Submit Daily Report</button>
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
           </div>
         </Modal>
       )}
-
-      {viewReportModal&&(
-        <Modal title={`Report — ${viewReportModal.date}`} onClose={()=>setViewReportModal(null)}>
+      {viewModal&&(
+        <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
           <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewReportModal.addedBy} · {viewReportModal.siteStatus}</div>
+            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewReportModal.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewReportModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewReportModal.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewModal.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewModal.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
             </div>
-            {viewReportModal.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{viewReportModal.dayNotes}</div></SectionBox>}
-            {viewReportModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewReportModal.materialsUnloaded} · {viewReportModal.materialQty}</div><div className="text-xs text-gray-400">Supplier: {viewReportModal.supplierName||"—"}</div></SectionBox>}
-            {viewReportModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewReportModal.extraWorkDesc} · {viewReportModal.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(viewReportModal.extraWorkCost||0)}</div></SectionBox>}
-            {(viewReportModal.payments||[]).length>0&&(
-              <SectionBox title="Payments" icon="💰" color="green">
-                {viewReportModal.payments.map((p,i)=>(
-                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
-                    <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
-                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
-                  </div>
-                ))}
-              </SectionBox>
-            )}
-            {viewReportModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewReportModal.complaints}</div>{viewReportModal.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {viewReportModal.actionTaken}</div>}</SectionBox>}
+            {viewModal.dayNotes&&<SectionBox title="Notes" icon="📝" color="gray"><div className="text-sm">{viewModal.dayNotes}</div></SectionBox>}
+            {viewModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewModal.materialsUnloaded} · {viewModal.materialQty}</div></SectionBox>}
+            {viewModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewModal.extraWorkDesc}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(viewModal.extraWorkCost||0)}</div></SectionBox>}
+            {(viewModal.payments||[]).length>0&&(<SectionBox title="Payments" icon="💰" color="green">{viewModal.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>)}
+            {viewModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewModal.complaints}</div></SectionBox>}
           </div>
         </Modal>
       )}
@@ -1429,38 +1504,37 @@ function DailyReport({ user }) {
 function SupervisorReports({ allUsers }) {
   const [selectedSupervisor, setSelectedSupervisor] = useState("");
   const [siteWorks, setSiteWorks] = useState([]);
-  const [dailyReports, setDailyReports] = useState([]);
+  const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("running");
   const [selectedSite, setSelectedSite] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [filterSite, setFilterSite] = useState("");
-  const [filterDate, setFilterDate] = useState("");
+  const [searchSite, setSearchSite] = useState("");
+  const [searchDate, setSearchDate] = useState("");
 
-  const supervisors = allUsers.filter(u=>u.role==="supervisor");
+  const supervisors = (allUsers||[]).filter(u=>u.role==="supervisor");
 
   useEffect(()=>{
     if (!selectedSupervisor) return;
     setLoading(true);
     Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
       setSiteWorks((Array.isArray(sw)?sw:[]).filter(x=>x.addedBy===selectedSupervisor));
-      setDailyReports((Array.isArray(dr)?dr:[]).filter(x=>x.addedBy===selectedSupervisor));
+      setReports((Array.isArray(dr)?dr:[]).filter(x=>x.addedBy===selectedSupervisor));
       setLoading(false);
     });
   },[selectedSupervisor]);
 
   const getSiteReports = (site) => {
-    let r = dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
-    if (filterDate) r = r.filter(x=>x.date===filterDate);
+    let r = reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+    if (searchDate) r = r.filter(x=>x.date===searchDate);
     return r.sort((a,b)=>b.date.localeCompare(a.date));
   };
 
-  const planned = siteWorks.filter(s=>s.status==="pending");
-  const running = siteWorks.filter(s=>s.status==="running");
-  const completed = siteWorks.filter(s=>s.status==="completed");
-  const tabs = [{id:"planned",label:"Planned",count:planned.length},{id:"running",label:"Running",count:running.length},{id:"completed",label:"Completed",count:completed.length}];
+  const filterSites = (list) => list.filter(s=>!searchSite||(s.customerName||"").toLowerCase().includes(searchSite.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(searchSite.toLowerCase()));
 
-  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
+  const planned = filterSites(siteWorks.filter(s=>s.status==="pending"));
+  const running = filterSites(siteWorks.filter(s=>s.status==="running"));
+  const completed = filterSites(siteWorks.filter(s=>s.status==="completed"));
 
   const approveSite = async (id) => {
     await api("PUT",`/sitework/${id}`,{status:"completed"});
@@ -1469,14 +1543,13 @@ function SupervisorReports({ allUsers }) {
   };
 
   if (selectedSite) {
-    const siteReports = getSiteReports(selectedSite);
-    const allPayments = siteReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
-    const allMaterials = siteReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
-    const allExtra = siteReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
-    const totalCompleted = siteReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-    const totalPaid = siteReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-    const dateReport = selectedDate?siteReports.find(r=>r.date===selectedDate):null;
-
+    const sr = getSiteReports(selectedSite);
+    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -1485,55 +1558,53 @@ function SupervisorReports({ allUsers }) {
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
-            <div><div className="font-black text-xl">{selectedSite.customerName}</div><div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy}</div><div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div></div>
+            <div>
+              <div className="font-black text-xl">{selectedSite.customerName}</div>
+              <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy}</div>
+              <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+            </div>
             <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
           </div>
-          <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
-            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{siteReports.length}</div><div className="text-gray-400">Reports</div></div>
-            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalCompleted} sqft</div><div className="text-gray-400">Done</div></div>
+          <div className="mt-3 grid grid-cols-4 gap-1 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Done</div></div>
             <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
             <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
           </div>
         </div>
-
         <div className="bg-white rounded-2xl border shadow-sm p-3">
-          <div className="text-xs font-bold text-gray-500 mb-2">📅 Select Date to View Activity</div>
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 Filter by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates</option>
-            {siteReports.map(r=><option key={r._id} value={r.date}>{r.date}</option>)}
+            <option value="">All Dates ({reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).length} reports)</option>
+            {reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
         </div>
-
         {dateReport?(
           <div className="space-y-3">
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Activity on {selectedDate}</div>
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate}</div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done Today</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
             </div>
             {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
             {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
-            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc}</div><div className="font-bold text-orange-700 text-xs">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
-            {(dateReport.payments||[]).length>0&&(
-              <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
-              </SectionBox>
-            )}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).length>0&&(<SectionBox title="Payments" icon="💰" color="green">{dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div></SectionBox>)}
             {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
           </div>
         ):(
           <div className="space-y-3">
-            {allMaterials.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMaterials.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier}</span></div>)}</SectionBox>}
-            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
-            {allPayments.length>0&&<SectionBox title="Payment History" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports</div>
-            {siteReports.length===0&&<EmptyState icon="📋" text="No reports yet" />}
-            {siteReports.map(r=>(
+            {allPayments.length>0&&<SectionBox title="All Payments" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 All Reports</div>
+            {sr.length===0&&<EmptyState icon="📋" text="No reports yet" />}
+            {sr.map(r=>(
               <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
                 <div className="flex items-center justify-between">
-                  <div><div className="font-black text-gray-900">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
-                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={r.siteStatus==="completed"?"green":"amber"}>{r.siteStatus}</Badge></div>
+                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus}</Badge></div>
                 </div>
               </div>
             ))}
@@ -1547,72 +1618,58 @@ function SupervisorReports({ allUsers }) {
     <div className="space-y-4">
       <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
       <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <Select label="Select Supervisor" value={selectedSupervisor} options={[{value:"",label:"-- Select --"},...supervisors.map(s=>({value:s.name,label:`${s.name} (@${s.username})`}))]} onChange={e=>{setSelectedSupervisor(e.target.value);setSelectedSite(null);}} />
-        {selectedSupervisor&&(
-          <div className="grid grid-cols-2 gap-2">
-            <Input label="Filter by Date" type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} />
-            <button onClick={()=>setFilterDate("")} className="text-xs text-gray-400 hover:text-gray-600 mt-5">Clear</button>
-          </div>
-        )}
+        <Select label="Select Supervisor" value={selectedSupervisor} options={[{value:"",label:"-- Select Supervisor --"},...supervisors.map(s=>({value:s.name,label:`${s.name} (@${s.username})`}))]} onChange={e=>{setSelectedSupervisor(e.target.value);setSelectedSite(null);}} />
       </div>
-
       {!selectedSupervisor&&<EmptyState icon="👆" text="Select a supervisor to view their work" />}
       {loading&&<Loader />}
-
       {selectedSupervisor&&!loading&&(
         <>
+          <div className="bg-white rounded-2xl border shadow-sm p-3 space-y-2">
+            <input value={searchSite} onChange={e=>setSearchSite(e.target.value)} placeholder="🔍 Search site name or location..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            <div className="flex gap-2 items-center">
+              <Input label="Filter by date" type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} />
+              {(searchSite||searchDate)&&<button onClick={()=>{setSearchSite("");setSearchDate("");}} className="text-xs text-amber-600 font-bold mt-5 whitespace-nowrap">✕ Clear</button>}
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-gray-50 border rounded-xl p-2 text-center"><div className="font-black">{planned.length}</div><div className="text-xs text-gray-400">Planned</div></div>
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{running.length}</div><div className="text-xs text-gray-400">Running</div></div>
             <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{completed.length}</div><div className="text-xs text-gray-400">Completed</div></div>
           </div>
           <div className="flex gap-1">
-            {tabs.map(t=>(
-              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-                {t.label} ({t.count})
-              </button>
+            {[{id:"running",label:"Running"},{id:"planned",label:"Planned"},{id:"completed",label:"Completed"}].map(t=>(
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
             ))}
           </div>
           <div className="space-y-3">
-            {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites" />:planned.map(s=>(
+            {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
+              const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between"><div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
+                <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button></div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
+                </div>
+              </div>);
+            }))}
+            {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
               <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="font-black text-gray-900">{s.customerName}</div>
-                <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div>
-                <div className="text-xs text-gray-400">{s.workSize||"—"} sqft · 🧱 {s.interlockType||"—"}</div>
+                <div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"} · {s.workSize||"—"} sqft</div>
               </div>
             )))}
-            {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites" />:running.map(s=>{
-              const sr=getSiteReports(s);
-              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-              return (
-                <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                  <div className="flex items-start justify-between">
-                    <div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
-                    <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                    <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
-                    <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                    <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
-                  </div>
+            {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>{
+              const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0); const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+              return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="font-black">{s.customerName}</div>
+                <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
                 </div>
-              );
-            }))}
-            {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites" />:completed.map(s=>{
-              const sr=getSiteReports(s);
-              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-              const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-              return (
-                <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                  <div className="font-black">{s.customerName}</div>
-                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div>
-                  <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                    <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Completed</div></div>
-                    <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Received</div></div>
-                    <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                  </div>
-                </div>
-              );
+              </div>);
             }))}
           </div>
         </>
