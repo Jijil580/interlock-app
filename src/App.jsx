@@ -1273,14 +1273,76 @@ function DailyReport({ user }) {
   const [payForm, setPayForm] = useState({type:"Worker Payment",mode:"Cash",amount:"",paidTo:"",remarks:""});
   const [siteSearch, setSiteSearch] = useState("");
 
-  useEffect(()=>{
-    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
-      setSiteWorks(Array.isArray(sw)?sw:[]);
-      setReports(Array.isArray(dr)?dr:[]);
-      setLoading(false);
-    });
-  },[]);
+  const [siteWorks,setSiteWorks] = useState([]);
 
+const [sitePayments,setSitePayments] = useState([]);
+
+const [paymentForm,setPaymentForm] = useState({
+  siteId:"",
+  siteName:"",
+  paymentType:"Advance",
+  amount:"",
+  paymentMode:"Cash",
+  note:"",
+  date:today()
+});
+
+  useEffect(()=>{
+
+  Promise.all([
+    api("GET","/sitework"),
+    api("GET","/dailyreport"),
+    api("GET","/sitepayments")
+  ]).then(([sw,dr,sp])=>{
+
+    setSiteWorks(Array.isArray(sw)?sw:[]);
+
+    setReports(Array.isArray(dr)?dr:[]);
+
+    setSitePayments(Array.isArray(sp)?sp:[]);
+
+    setLoading(false);
+
+  });
+
+},[]);
+
+
+  
+  
+   const addSitePayment = async () => {
+
+  if(
+    !paymentForm.siteId ||
+    !paymentForm.amount
+  ) return;
+
+  const item = await api(
+    "POST",
+    "/sitepayments",
+    {
+      ...paymentForm,
+      addedBy:user.name
+    }
+  );
+
+  if(item._id){
+
+    setSitePayments(p=>[item,...p]);
+
+    setPaymentForm({
+      siteId:"",
+      siteName:"",
+      paymentType:"Advance",
+      amount:"",
+      paymentMode:"Cash",
+      note:"",
+      date:today()
+    });
+
+    alert("Payment Added Successfully");
+  }
+};
   const mySites = siteWorks.filter(s=>user.role==="admin"||s.addedBy===user.name);
   const planned = mySites.filter(s=>s.status==="pending");
   const running = mySites.filter(s=>s.status==="running");
@@ -1388,117 +1450,413 @@ function DailyReport({ user }) {
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
-        <button onClick={()=>{setForm(emptyForm);setSiteSearch("");setAddModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
-      </div>
-      <div className="flex gap-1">
-        {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
-          <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label} ({t.c})</button>
-        ))}
-      </div>
-      <div className="space-y-3">
-        {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
-          const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"?"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0">+ Entry</button></div></div>);
-        }))}
-        {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
-          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
-        )))}
-        {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>(
-          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div></div>
-        )))}
-      </div>
+ return (
+  <div className="space-y-4">
 
-      {addModal&&(
-        <Modal title="Add Daily Report" onClose={()=>setAddModal(false)} wide>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name * (search or type)</label>
-              <input list="site-list" value={siteSearch} onChange={e=>{
-                setSiteSearch(e.target.value);
-                const found=mySites.find(s=>s.customerName===e.target.value);
-                if(found) setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,totalArea:found.workSize||f.totalArea,siteStatus:found.status||"running"}));
-                else setForm(f=>({...f,siteName:e.target.value,siteId:""}));
-              }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
-              <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
-              {form.siteId&&<div className="text-xs text-green-600 font-semibold mt-1">✓ Linked to existing site</div>}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-              <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
-            </div>
-            <SectionBox title="Work Progress" icon="📐" color="blue">
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Workers Today" type="number" value={form.workersCount||""} onChange={e=>setForm({...form,workersCount:e.target.value})} placeholder="0" />
-                <Input label="Total Area (sqft)" type="number" value={form.totalArea||""} onChange={e=>setForm({...form,totalArea:e.target.value})} placeholder="0" />
-                <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
-                <Input label="Total Done Till Date (sqft)" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
-              </div>
-              <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} />
-              <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
-            </SectionBox>
-            <SectionBox title="Materials & Equipment" icon="🧱" color="teal">
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Materials" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
-                <Input label="Quantity" value={form.materialQty||""} onChange={e=>setForm({...form,materialQty:e.target.value})} placeholder="e.g. 50 bags" />
-                <Input label="Equipment" value={form.equipment||""} onChange={e=>setForm({...form,equipment:e.target.value})} placeholder="e.g. Mixer" />
-                <Input label="Supplier" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier name" />
-              </div>
-            </SectionBox>
-            <SectionBox title="Extra Work" icon="➕" color="orange">
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Description" value={form.extraWorkDesc||""} onChange={e=>setForm({...form,extraWorkDesc:e.target.value})} placeholder="Extra work done" />
-                <Input label="Qty / Sqft" value={form.extraWorkQty||""} onChange={e=>setForm({...form,extraWorkQty:e.target.value})} />
-                <Input label={`Cost (${CURRENCY})`} type="number" value={form.extraWorkCost||""} onChange={e=>setForm({...form,extraWorkCost:e.target.value})} placeholder="0" />
-              </div>
-            </SectionBox>
-            <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Client Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
-              <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
-                <Input label="Paid To / Received From" value={payForm.paidTo} onChange={e=>setPayForm({...payForm,paidTo:e.target.value})} placeholder="Name" />
-              </div>
-              <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
-              {(form.payments||[]).map((p,i)=>(
-                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs">
-                  <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
-                  <span className="font-black text-green-700 mx-2">{CURRENCY}{fmt(p.amount)}</span>
-                  <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black text-base">×</button>
-                </div>
-              ))}
-              {(form.payments||[]).length>0&&<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>}
-            </SectionBox>
-            <SectionBox title="Complaints" icon="⚠️" color="red">
-              <Textarea label="Complaint" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues..." />
-              <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
-            </SectionBox>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewModal.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewModal.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
-            </div>
-            {viewModal.dayNotes&&<SectionBox title="Notes" icon="📝" color="gray"><div className="text-sm">{viewModal.dayNotes}</div></SectionBox>}
-            {viewModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewModal.materialsUnloaded} · {viewModal.materialQty}</div></SectionBox>}
-            {viewModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewModal.extraWorkDesc}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(viewModal.extraWorkCost||0)}</div></SectionBox>}
-            {(viewModal.payments||[]).length>0&&(<SectionBox title="Payments" icon="💰" color="green">{viewModal.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>)}
-            {viewModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewModal.complaints}</div></SectionBox>}
-          </div>
-        </Modal>
-      )}
+    <div className="flex items-center justify-between">
+      <h2 className="text-xl font-black text-gray-900">
+        📋 Daily Report
+      </h2>
+
+      <button
+        onClick={()=>{
+          setForm(emptyForm);
+          setSiteSearch("");
+          setAddModal(true);
+        }}
+        className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow"
+      >
+        + Add
+      </button>
     </div>
-  );
+
+    <div className="flex gap-1">
+
+      {[
+        {
+          id:"running",
+          label:"🔄 Running",
+          c:running.length
+        },
+        {
+          id:"planned",
+          label:"📋 Planned",
+          c:planned.length
+        },
+        {
+          id:"completed",
+          label:"✅ Done",
+          c:completed.length
+        }
+      ].map(t=>(
+
+        <button
+          key={t.id}
+          onClick={()=>setActiveTab(t.id)}
+          className={`flex-1 py-2 rounded-xl text-xs font-bold ${
+            activeTab===t.id
+              ?"bg-amber-500 text-white"
+              :"bg-white border border-gray-200 text-gray-600"
+          }`}
+        >
+          {t.label} ({t.c})
+        </button>
+
+      ))}
+
+    </div>
+
+    <div className="space-y-3">
+
+      {activeTab==="running" && (
+        running.length===0
+        ? <EmptyState icon="🔄" text="No running sites"/>
+        : running.map(s=>{
+
+          const sr=getSiteReports(s);
+
+          const comp=sr.reduce(
+            (a,r)=>a+(+(r.completedToday||0)),
+            0
+          );
+
+          return (
+
+            <div
+              key={s._id}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"
+            >
+
+              <div className="flex items-start justify-between">
+
+                <div
+                  className="flex-1 cursor-pointer"
+                  onClick={()=>setSelectedSite(s)}
+                >
+
+                  <div className="font-black">
+                    {s.customerName}
+                  </div>
+
+                  <div className="text-xs text-gray-400">
+                    📍 {s.siteLocation||"—"} ·
+                    {" "}
+                    {comp}/{s.workSize||"?"} sqft
+                  </div>
+
+                </div>
+
+                <button
+                  onClick={()=>openAdd(s)}
+                  className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0"
+                >
+                  + Entry
+                </button>
+
+              </div>
+
+            </div>
+
+          );
+        })
+      )}
+
+    </div>
+
+    {addModal && (
+
+      <Modal
+        title="Add Daily Report"
+        onClose={()=>setAddModal(false)}
+        wide
+      >
+
+        <div className="space-y-3">
+
+          <div>
+
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              Site Name * (search or type)
+            </label>
+
+            <input
+              list="site-list"
+              value={siteSearch}
+              onChange={e=>{
+
+                setSiteSearch(e.target.value);
+
+                const found=mySites.find(
+                  s=>s.customerName===e.target.value
+                );
+
+                if(found){
+
+                  setForm(f=>({
+                    ...f,
+                    siteName:found.customerName,
+                    siteId:found._id,
+                    interlockType:found.interlockType||f.interlockType,
+                    totalArea:found.workSize||f.totalArea,
+                    siteStatus:found.status||"running"
+                  }));
+
+                }else{
+
+                  setForm(f=>({
+                    ...f,
+                    siteName:e.target.value,
+                    siteId:""
+                  }));
+
+                }
+              }}
+              placeholder="Search or type site name..."
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
+            />
+
+            <datalist id="site-list">
+              {mySites.map(s=>(
+                <option
+                  key={s._id}
+                  value={s.customerName}
+                />
+              ))}
+            </datalist>
+
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+
+            <Input
+              label="Date"
+              type="date"
+              value={form.date}
+              onChange={e=>
+                setForm({
+                  ...form,
+                  date:e.target.value
+                })
+              }
+            />
+
+            <Select
+              label="Site Status"
+              value={form.siteStatus}
+              options={[
+                "pending",
+                "running",
+                "completed"
+              ]}
+              onChange={e=>
+                setForm({
+                  ...form,
+                  siteStatus:e.target.value
+                })
+              }
+            />
+
+          </div>
+
+          <SectionBox
+            title="Payments & Expenses"
+            icon="💰"
+            color="green"
+          >
+
+            <Select
+              label="Payment Type"
+              value={payForm.type}
+              options={[
+                "Worker Payment",
+                "Material Payment",
+                "Equipment Payment",
+                "Client Payment Received",
+                "Other Expense"
+              ]}
+              onChange={e=>
+                setPayForm({
+                  ...payForm,
+                  type:e.target.value
+                })
+              }
+            />
+
+            <Select
+              label="Mode"
+              value={payForm.mode}
+              options={[
+                "Cash",
+                "UPI",
+                "Bank Transfer",
+                "Cheque"
+              ]}
+              onChange={e=>
+                setPayForm({
+                  ...payForm,
+                  mode:e.target.value
+                })
+              }
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+
+              <Input
+                label={`Amount (${CURRENCY})`}
+                type="number"
+                value={payForm.amount}
+                onChange={e=>
+                  setPayForm({
+                    ...payForm,
+                    amount:e.target.value
+                  })
+                }
+                placeholder="0"
+              />
+
+              <Input
+                label="Paid To / Received From"
+                value={payForm.paidTo}
+                onChange={e=>
+                  setPayForm({
+                    ...payForm,
+                    paidTo:e.target.value
+                  })
+                }
+                placeholder="Name"
+              />
+
+            </div>
+
+            <button
+              onClick={addPayment}
+              className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600"
+            >
+              + Add Payment
+            </button>
+
+            {/* NEW SITE PAYMENT ENTRY */}
+
+            <div className="border-t border-green-200 pt-3 mt-3 space-y-3">
+
+              <div className="text-sm font-black text-green-700">
+                🏗️ SITE PAYMENT ENTRY
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+
+                <Select
+                  label="Site"
+                  value={paymentForm.siteId}
+                  options={[
+                    {label:"Select Site",value:""},
+                    ...siteWorks.map(s=>({
+                      label:s.customerName,
+                      value:s._id
+                    }))
+                  ]}
+                  onChange={e=>{
+
+                    const site = siteWorks.find(
+                      s=>s._id===e.target.value
+                    );
+
+                    setPaymentForm({
+                      ...paymentForm,
+                      siteId:e.target.value,
+                      siteName:site?.customerName || ""
+                    });
+                  }}
+                />
+
+                <Select
+                  label="Type"
+                  value={paymentForm.paymentType}
+                  options={[
+                    "Advance",
+                    "Partial",
+                    "Full Payment",
+                    "Material Payment",
+                    "Labour Payment"
+                  ]}
+                  onChange={e=>
+                    setPaymentForm({
+                      ...paymentForm,
+                      paymentType:e.target.value
+                    })
+                  }
+                />
+
+                <Input
+                  label={`Amount (${CURRENCY})`}
+                  type="number"
+                  value={paymentForm.amount}
+                  onChange={e=>
+                    setPaymentForm({
+                      ...paymentForm,
+                      amount:e.target.value
+                    })
+                  }
+                  placeholder="0"
+                />
+
+                <Select
+                  label="Mode"
+                  value={paymentForm.paymentMode}
+                  options={[
+                    "Cash",
+                    "UPI",
+                    "Bank Transfer",
+                    "Cheque"
+                  ]}
+                  onChange={e=>
+                    setPaymentForm({
+                      ...paymentForm,
+                      paymentMode:e.target.value
+                    })
+                  }
+                />
+
+              </div>
+
+              <Textarea
+                label="Note"
+                value={paymentForm.note}
+                onChange={e=>
+                  setPaymentForm({
+                    ...paymentForm,
+                    note:e.target.value
+                  })
+                }
+                placeholder="Payment note..."
+              />
+
+              <button
+                onClick={addSitePayment}
+                className="w-full bg-green-600 text-white py-2.5 rounded-xl text-sm font-black hover:bg-green-700"
+              >
+                + Add Site Payment
+              </button>
+
+            </div>
+
+          </SectionBox>
+
+          <button
+            onClick={save}
+            className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600"
+          >
+            Submit Report
+          </button>
+
+        </div>
+
+      </Modal>
+
+    )}
+
+  </div>
+) ;
 }
 
 function SupervisorReports({ allUsers }) {
@@ -1752,50 +2110,398 @@ function SupervisorWorkView({ user }) {
           );
         })}
       </div>
-      {viewItem&&(
-        <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
-              <Badge color={viewItem.paymentStatus==="paid"?"green":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
-              {user.role==="admin"&&viewItem.status!=="completed"&&<button onClick={()=>approveSite(viewItem._id)} className="ml-auto bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold">✅ Approve & Complete</button>}
+   {viewItem&&(
+  <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
+
+    <div className="space-y-3">
+
+      <div className="flex items-center gap-2 flex-wrap">
+
+        <Badge color={statusColor[viewItem.status]||"gray"}>
+          {viewItem.status}
+        </Badge>
+
+        <Badge
+          color={
+            viewItem.paymentStatus==="paid"
+            ?"green"
+            :"red"
+          }
+        >
+          {viewItem.paymentStatus||"pending"}
+        </Badge>
+
+        {user.role==="admin" &&
+          viewItem.status!=="completed" && (
+
+          <button
+            onClick={()=>approveSite(viewItem._id)}
+            className="ml-auto bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+          >
+            ✅ Approve & Complete
+          </button>
+
+        )}
+
+      </div>
+
+
+      <SectionBox
+        title="Customer"
+        icon="👤"
+        color="blue"
+      >
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Name
             </div>
-            <SectionBox title="Customer" icon="👤" color="blue">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewItem.customerName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewItem.phone||"—"}</div></div>
-                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewItem.siteLocation||"—"}</div></div>
-              </div>
-            </SectionBox>
-            <SectionBox title="Work Details" icon="🧱" color="amber">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewItem.interlockType||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewItem.workSize} {viewItem.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewItem.ratePerUnit}/{viewItem.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
-              </div>
-            </SectionBox>
-            {(viewItem.extraWork||[]).length>0&&(
-              <SectionBox title="Extra Work" icon="➕" color="orange">
-                {(viewItem.extraWork||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty||1}×)</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            {(viewItem.extraMaterials||[]).length>0&&(
-              <SectionBox title="Extra Materials" icon="🧱" color="purple">
-                {(viewItem.extraMaterials||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty} {e.unit})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            <SectionBox title="Costing" icon="💰" color="green">
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between"><span>Base</span><span>{CURRENCY}{fmt(+(viewItem.workSize||0)*(+(viewItem.ratePerUnit||0)))}</span></div>
-                <div className="flex justify-between font-black text-green-700 border-t pt-1"><span>TOTAL</span><span>{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
-                <div className="flex justify-between"><span>Advance</span><span>{CURRENCY}{fmt(viewItem.advancePaid||0)}</span></div>
-                <div className="flex justify-between text-red-600 font-black"><span>Pending</span><span>{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
-              </div>
-            </SectionBox>
+
+            <div className="font-bold">
+              {viewItem.customerName||"—"}
+            </div>
           </div>
-        </Modal>
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Phone
+            </div>
+
+            <div className="font-bold">
+              {viewItem.phone||"—"}
+            </div>
+          </div>
+
+          <div className="col-span-2">
+
+            <div className="text-xs text-gray-400">
+              Location
+            </div>
+
+            <div className="font-bold">
+              {viewItem.siteLocation||"—"}
+            </div>
+
+          </div>
+
+        </div>
+
+      </SectionBox>
+
+
+      <SectionBox
+        title="Work Details"
+        icon="🧱"
+        color="amber"
+      >
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Type
+            </div>
+
+            <div className="font-bold">
+              {viewItem.interlockType||"—"}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Size
+            </div>
+
+            <div className="font-bold">
+              {viewItem.workSize} {viewItem.workUnit}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Rate
+            </div>
+
+            <div className="font-bold">
+              {CURRENCY}
+              {viewItem.ratePerUnit}
+              /
+              {viewItem.workUnit}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-400">
+              Added By
+            </div>
+
+            <div className="font-bold">
+              {viewItem.addedBy||"—"}
+            </div>
+          </div>
+
+        </div>
+
+      </SectionBox>
+
+
+      {(viewItem.extraWork||[]).length>0&&(
+
+        <SectionBox
+          title="Extra Work"
+          icon="➕"
+          color="orange"
+        >
+
+          {(viewItem.extraWork||[]).map((e,i)=>(
+
+            <div
+              key={i}
+              className="flex justify-between text-sm"
+            >
+
+              <span>
+                {e.name} ({e.qty||1}×)
+              </span>
+
+              <span className="font-bold text-orange-700">
+                {CURRENCY}{fmt(e.total)}
+              </span>
+
+            </div>
+
+          ))}
+
+        </SectionBox>
+
       )}
+
+
+      {(viewItem.extraMaterials||[]).length>0&&(
+
+        <SectionBox
+          title="Extra Materials"
+          icon="🧱"
+          color="purple"
+        >
+
+          {(viewItem.extraMaterials||[]).map((e,i)=>(
+
+            <div
+              key={i}
+              className="flex justify-between text-sm"
+            >
+
+              <span>
+                {e.name} ({e.qty} {e.unit})
+              </span>
+
+              <span className="font-bold text-purple-700">
+                {CURRENCY}{fmt(e.total)}
+              </span>
+
+            </div>
+
+          ))}
+
+        </SectionBox>
+
+      )}
+
+
+      <SectionBox
+        title="Costing"
+        icon="💰"
+        color="green"
+      >
+
+        <div className="space-y-1 text-sm">
+
+          <div className="flex justify-between">
+
+            <span>Base</span>
+
+            <span>
+              {CURRENCY}
+              {
+                fmt(
+                  +(viewItem.workSize||0) *
+                  (+(viewItem.ratePerUnit||0))
+                )
+              }
+            </span>
+
+          </div>
+
+          <div className="flex justify-between font-black text-green-700 border-t pt-1">
+
+            <span>TOTAL</span>
+
+            <span>
+              {CURRENCY}
+              {
+                fmt(
+                  +(viewItem.totalCost||
+                  viewItem.totalAmount||0)
+                )
+              }
+            </span>
+
+          </div>
+
+          <div className="flex justify-between">
+
+            <span>Advance</span>
+
+            <span>
+              {CURRENCY}
+              {fmt(viewItem.advancePaid||0)}
+            </span>
+
+          </div>
+
+          <div className="flex justify-between text-red-600 font-black">
+
+  <span>Pending</span>
+
+  <span>
+    {CURRENCY}
+    {fmt(viewItem.pendingAmount||0)}
+  </span>
+
+</div>
+
+
+<div className="grid grid-cols-3 gap-2 mt-3">
+
+  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+
+    <div className="text-xs text-gray-400">
+      Total
+    </div>
+
+    <div className="font-black text-green-700">
+      ₹{fmt(viewItem.totalCost || 0)}
+    </div>
+
+  </div>
+
+
+  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+
+    <div className="text-xs text-gray-400">
+      Received
+    </div>
+
+    <div className="font-black text-blue-700">
+      ₹{fmt(viewItem.advancePaid || 0)}
+    </div>
+
+  </div>
+
+
+  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+
+    <div className="text-xs text-gray-400">
+      Pending
+    </div>
+
+    <div className="font-black text-red-700">
+      ₹{fmt(viewItem.pendingAmount || 0)}
+    </div>
+
+  </div>
+
+</div>
+
+
+</div>
+
+</SectionBox>
+
+      {/* PAYMENT HISTORY */}
+
+      <SectionBox
+        title="Payment History"
+        icon="💳"
+        color="teal"
+      >
+
+        {(sitePayments||[])
+          .filter(
+            p=>p.siteId===viewItem._id
+          )
+          .map(p=>(
+
+            <div
+              key={p._id}
+              className="bg-white rounded-xl border border-teal-100 p-3 mb-2"
+            >
+
+              <div className="flex items-center justify-between">
+
+                <div>
+
+                  <div className="font-black text-sm">
+                    {p.paymentType}
+                  </div>
+
+                  <div className="text-xs text-gray-400">
+                    📅 {p.date}
+                  </div>
+
+                  <div className="text-xs text-gray-500">
+                    👤 {p.addedBy||"—"}
+                  </div>
+
+                </div>
+
+
+                <div className="text-right">
+
+                  <div className="font-black text-teal-700">
+                    {CURRENCY}{fmt(p.amount)}
+                  </div>
+
+                  <div className="text-xs text-gray-400">
+                    {p.paymentMode}
+                  </div>
+
+                </div>
+
+              </div>
+
+              {p.note && (
+
+                <div className="text-xs text-gray-500 mt-2 border-t pt-2">
+                  📝 {p.note}
+                </div>
+
+              )}
+
+            </div>
+
+        ))}
+
+        {(sitePayments||[])
+          .filter(
+            p=>p.siteId===viewItem._id
+          ).length===0 && (
+
+          <div className="text-xs text-gray-400 text-center py-4">
+            No payment history
+          </div>
+
+        )}
+
+      </SectionBox>
+
+    </div>
+
+  </Modal>
+)}
       {viewDailyModal&&(
         <Modal title="Daily Reports" onClose={()=>setViewDailyModal(null)}>
           <div className="space-y-3">
