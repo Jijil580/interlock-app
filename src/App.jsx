@@ -532,6 +532,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [extraWorkTypes, setExtraWorkTypes] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sitePayments,setSitePayments] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [viewItem, setViewItem] = useState(null);
@@ -540,15 +541,18 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
 
   useEffect(()=>{
     Promise.all([
-      api("GET","/masterdata/interlock"),
-      api("GET","/workers"),
-      api("GET","/masterdata/extrawork"),
-      api("GET","/masterdata/materials"),
-    ]).then(([i,w,e,m])=>{
+  api("GET","/masterdata/interlock"),
+  api("GET","/workers"),
+  api("GET","/masterdata/extrawork"),
+  api("GET","/masterdata/materials"),
+  api("GET","/sitepayments"),
+]).then(([i,w,e,m,sp])=>{
       setInterlockTypes(Array.isArray(i)?i:[]);
       setWorkers(Array.isArray(w)?w:[]);
       setExtraWorkTypes(Array.isArray(e)?e:[]);
       setMaterialTypes(Array.isArray(m)?m:[]);
+      setSitePayments(Array.isArray(sp)?sp:[]);
+      
       setLoading(false);
     });
   },[]);
