@@ -3219,30 +3219,6 @@ function AdminWorkerReport() {
 }
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
-function Reports({ production, sales, stock, raw, siteWorks }) {
-  const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
-  const totalIncome = siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0);
-  const totalPending = siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0);
-  const completed = siteWorks.filter(s=>s.status==="completed").length;
-  const running = siteWorks.filter(s=>s.status==="running").length;
-  return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalIncome)}`} icon="💰" color="green" />
-        <StatCard label="Pending" value={`${CURRENCY}${fmt(totalPending)}`} icon="⏳" color="red" />
-        <StatCard label="Sales" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="blue" />
-        <StatCard label="Completed" value={completed} icon="✅" color="teal" />
-      </div>
-      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <div className="font-black text-gray-900 mb-3">📊 Summary</div>
-        {[["Running Sites",running,"amber"],["Completed",completed,"green"],["Total Sites",siteWorks.length,"blue"],["Total Income",`${CURRENCY}${fmt(totalIncome)}`,"green"],["Pending",`${CURRENCY}${fmt(totalPending)}`,"red"]].map(([l,v,c])=>(
-          <div key={l} className="flex justify-between py-2 border-b border-gray-50"><span className="text-sm text-gray-600">{l}</span><span className={`font-black text-${c}-700`}>{v}</span></div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const NAV = {
   admin: [
