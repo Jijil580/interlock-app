@@ -1282,8 +1282,10 @@ function WorkerReport({ user }) {
 
 // ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
 
+// ─── DAILY REPORT (Supervisor) ────────────────────────────────────────────────
 function DailyReport({ user }) {
   const [siteWorks, setSiteWorks] = useState([]);
+  const [workers, setWorkers] = useState([]);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("running");
@@ -1291,14 +1293,25 @@ function DailyReport({ user }) {
   const [addModal, setAddModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
-  const emptyForm = { siteName:"", siteId:"", date:today(), siteStatus:"running", workersCount:"", totalArea:"", completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"", materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"", extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"", payments:[], complaints:"", actionTaken:"" };
-  const [form, setForm] = useState(emptyForm);
-  const [payForm, setPayForm] = useState({type:"Worker Payment",mode:"Cash",amount:"",paidTo:"",remarks:""});
   const [siteSearch, setSiteSearch] = useState("");
 
+  const emptyForm = {
+    siteName:"", siteId:"", date:today(), siteStatus:"running",
+    completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"",
+    materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"",
+    extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"",
+    complaints:"", actionTaken:"",
+    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks}]
+    payments:[], // [{type, workerName, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [workerEntry, setWorkerEntry] = useState({workerName:"",attendance:"present",workDone:"",salary:"",paymentGiven:"",pending:"",remarks:""});
+  const [payForm, setPayForm] = useState({type:"Worker Payment",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""});
+
   useEffect(()=>{
-    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+    Promise.all([api("GET","/sitework"),api("GET","/workers"),api("GET","/dailyreport")]).then(([sw,w,dr])=>{
       setSiteWorks(Array.isArray(sw)?sw:[]);
+      setWorkers(Array.isArray(w)?w:[]);
       setReports(Array.isArray(dr)?dr:[]);
       setLoading(false);
     });
@@ -1310,24 +1323,41 @@ function DailyReport({ user }) {
   const completed = mySites.filter(s=>s.status==="completed");
   const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id).sort((a,b)=>b.date.localeCompare(a.date));
 
+  const addWorkerEntry = () => {
+    if (!workerEntry.workerName) return;
+    const pending = Math.max(0, +(workerEntry.salary||0) - +(workerEntry.paymentGiven||0));
+    setForm(f=>({...f, workerEntries:[...(f.workerEntries||[]),{...workerEntry,pending:String(pending)}]}));
+    setWorkerEntry({workerName:"",attendance:"present",workDone:"",salary:"",paymentGiven:"",pending:"",remarks:""});
+  };
+
   const addPayment = () => {
     if (!payForm.amount) return;
-    setForm(f=>({...f,payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount}]}));
-    setPayForm({type:"Worker Payment",mode:"Cash",amount:"",paidTo:"",remarks:""});
+    setForm(f=>({...f, payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount,pending:+payForm.pending||0,siteName:payForm.siteName||f.siteName}]}));
+    setPayForm({type:"Worker Payment",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""});
   };
 
   const save = async () => {
     if (!form.siteName||!form.date) return;
+    // Auto-save worker payments
+    for (const we of (form.workerEntries||[])) {
+      if (+we.paymentGiven>0) {
+        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,reportDate:form.date});
+      }
+    }
+    // Auto-save payments
     for (const p of (form.payments||[])) {
-      if (p.type==="Worker Payment"&&p.paidTo) await api("POST","/workerpayments",{workerName:p.paidTo,amount:p.amount,date:form.date,note:p.remarks,addedBy:user.name});
+      if (p.type==="Worker Payment"&&p.workerName) {
+        await api("POST","/workerpayments",{workerName:p.workerName,amount:p.amount,date:p.date||form.date,note:p.remarks,addedBy:user.name,reportDate:form.date});
+      }
     }
     const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
-    const item = await api("POST","/dailyreport",{...form,totalPayments,addedBy:user.name});
+    const totalReceived = (form.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0);
+    const item = await api("POST","/dailyreport",{...form,totalPayments,totalReceived,addedBy:user.name});
     if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setSiteSearch(""); }
   };
 
   const openAdd = (site) => {
-    setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",totalArea:site.workSize||"",siteStatus:site.status||"running"});
+    setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"});
     setSiteSearch(site.customerName);
     setAddModal(true);
   };
@@ -1339,9 +1369,12 @@ function DailyReport({ user }) {
     const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
     const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
     const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
     const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+    const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -1360,48 +1393,113 @@ function DailyReport({ user }) {
           <div className="mt-3 grid grid-cols-4 gap-1 text-xs">
             <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{selectedSite.workSize||"—"}</div><div className="text-gray-400">Total sqft</div></div>
             <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp}</div><div className="text-gray-400">Done</div></div>
-            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Received</div></div>
             <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
           </div>
         </div>
+
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
             <option value="">All Dates ({sr.length} reports)</option>
-            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalPayments||0)} paid</option>)}
           </select>
         </div>
+
         {dateReport?(
           <div className="space-y-3">
             <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate}</div>
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
               <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+              <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
             </div>
             {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
-            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
-            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
-            {(dateReport.payments||[]).length>0&&(
-              <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
-                <div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Worker Details" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="bg-white rounded-xl p-2 border border-teal-100 text-xs">
+                    <div className="flex justify-between"><span className="font-bold">{w.workerName}</span><Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></div>
+                    {w.workDone&&<div className="text-gray-500">Work: {w.workDone}</div>}
+                    <div className="flex gap-3 mt-0.5">
+                      {w.salary&&<span>Salary: {CURRENCY}{fmt(w.salary)}</span>}
+                      {w.paymentGiven&&<span className="text-green-700 font-bold">Paid: {CURRENCY}{fmt(w.paymentGiven)}</span>}
+                      {w.pending>0&&<span className="text-red-600">Pending: {CURRENCY}{fmt(w.pending)}</span>}
+                    </div>
+                  </div>
+                ))}
               </SectionBox>
             )}
+            {(dateReport.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}{p.remarks?` · ${p.remarks}`:""}</div></div>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+              </SectionBox>
+            )}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
             {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
           </div>
         ):(
           <div className="space-y-3">
-            {allPayments.length>0&&<SectionBox title="Payment History" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{sr.length}</div><div className="text-xs text-gray-400">Reports</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">Total Received</div></div>
+            </div>
+            {allWorkers.length>0&&(
+              <SectionBox title="Worker Summary" icon="👷" color="teal">
+                {Object.entries(allWorkers.reduce((acc,w)=>{
+                  if (!acc[w.workerName]) acc[w.workerName]={days:0,paid:0,pending:0};
+                  acc[w.workerName].days++;
+                  acc[w.workerName].paid+=+(w.paymentGiven||0);
+                  acc[w.workerName].pending+=+(w.pending||0);
+                  return acc;
+                },{})).map(([name,d])=>(
+                  <div key={name} className="flex justify-between text-xs py-1 border-b border-teal-100">
+                    <span className="font-bold">{name} ({d.days} days)</span>
+                    <span>Paid: {CURRENCY}{fmt(d.paid)} {d.pending>0?`· Pending: ${CURRENCY}${fmt(d.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {allPayments.filter(p=>p.type==="Site Payment Received").length>0&&(
+              <SectionBox title="Payments Received from Site" icon="💰" color="blue">
+                {allPayments.filter(p=>p.type==="Site Payment Received").map((p,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100">
+                    <span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span>
+                    <span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="text-xs font-black text-blue-700 text-right mt-1">Total: {CURRENCY}{fmt(allPayments.filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
+              </SectionBox>
+            )}
+            {allPayments.filter(p=>p.type!=="Site Payment Received").length>0&&(
+              <SectionBox title="Payments Made" icon="💸" color="green">
+                {allPayments.filter(p=>p.type!=="Site Payment Received").map((p,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-green-100">
+                    <span>{p.date} · {p.type}{p.workerName?` → ${p.workerName}`:""}</span>
+                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
             {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
-            {allExtra.length>0&&<SectionBox title="Extra Work History" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports</div>
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 All Daily Reports</div>
             {sr.length===0&&<EmptyState icon="📋" text="No reports yet" />}
             {sr.map(r=>(
               <div key={r._id} onClick={()=>setViewModal(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
-                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div>
-                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus}</Badge></div>
+                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right"><div className="font-black text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recv</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
                 </div>
               </div>
             ))}
@@ -1425,25 +1523,25 @@ function DailyReport({ user }) {
       <div className="space-y-3">
         {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
           const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"?"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0">+ Entry</button></div></div>);
+          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"?"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0 ml-2">+ Entry</button></div></div>);
         }))}
         {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
-          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
         )))}
         {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>(
-          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div></div>
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div></div>
         )))}
       </div>
 
       {addModal&&(
-        <Modal title="Add Daily Report" onClose={()=>setAddModal(false)} wide>
+        <Modal title={`Daily Entry — ${form.siteName||"Select Site"}`} onClose={()=>setAddModal(false)} wide>
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name * (search or type)</label>
               <input list="site-list" value={siteSearch} onChange={e=>{
                 setSiteSearch(e.target.value);
                 const found=mySites.find(s=>s.customerName===e.target.value);
-                if(found) setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,totalArea:found.workSize||f.totalArea,siteStatus:found.status||"running"}));
+                if(found) setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,siteStatus:found.status||"running"}));
                 else setForm(f=>({...f,siteName:e.target.value,siteId:""}));
               }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
               <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
@@ -1453,16 +1551,99 @@ function DailyReport({ user }) {
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
               <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
             </div>
+
             <SectionBox title="Work Progress" icon="📐" color="blue">
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Workers Today" type="number" value={form.workersCount||""} onChange={e=>setForm({...form,workersCount:e.target.value})} placeholder="0" />
-                <Input label="Total Area (sqft)" type="number" value={form.totalArea||""} onChange={e=>setForm({...form,totalArea:e.target.value})} placeholder="0" />
                 <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
-                <Input label="Total Done Till Date (sqft)" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
+                <Input label="Total Done Till Date" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
               </div>
               <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} />
               <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
             </SectionBox>
+
+            <SectionBox title="Worker Details" icon="👷" color="teal">
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+                  <input list="worker-list" value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} placeholder="Select or type worker name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50" />
+                  <datalist id="worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select label="Attendance" value={workerEntry.attendance} options={["present","absent","half-day"]} onChange={e=>setWorkerEntry({...workerEntry,attendance:e.target.value})} />
+                  <Input label="Work Done" value={workerEntry.workDone} onChange={e=>setWorkerEntry({...workerEntry,workDone:e.target.value})} placeholder="e.g. 50 sqft" />
+                  <Input label={`Salary/Wage (${CURRENCY})`} type="number" value={workerEntry.salary} onChange={e=>{
+                    const pending = Math.max(0,+(e.target.value||0)-(+(workerEntry.paymentGiven||0)));
+                    setWorkerEntry({...workerEntry,salary:e.target.value,pending:String(pending)});
+                  }} placeholder="0" />
+                  <Input label={`Payment Given (${CURRENCY})`} type="number" value={workerEntry.paymentGiven} onChange={e=>{
+                    const pending = Math.max(0,+(workerEntry.salary||0)-(+(e.target.value||0)));
+                    setWorkerEntry({...workerEntry,paymentGiven:e.target.value,pending:String(pending)});
+                  }} placeholder="0" />
+                </div>
+                {+(workerEntry.salary||0)>0&&<div className="bg-white rounded-xl p-2 border border-teal-200 flex justify-between text-xs"><span>Pending Salary</span><span className="font-black text-red-600">{CURRENCY}{fmt(Math.max(0,+(workerEntry.salary||0)-(+(workerEntry.paymentGiven||0))))}</span></div>}
+                <Input label="Remarks" value={workerEntry.remarks} onChange={e=>setWorkerEntry({...workerEntry,remarks:e.target.value})} placeholder="Optional" />
+                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-teal-600">+ Add Worker Entry</button>
+              </div>
+              {(form.workerEntries||[]).map((w,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-teal-200 text-xs mt-1">
+                  <div><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>{w.workDone?` · ${w.workDone}`:""}</div>
+                  <div className="flex items-center gap-1">
+                    {w.paymentGiven&&<span className="text-green-700 font-bold">{CURRENCY}{fmt(w.paymentGiven)}</span>}
+                    {+w.pending>0&&<span className="text-red-500">(P:{CURRENCY}{fmt(w.pending)})</span>}
+                    <button onClick={()=>setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}))} className="text-red-400 font-black ml-1">×</button>
+                  </div>
+                </div>
+              ))}
+            </SectionBox>
+
+            <SectionBox title="Payments & Expenses" icon="💰" color="green">
+              <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Site Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""})} />
+              
+              {payForm.type==="Worker Payment"&&(
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+                  <input list="pay-worker-list" value={payForm.workerName} onChange={e=>setPayForm({...payForm,workerName:e.target.value})} placeholder="Select worker..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50" />
+                  <datalist id="pay-worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
+                </div>
+              )}
+              {payForm.type==="Material Payment"&&(
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
+                  <Input label="Supplier" value={payForm.supplierName||""} onChange={e=>setPayForm({...payForm,supplierName:e.target.value})} placeholder="Supplier" />
+                </div>
+              )}
+              {payForm.type==="Equipment Payment"&&(
+                <Input label="Equipment Name" value={payForm.equipmentName||""} onChange={e=>setPayForm({...payForm,equipmentName:e.target.value})} placeholder="Equipment" />
+              )}
+              {payForm.type==="Site Payment Received"&&(
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Received From" value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,receivedFrom:e.target.value})} placeholder="Client name" />
+                  <Input label="Pending Amount" type="number" value={payForm.pending||""} onChange={e=>setPayForm({...payForm,pending:e.target.value})} placeholder="0" />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
+              {(form.payments||[]).map((p,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs mt-1">
+                  <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}</div></div>
+                  <div className="flex items-center gap-1">
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                    <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black ml-1">×</button>
+                  </div>
+                </div>
+              ))}
+              {(form.payments||[]).length>0&&(
+                <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+              )}
+            </SectionBox>
+
             <SectionBox title="Materials & Equipment" icon="🧱" color="teal">
               <div className="grid grid-cols-2 gap-2">
                 <Input label="Materials" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
@@ -1471,6 +1652,7 @@ function DailyReport({ user }) {
                 <Input label="Supplier" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier name" />
               </div>
             </SectionBox>
+
             <SectionBox title="Extra Work" icon="➕" color="orange">
               <div className="grid grid-cols-2 gap-2">
                 <Input label="Description" value={form.extraWorkDesc||""} onChange={e=>setForm({...form,extraWorkDesc:e.target.value})} placeholder="Extra work done" />
@@ -1478,28 +1660,13 @@ function DailyReport({ user }) {
                 <Input label={`Cost (${CURRENCY})`} type="number" value={form.extraWorkCost||""} onChange={e=>setForm({...form,extraWorkCost:e.target.value})} placeholder="0" />
               </div>
             </SectionBox>
-            <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Client Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
-              <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
-                <Input label="Paid To / Received From" value={payForm.paidTo} onChange={e=>setPayForm({...payForm,paidTo:e.target.value})} placeholder="Name" />
-              </div>
-              <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
-              {(form.payments||[]).map((p,i)=>(
-                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs">
-                  <span><span className="font-bold">{p.type}</span> · {p.mode} → {p.paidTo||"—"}</span>
-                  <span className="font-black text-green-700 mx-2">{CURRENCY}{fmt(p.amount)}</span>
-                  <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black text-base">×</button>
-                </div>
-              ))}
-              {(form.payments||[]).length>0&&<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div>}
-            </SectionBox>
+
             <SectionBox title="Complaints" icon="⚠️" color="red">
               <Textarea label="Complaint" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues..." />
               <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
             </SectionBox>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button>
+
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Daily Report</button>
           </div>
         </Modal>
       )}
@@ -1508,14 +1675,33 @@ function DailyReport({ user }) {
           <div className="space-y-3">
             <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewModal.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
               <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewModal.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(viewModal.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewModal.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
             </div>
             {viewModal.dayNotes&&<SectionBox title="Notes" icon="📝" color="gray"><div className="text-sm">{viewModal.dayNotes}</div></SectionBox>}
+            {(viewModal.workerEntries||[]).length>0&&(
+              <SectionBox title="Workers" icon="👷" color="teal">
+                {viewModal.workerEntries.map((w,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                    <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></span>
+                    <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""} {+w.pending>0?`Pending: ${CURRENCY}${fmt(w.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {(viewModal.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {viewModal.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
             {viewModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewModal.materialsUnloaded} · {viewModal.materialQty}</div></SectionBox>}
-            {viewModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewModal.extraWorkDesc}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(viewModal.extraWorkCost||0)}</div></SectionBox>}
-            {(viewModal.payments||[]).length>0&&(<SectionBox title="Payments" icon="💰" color="green">{viewModal.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>)}
+            {viewModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewModal.extraWorkDesc} · {CURRENCY}{fmt(viewModal.extraWorkCost||0)}</div></SectionBox>}
             {viewModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewModal.complaints}</div></SectionBox>}
           </div>
         </Modal>
@@ -1524,6 +1710,7 @@ function DailyReport({ user }) {
   );
 }
 
+// ─── SUPERVISOR OVERVIEW (Admin) ───────────────────────────────────────────────
 function SupervisorReports({ allUsers }) {
   const [selectedSupervisor, setSelectedSupervisor] = useState("");
   const [siteWorks, setSiteWorks] = useState([]);
@@ -1534,6 +1721,7 @@ function SupervisorReports({ allUsers }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [searchSite, setSearchSite] = useState("");
   const [searchDate, setSearchDate] = useState("");
+  const [reportView, setReportView] = useState("daily"); // daily | monthly
 
   const supervisors = (allUsers||[]).filter(u=>u.role==="supervisor");
 
@@ -1554,7 +1742,6 @@ function SupervisorReports({ allUsers }) {
   };
 
   const filterSites = (list) => list.filter(s=>!searchSite||(s.customerName||"").toLowerCase().includes(searchSite.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(searchSite.toLowerCase()));
-
   const planned = filterSites(siteWorks.filter(s=>s.status==="pending"));
   const running = filterSites(siteWorks.filter(s=>s.status==="running"));
   const completed = filterSites(siteWorks.filter(s=>s.status==="completed"));
@@ -1567,17 +1754,32 @@ function SupervisorReports({ allUsers }) {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
-    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
-    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-    const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
-    const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
-    const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+    const allReports = reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).sort((a,b)=>b.date.localeCompare(a.date));
+    const dateReport = selectedDate?allReports.find(r=>r.date===selectedDate):null;
+    const totalComp = allReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalReceived = allReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+    const totalPaid = allReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const allPayments = allReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allWorkers = allReports.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+    const allMats = allReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = allReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+
+    // Monthly grouping
+    const byMonth = allReports.reduce((acc,r)=>{
+      const m = r.date?.slice(0,7)||"unknown";
+      if (!acc[m]) acc[m]={reports:[],received:0,paid:0,completed:0};
+      acc[m].reports.push(r);
+      acc[m].received+=+(r.totalReceived||0);
+      acc[m].paid+=+(r.totalPayments||0);
+      acc[m].completed+=+(r.completedToday||0);
+      return acc;
+    },{});
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          {selectedSite.status!=="completed"&&<button onClick={()=>approveSite(selectedSite._id)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">✅ Approve & Complete</button>}
+          {selectedSite.status!=="completed"&&<button onClick={()=>approveSite(selectedSite._id)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">✅ Approve</button>}
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
@@ -1588,49 +1790,141 @@ function SupervisorReports({ allUsers }) {
             </div>
             <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
           </div>
-          <div className="mt-3 grid grid-cols-4 gap-1 text-xs">
-            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
-            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Done</div></div>
-            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Total Received</div></div>
             <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Work Done</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Total Paid Out</div></div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl border shadow-sm p-3">
-          <div className="text-xs font-bold text-gray-500 mb-2">📅 Filter by Date</div>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates ({reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).length} reports)</option>
-            {reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).sort((a,b)=>b.date.localeCompare(a.date)).map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
-          </select>
+
+        <div className="flex gap-1">
+          {["daily","monthly","workers","payments"].map(v=>(
+            <button key={v} onClick={()=>setReportView(v)} className={`flex-1 py-1.5 rounded-xl text-xs font-bold ${reportView===v?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+              {v==="daily"?"📅 Daily":v==="monthly"?"📆 Monthly":v==="workers"?"👷 Workers":"💰 Payments"}
+            </button>
+          ))}
         </div>
-        {dateReport?(
-          <div className="space-y-3">
-            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate}</div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
-              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
-              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid</div></div>
-            </div>
-            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
-            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
-            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
-            {(dateReport.payments||[]).length>0&&(<SectionBox title="Payments" icon="💰" color="green">{dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100"><span><span className="font-bold">{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right">Total: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}</div></SectionBox>)}
-            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
-          </div>
-        ):(
-          <div className="space-y-3">
-            {allPayments.length>0&&<SectionBox title="All Payments" icon="💰" color="green">{allPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.type} → {p.paidTo||"—"}</span><span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
-            {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
-            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 All Reports</div>
-            {sr.length===0&&<EmptyState icon="📋" text="No reports yet" />}
-            {sr.map(r=>(
-              <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
-                <div className="flex items-center justify-between">
-                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
-                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus}</Badge></div>
+
+        {reportView==="daily"&&(
+          <div className="space-y-2">
+            <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+              <option value="">All Dates ({allReports.length} reports)</option>
+              {allReports.map(r=><option key={r._id} value={r.date}>{r.date} — {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalReceived||0)} recd</option>)}
+            </select>
+            {dateReport?(
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
                 </div>
+                {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+                {(dateReport.workerEntries||[]).length>0&&(
+                  <SectionBox title="Worker Details" icon="👷" color="teal">
+                    {dateReport.workerEntries.map((w,i)=>(
+                      <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                        <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>{w.workDone?` · ${w.workDone}`:""}</span>
+                        <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""} {+w.pending>0?`P:${CURRENCY}${fmt(w.pending)}`:""}</span>
+                      </div>
+                    ))}
+                  </SectionBox>
+                )}
+                {(dateReport.payments||[]).length>0&&(
+                  <SectionBox title="Payments" icon="💰" color="green">
+                    {dateReport.payments.map((p,i)=>(
+                      <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                        <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
+                        <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                      </div>
+                    ))}
+                  </SectionBox>
+                )}
+                {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty} (Supplier: {dateReport.supplierName||"—"})</div></SectionBox>}
+                {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+                {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+              </div>
+            ):(
+              <div className="space-y-2">
+                {allReports.map(r=>(
+                  <div key={r._id} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-xl border p-3 cursor-pointer hover:border-amber-300 transition-all">
+                    <div className="flex justify-between items-center">
+                      <div><div className="font-black text-sm">📅 {r.date}</div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
+                      <div className="text-right"><div className="text-xs font-bold text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recd</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
+                    </div>
+                  </div>
+                ))}
+                {allReports.length===0&&<EmptyState icon="📋" text="No reports" />}
+              </div>
+            )}
+          </div>
+        )}
+
+        {reportView==="monthly"&&(
+          <div className="space-y-3">
+            {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+              <div key={month} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black text-gray-900 mb-2">📆 {month}</div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{data.completed} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(data.received)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+                <div className="text-xs text-gray-400 mt-1">{data.reports.length} daily reports</div>
               </div>
             ))}
+            {Object.keys(byMonth).length===0&&<EmptyState icon="📆" text="No reports" />}
+          </div>
+        )}
+
+        {reportView==="workers"&&(
+          <div className="space-y-3">
+            {Object.entries(allWorkers.reduce((acc,w)=>{
+              if (!acc[w.workerName]) acc[w.workerName]={days:0,absent:0,paid:0,pending:0,work:[],entries:[]};
+              if (w.attendance==="present") acc[w.workerName].days++;
+              else acc[w.workerName].absent++;
+              acc[w.workerName].paid+=+(w.paymentGiven||0);
+              acc[w.workerName].pending+=+(w.pending||0);
+              if (w.workDone) acc[w.workerName].work.push(`${w.date}: ${w.workDone}`);
+              acc[w.workerName].entries.push(w);
+              return acc;
+            },{})).map(([name,d])=>(
+              <div key={name} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black text-gray-900 mb-2">👷 {name}</div>
+                <div className="grid grid-cols-4 gap-1 text-xs mb-2">
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{d.days}</div><div className="text-gray-400">Present</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{d.absent}</div><div className="text-gray-400">Absent</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(d.paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(d.pending)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+                {d.work.length>0&&<div className="text-xs text-gray-400">{d.work.slice(0,3).join(" · ")}</div>}
+              </div>
+            ))}
+            {allWorkers.length===0&&<EmptyState icon="👷" text="No worker data" />}
+          </div>
+        )}
+
+        {reportView==="payments"&&(
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="font-black text-blue-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Received from Site</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="font-black text-green-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid Out</div></div>
+            </div>
+            {["Site Payment Received","Worker Payment","Material Payment","Equipment Payment","Other Expense"].map(type=>{
+              const pts = allPayments.filter(p=>p.type===type);
+              if (pts.length===0) return null;
+              return (
+                <SectionBox key={type} title={type} icon={type==="Site Payment Received"?"💰":"💸"} color={type==="Site Payment Received"?"blue":"green"}>
+                  {pts.map((p,i)=>(
+                    <div key={i} className="text-xs flex justify-between py-1 border-b border-gray-100">
+                      <span>{p.date}{p.workerName?` · ${p.workerName}`:""}{p.receivedFrom?` · ${p.receivedFrom}`:""} · {p.mode}</span>
+                      <span className="font-black">{CURRENCY}{fmt(p.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="text-xs font-black text-right mt-1">Total: {CURRENCY}{fmt(pts.reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
+                </SectionBox>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1666,30 +1960,34 @@ function SupervisorReports({ allUsers }) {
           </div>
           <div className="space-y-3">
             {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
-              const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              const sr=reports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
               return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-start justify-between"><div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
                 <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button></div>
                 <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
                   <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
                   <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
-                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{sr.length}</div><div className="text-gray-400">Reports</div></div>
                 </div>
               </div>);
             }))}
             {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
               <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"} · {s.workSize||"—"} sqft</div>
+                <div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div>
               </div>
             )))}
             {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>{
-              const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0); const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+              const sr=reports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+              const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+              const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
               return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="font-black">{s.customerName}</div>
                 <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div>
                 <div className="mt-1 grid grid-cols-3 gap-1 text-xs">
-                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Done</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid Out</div></div>
                   <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
                 </div>
               </div>);
@@ -1701,140 +1999,272 @@ function SupervisorReports({ allUsers }) {
   );
 }
 
-function SupervisorWorkView({ user }) {
-  const [siteWorks, setSiteWorks] = useState([]);
+// ─── REPORTS (Admin) ──────────────────────────────────────────────────────────
+function Reports({ production, sales, stock, raw, siteWorks }) {
   const [dailyReports, setDailyReports] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [allSiteWorks, setAllSiteWorks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [viewItem, setViewItem] = useState(null);
-  const [viewDailyModal, setViewDailyModal] = useState(null);
-  const [filter, setFilter] = useState("all");
+  const [tab, setTab] = useState("sites"); // sites | workers | financial
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [searchSite, setSearchSite] = useState("");
+  const [searchWorker, setSearchWorker] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   useEffect(()=>{
-    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
-      setSiteWorks((Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name||user.role==="admin"));
-      setDailyReports((Array.isArray(dr)?dr:[]).filter(d=>d.addedBy===user.name||user.role==="admin"));
+    Promise.all([api("GET","/dailyreport"),api("GET","/workers"),api("GET","/sitework")]).then(([dr,w,sw])=>{
+      setDailyReports(Array.isArray(dr)?dr:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setAllSiteWorks(Array.isArray(sw)?sw:[]);
       setLoading(false);
     });
   },[]);
 
-  const approveSite = async (id) => {
-    await api("PUT",`/sitework/${id}`,{status:"completed",paymentStatus:"paid"});
-    setSiteWorks(p=>p.map(x=>x._id===id?{...x,status:"completed"}:x));
-    if (viewItem?._id===id) setViewItem(v=>({...v,status:"completed"}));
+  const filterByDate = (r) => {
+    if (fromDate && r.date<fromDate) return false;
+    if (toDate && r.date>toDate) return false;
+    return true;
   };
 
-  const filtered = siteWorks.filter(s=>filter==="all"||s.status===filter);
-  const statusColor = {running:"amber",completed:"green",pending:"gray",cancelled:"red"};
-
-  const colorMap = { blue:{bg:"bg-blue-50",border:"border-blue-200",label:"text-blue-700"}, teal:{bg:"bg-teal-50",border:"border-teal-200",label:"text-teal-700"}, amber:{bg:"bg-amber-50",border:"border-amber-200",label:"text-amber-700"}, orange:{bg:"bg-orange-50",border:"border-orange-200",label:"text-orange-700"}, red:{bg:"bg-red-50",border:"border-red-200",label:"text-red-700"}, green:{bg:"bg-green-50",border:"border-green-200",label:"text-green-700"}, gray:{bg:"bg-gray-50",border:"border-gray-200",label:"text-gray-600"}, purple:{bg:"bg-purple-50",border:"border-purple-200",label:"text-purple-700"} };
-  const sections = [{key:"newSite",icon:"🆕",label:"New Site",color:"blue"},{key:"runningSite",icon:"🔄",label:"Running",color:"teal"},{key:"workersDetail",icon:"👷",label:"Workers",color:"amber"},{key:"materialSupply",icon:"🧱",label:"Materials",color:"orange"},{key:"complaints",icon:"⚠️",label:"Complaints",color:"red"},{key:"payments",icon:"💰",label:"Payments",color:"green"},{key:"dayNote",icon:"📝",label:"Day Note",color:"gray"},{key:"expenses",icon:"💸",label:"Expenses",color:"purple"}];
-
   if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📋 {user.role==="admin"?"All Submitted Work":"My Submitted Work"}</h2>
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {["all","running","pending","completed"].map(s=>(
-          <button key={s} onClick={()=>setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold ${filter===s?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?siteWorks.length:siteWorks.filter(x=>x.status===s).length})
-          </button>
-        ))}
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-2 text-center"><div className="font-black text-gray-700">{siteWorks.filter(s=>s.status==="pending").length}</div><div className="text-xs text-gray-400">Pending</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-xs text-gray-400">Completed</div></div>
-      </div>
-      <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="📋" text="No submitted work" />}
-        {filtered.map(s=>{
-          const relatedReports = dailyReports.filter(d=>d.addedBy===s.addedBy);
-          return (
-            <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 cursor-pointer" onClick={()=>setViewItem(s)}>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-black text-gray-900">{s.customerName}</span>
-                    <Badge color={statusColor[s.status]||"gray"}>{s.status||"pending"}</Badge>
-                    {s.status!=="completed"&&user.role==="admin"&&<Badge color="red">Pending Approval</Badge>}
-                  </div>
-                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate}</div>
-                  <div className="text-xs text-gray-400">By: {s.addedBy||"—"} · 🧱 {s.interlockType||"—"}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.totalCost||s.totalAmount)||0)}</div>
-                  <div className="text-xs text-red-500">{+(s.pendingAmount||0)>0?`Pending: ${CURRENCY}${fmt(s.pendingAmount)}`:""}</div>
-                </div>
-              </div>
-              <div className="mt-2 flex gap-1 flex-wrap">
-                <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
-                {relatedReports.length>0&&<button onClick={()=>setViewDailyModal(relatedReports[0])} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">📝 Daily Reports ({relatedReports.length})</button>}
-                {user.role==="admin"&&s.status!=="completed"&&<button onClick={()=>approveSite(s._id)} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-1.5 rounded-xl text-xs font-bold">✅ Approve</button>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {viewItem&&(
-        <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
-              <Badge color={viewItem.paymentStatus==="paid"?"green":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
-              {user.role==="admin"&&viewItem.status!=="completed"&&<button onClick={()=>approveSite(viewItem._id)} className="ml-auto bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold">✅ Approve & Complete</button>}
-            </div>
-            <SectionBox title="Customer" icon="👤" color="blue">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewItem.customerName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewItem.phone||"—"}</div></div>
-                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewItem.siteLocation||"—"}</div></div>
-              </div>
-            </SectionBox>
-            <SectionBox title="Work Details" icon="🧱" color="amber">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewItem.interlockType||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewItem.workSize} {viewItem.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewItem.ratePerUnit}/{viewItem.workUnit}</div></div>
-                <div><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
-              </div>
-            </SectionBox>
-            {(viewItem.extraWork||[]).length>0&&(
-              <SectionBox title="Extra Work" icon="➕" color="orange">
-                {(viewItem.extraWork||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty||1}×)</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            {(viewItem.extraMaterials||[]).length>0&&(
-              <SectionBox title="Extra Materials" icon="🧱" color="purple">
-                {(viewItem.extraMaterials||[]).map((e,i)=><div key={i} className="flex justify-between text-sm"><span>{e.name} ({e.qty} {e.unit})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
-              </SectionBox>
-            )}
-            <SectionBox title="Costing" icon="💰" color="green">
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between"><span>Base</span><span>{CURRENCY}{fmt(+(viewItem.workSize||0)*(+(viewItem.ratePerUnit||0)))}</span></div>
-                <div className="flex justify-between font-black text-green-700 border-t pt-1"><span>TOTAL</span><span>{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
-                <div className="flex justify-between"><span>Advance</span><span>{CURRENCY}{fmt(viewItem.advancePaid||0)}</span></div>
-                <div className="flex justify-between text-red-600 font-black"><span>Pending</span><span>{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
-              </div>
-            </SectionBox>
+
+  const filteredDailyReports = dailyReports.filter(filterByDate);
+
+  // Site Report
+  if (selectedSite) {
+    const sr = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).filter(filterByDate).sort((a,b)=>b.date.localeCompare(a.date));
+    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+    const totalPaidOut = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const byMonth = sr.reduce((acc,r)=>{
+      const m=r.date?.slice(0,7)||"?";
+      if (!acc[m]) acc[m]={recv:0,paid:0,comp:0,count:0};
+      acc[m].recv+=+(r.totalReceived||0); acc[m].paid+=+(r.totalPayments||0);
+      acc[m].comp+=+(r.completedToday||0); acc[m].count++;
+      return acc;
+    },{});
+
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedSite(null)} className="text-amber-600 font-bold text-sm">← Back to Sites</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft total</div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Work Done</div></div>
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Total Received</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaidOut)}</div><div className="text-gray-400">Total Paid Out</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
           </div>
-        </Modal>
-      )}
-      {viewDailyModal&&(
-        <Modal title="Daily Reports" onClose={()=>setViewDailyModal(null)}>
-          <div className="space-y-3">
-            {dailyReports.filter(d=>d.addedBy===viewDailyModal.addedBy).map(r=>(
-              <div key={r._id} className="bg-white rounded-xl border p-3">
-                <div className="font-black text-gray-900">📅 {r.date}</div>
-                {sections.filter(s=>r[s.key]).map(s=>{const c=colorMap[s.color];return <div key={s.key} className={`${c.bg} border ${c.border} rounded-lg p-2 mt-1`}><div className={`text-xs font-bold ${c.label}`}>{s.icon} {s.label}</div><div className="text-xs text-gray-700">{r[s.key]}</div></div>;})}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+        </div>
+        {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+          <SectionBox key={month} title={`📆 ${month}`} icon="" color="gray">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center"><div className="font-black text-teal-700">{data.comp} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(data.recv)}</div><div className="text-gray-400">Received</div></div>
+              <div className="text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid Out</div></div>
+            </div>
+          </SectionBox>
+        ))}
+        {allWorkers.length>0&&(
+          <SectionBox title="Worker Summary" icon="👷" color="teal">
+            {Object.entries(allWorkers.reduce((acc,w)=>{
+              if (!acc[w.workerName]) acc[w.workerName]={days:0,paid:0,pending:0};
+              if (w.attendance==="present") acc[w.workerName].days++;
+              acc[w.workerName].paid+=+(w.paymentGiven||0);
+              acc[w.workerName].pending+=+(w.pending||0);
+              return acc;
+            },{})).map(([name,d])=>(
+              <div key={name} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                <span className="font-bold">{name} ({d.days} days)</span>
+                <span>Paid: {CURRENCY}{fmt(d.paid)} {d.pending>0?`· P:${CURRENCY}${fmt(d.pending)}`:""}</span>
               </div>
             ))}
+          </SectionBox>
+        )}
+        {allPayments.filter(p=>p.type==="Site Payment Received").length>0&&(
+          <SectionBox title="Payments Received" icon="💰" color="blue">
+            {allPayments.filter(p=>p.type==="Site Payment Received").map((p,i)=>(
+              <div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100">
+                <span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span>
+                <span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+              </div>
+            ))}
+          </SectionBox>
+        )}
+        {sr.length===0&&<EmptyState icon="📋" text="No reports for this period" />}
+        {sr.map(r=>(
+          <div key={r._id} className="bg-white rounded-xl border p-3">
+            <div className="flex justify-between"><div className="font-black text-sm">📅 {r.date}</div><div className="text-xs"><span className="text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)}</span> / <span className="text-green-600">{CURRENCY}{fmt(r.totalPayments||0)}</span></div></div>
+            <div className="text-xs text-gray-400">{r.completedToday||0} sqft · {(r.workerEntries||[]).length} workers</div>
           </div>
-        </Modal>
+        ))}
+      </div>
+    );
+  }
+
+  // Worker Report
+  if (selectedWorker) {
+    const workerReports = dailyReports.filter(r=>(r.workerEntries||[]).some(w=>w.workerName===selectedWorker.name)).filter(filterByDate);
+    const allEntries = workerReports.flatMap(r=>(r.workerEntries||[]).filter(w=>w.workerName===selectedWorker.name).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    const totalDays = allEntries.filter(e=>e.attendance==="present").length;
+    const totalPaid = allEntries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
+    const totalPending = allEntries.reduce((a,e)=>a+(+(e.pending||0)),0);
+    const byMonth = allEntries.reduce((acc,e)=>{
+      const m=e.date?.slice(0,7)||"?";
+      if (!acc[m]) acc[m]={days:0,paid:0,pending:0,work:[]};
+      if (e.attendance==="present") acc[m].days++;
+      acc[m].paid+=+(e.paymentGiven||0);
+      acc[m].pending+=+(e.pending||0);
+      if (e.workDone) acc[m].work.push(e.workDone);
+      return acc;
+    },{});
+
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back to Workers</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">👷 {selectedWorker.name}</div>
+          <div className="text-xs text-gray-400">{selectedWorker.role} · {selectedWorker.paymentType||"day"} · {CURRENCY}{fmt(selectedWorker.rateAmount||0)}/unit</div>
+          {selectedWorker.phone&&<div className="text-xs text-gray-400">📞 {selectedWorker.phone}</div>}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="font-black text-blue-700 text-lg">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(totalPending)}</div><div className="text-xs text-gray-400">Pending</div></div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+        </div>
+        {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+          <SectionBox key={month} title={`📆 ${month}`} icon="" color="gray">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center"><div className="font-black text-blue-700">{data.days} days</div><div className="text-gray-400">Present</div></div>
+              <div className="text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(data.pending)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+          </SectionBox>
+        ))}
+        <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Attendance</div>
+        {allEntries.sort((a,b)=>b.date.localeCompare(a.date)).map((e,i)=>(
+          <div key={i} className="bg-white rounded-xl border p-3 text-xs flex justify-between items-center">
+            <div><div className="font-bold">{e.date}</div><div className="text-gray-400">{e.siteName} {e.workDone?`· ${e.workDone}`:""}</div></div>
+            <div className="text-right">
+              <Badge color={e.attendance==="present"?"green":"red"}>{e.attendance}</Badge>
+              {+e.paymentGiven>0&&<div className="text-green-700 font-bold mt-0.5">{CURRENCY}{fmt(e.paymentGiven)}</div>}
+              {+e.pending>0&&<div className="text-red-500 text-xs">P:{CURRENCY}{fmt(e.pending)}</div>}
+            </div>
+          </div>
+        ))}
+        {allEntries.length===0&&<EmptyState icon="📋" text="No records for this period" />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
+      <div className="flex gap-1">
+        {[{id:"sites",label:"🏗️ Sites"},{id:"workers",label:"👷 Workers"},{id:"financial",label:"💰 Financial"}].map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${tab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+        <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+      </div>
+
+      {tab==="sites"&&(
+        <div className="space-y-3">
+          <input value={searchSite} onChange={e=>setSearchSite(e.target.value)} placeholder="🔍 Search site..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          {allSiteWorks.filter(s=>!searchSite||(s.customerName||"").toLowerCase().includes(searchSite.toLowerCase())).map(s=>{
+            const sr = filteredDailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+            const recv = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+            const comp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+            return (
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between">
+                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div></div>
+                  <Badge color={s.status==="completed"?"green":s.status==="running"?"amber":"gray"}>{s.status}</Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+          {allSiteWorks.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
+        </div>
+      )}
+
+      {tab==="workers"&&(
+        <div className="space-y-3">
+          <input value={searchWorker} onChange={e=>setSearchWorker(e.target.value)} placeholder="🔍 Search worker..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          {workers.filter(w=>!searchWorker||w.name.toLowerCase().includes(searchWorker.toLowerCase())).map(w=>{
+            const entries = filteredDailyReports.flatMap(r=>(r.workerEntries||[]).filter(e=>e.workerName===w.name));
+            const days = entries.filter(e=>e.attendance==="present").length;
+            const paid = entries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
+            const pending = entries.reduce((a,e)=>a+(+(e.pending||0)),0);
+            return (
+              <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role} · {w.paymentType||"day"} · {CURRENCY}{fmt(w.rateAmount||0)}</div></div>
+                  <span className="text-gray-300 text-xl">›</span>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{days}</div><div className="text-gray-400">Days</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+          {workers.length===0&&<EmptyState icon="👷" text="No workers found" />}
+        </div>
+      )}
+
+      {tab==="financial"&&(
+        <div className="space-y-3">
+          {(()=>{
+            const totalReceived = filteredDailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+            const totalPaid = filteredDailyReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+            const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard label="Total Received" value={`${CURRENCY}${fmt(totalReceived)}`} icon="💰" color="blue" />
+                  <StatCard label="Total Paid Out" value={`${CURRENCY}${fmt(totalPaid)}`} icon="💸" color="green" />
+                  <StatCard label="Pending Payments" value={`${CURRENCY}${fmt(allSiteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}`} icon="⏳" color="red" />
+                  <StatCard label="Stock Sales" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="purple" />
+                </div>
+                <div className="bg-white rounded-2xl border shadow-sm p-4">
+                  <div className="font-black text-gray-900 mb-3">📊 Site Summary</div>
+                  {allSiteWorks.slice(0,5).map(s=>{
+                    const sr=filteredDailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+                    const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+                    return <div key={s._id} className="flex justify-between py-2 border-b border-gray-50 text-sm"><span className="font-bold">{s.customerName}</span><span className="text-blue-700 font-bold">{CURRENCY}{fmt(recv)}</span></div>;
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </div>
       )}
     </div>
   );
 }
-
 
 // ─── WORKERS ──────────────────────────────────────────────────────────────────
 function Workers({ user }) {
@@ -1895,60 +2325,38 @@ function Workers({ user }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
-          {canEdit&&<div className="flex gap-1"><button onClick={()=>setEditModal({...selectedWorker})} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">✏️ Edit</button><button onClick={()=>del(selectedWorker._id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+          {canEdit&&<div className="flex gap-1"><button onClick={()=>setEditModal({...selectedWorker})} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(selectedWorker._id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="font-black text-xl text-gray-900 mb-2">👷 {selectedWorker.name}</div>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{selectedWorker.role}</div></div>
-            <div><div className="text-xs text-gray-400">Category</div><div className="font-bold">{selectedWorker.workerCategory||"Site"}</div></div>
             <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{selectedWorker.phone||"—"}</div></div>
-            <div><div className="text-xs text-gray-400">Location</div><div className="font-bold">{selectedWorker.workLocationType||"—"}</div></div>
             <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold">{selectedWorker.address||"—"}</div></div>
             <div><div className="text-xs text-gray-400">Payment Type</div><div className="font-bold">{selectedWorker.paymentType||"Per Day"}</div></div>
             <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(selectedWorker.rateAmount||0)}</div></div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{days}</div><div className="text-xs text-gray-400">Work Days</div></div>
-          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(sqft)} sqft</div><div className="text-xs text-gray-400">Work Done</div></div>
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-red-600">{CURRENCY}{fmt(Math.max(0, (+(selectedWorker.rateAmount||0)*days) - paid))}</div><div className="text-xs text-gray-400">Pending Est.</div></div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-blue-700">{days}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-teal-700">{fmt(sqft)}</div><div className="text-xs text-gray-400">sqft</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-xs text-gray-400">Paid</div></div>
         </div>
-        <div>
-          <div className="font-black text-gray-800 mb-2">💸 Payment History</div>
-          {wp.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
-          {wp.map((p,i)=>(
-            <div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between items-center">
-              <div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div><div className="text-xs text-gray-400">By: {p.addedBy}</div></div>
-              <Badge color="green">Paid</Badge>
-            </div>
-          ))}
-        </div>
-        <div>
-          <div className="font-black text-gray-800 mb-2">🏗️ Site Work History</div>
-          {sites.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
-          {sites.map(r=>(
-            <div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between">
-              <div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div>
-              <div className="text-right"><div className="font-black text-teal-700 text-sm">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div>
-            </div>
-          ))}
-        </div>
+        <div className="font-black text-gray-800 mb-2">💸 Payment History</div>
+        {wp.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
+        {wp.map((p,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between items-center"><div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div></div><Badge color="green">Paid</Badge></div>)}
+        <div className="font-black text-gray-800 mb-2">🏗️ Site Work</div>
+        {sites.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
+        {sites.map(r=><div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div><div className="text-right"><div className="font-black text-teal-700 text-sm">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div></div>)}
         {editModal&&<Modal title="Edit Worker" onClose={()=>setEditModal(null)}>
           <div className="space-y-3">
             <Input label="Name" value={editModal.name||""} onChange={e=>setEditModal({...editModal,name:e.target.value})} />
             <Input label="Phone" type="tel" value={editModal.phone||""} onChange={e=>setEditModal({...editModal,phone:e.target.value})} />
             <Input label="Address" value={editModal.address||""} onChange={e=>setEditModal({...editModal,address:e.target.value})} />
             <Select label="Role" value={editModal.role||"Labourer"} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setEditModal({...editModal,role:e.target.value})} />
-            <Select label="Category" value={editModal.workerCategory||"Site"} options={["Production","Site"]} onChange={e=>setEditModal({...editModal,workerCategory:e.target.value})} />
-            <Select label="Work Location" value={editModal.workLocationType||"Outside Site"} options={["Factory","Outside Site"]} onChange={e=>setEditModal({...editModal,workLocationType:e.target.value})} />
-            <SectionBox title="Payment" icon="💰" color="amber">
-              <Select label="Payment Type" value={editModal.paymentType||"Per Day"} options={["Per Piece","Per Hour","Per Day","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setEditModal({...editModal,paymentType:e.target.value})} />
-              {editModal.paymentType==="Other"&&<Input label="Custom Type" value={editModal.customPaymentType||""} onChange={e=>setEditModal({...editModal,customPaymentType:e.target.value})} />}
-              <Input label={`Rate (${CURRENCY})`} type="number" value={editModal.rateAmount||""} onChange={e=>setEditModal({...editModal,rateAmount:+e.target.value})} />
-            </SectionBox>
-            <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-2.5 rounded-xl font-bold hover:bg-blue-600">Save Changes</button>
+            <Select label="Payment Type" value={editModal.paymentType||"Per Day"} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setEditModal({...editModal,paymentType:e.target.value})} />
+            <Input label={`Rate (${CURRENCY})`} type="number" value={editModal.rateAmount||""} onChange={e=>setEditModal({...editModal,rateAmount:+e.target.value})} />
+            <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-2.5 rounded-xl font-bold">Save Changes</button>
           </div>
         </Modal>}
       </div>
@@ -1962,21 +2370,16 @@ function Workers({ user }) {
         {canEdit&&<button onClick={()=>setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center shadow-sm"><div className="font-black">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center shadow-sm"><div className="font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid</div></div>
-        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center shadow-sm"><div className="font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))} sqft</div><div className="text-xs text-gray-400">Work Done</div></div>
+        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid</div></div>
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))} sqft</div><div className="text-xs text-gray-400">Work</div></div>
       </div>
       <div className="space-y-3">
-        {workers.length===0&&<EmptyState icon="👷" text="No workers added yet" />}
+        {workers.length===0&&<EmptyState icon="👷" text="No workers yet" />}
         {workers.map(w=>(
-          <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 hover:shadow-md transition-all">
+          <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="font-black text-gray-900">{w.name}</div>
-                <div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div>
-                <div className="flex gap-1 mt-0.5"><Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge></div>
-                {w.rateAmount>0&&<div className="text-xs text-amber-600 font-semibold mt-0.5">{CURRENCY}{fmt(w.rateAmount)} / {w.paymentType||"day"}</div>}
-              </div>
+              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
               <span className="text-gray-300 text-xl">›</span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
@@ -1987,24 +2390,18 @@ function Workers({ user }) {
           </div>
         ))}
       </div>
-      {addModal&&(
-        <Modal title="Add Worker" onClose={()=>setAddModal(false)}>
-          <div className="space-y-3">
-            <Input label="Worker Name *" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm,name:e.target.value})} placeholder="Full name" />
-            <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
-            <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
-            <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
-            <Select label="Category" value={workerForm.workerCategory} options={["Production","Site"]} onChange={e=>setWorkerForm({...workerForm,workerCategory:e.target.value})} />
-            <Select label="Work Location" value={workerForm.workLocationType} options={["Factory","Outside Site"]} onChange={e=>setWorkerForm({...workerForm,workLocationType:e.target.value})} />
-            <SectionBox title="Payment Type" icon="💰" color="amber">
-              <Select label="Payment Type" value={workerForm.paymentType} options={["Per Piece","Per Hour","Per Day","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value,customPaymentType:""})} />
-              {workerForm.paymentType==="Other"&&<Input label="Custom Type" value={workerForm.customPaymentType||""} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load, per truck..." />}
-              <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} placeholder="e.g. 500" />
-            </SectionBox>
-            <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add Worker</button>
-          </div>
-        </Modal>
-      )}
+      {addModal&&<Modal title="Add Worker" onClose={()=>setAddModal(false)}>
+        <div className="space-y-3">
+          <Input label="Worker Name *" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm,name:e.target.value})} />
+          <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
+          <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
+          <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
+          <Select label="Payment Type" value={workerForm.paymentType} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value})} />
+          {workerForm.paymentType==="Other"&&<Input label="Custom Type" value={workerForm.customPaymentType} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load" />}
+          <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} />
+          <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Add Worker</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2015,91 +2412,129 @@ function Suppliers({ user }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [search, setSearch] = useState("");
   const MATERIAL_OPTIONS = ["Cement","Stone","Sand","Blocks","Chips","Steel","Tiles"];
   const emptyForm = { name:"", location:"", phone:"", materials:[], customMaterial:"", note:"" };
   const [form, setForm] = useState(emptyForm);
+  const canEdit = user.role==="admin"||user.role==="user";
 
   useEffect(()=>{ api("GET","/suppliers").then(d=>{ setSuppliers(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
-
-  const toggleMaterial = (mat) => {
-    const mats = form.materials||[];
-    setForm({...form, materials: mats.includes(mat)?mats.filter(x=>x!==mat):[...mats,mat]});
-  };
 
   const save = async () => {
     if (!form.name) return;
     const mats = [...(form.materials||[])];
     if (form.customMaterial) mats.push(form.customMaterial);
     const data = {...form, materials:mats};
-    if (editItem) {
-      await api("PUT",`/suppliers/${editItem._id}`,data);
-      setSuppliers(p=>p.map(x=>x._id===editItem._id?{...x,...data}:x));
-    } else {
-      const item = await api("POST","/suppliers",{...data,addedBy:user.name});
-      if (item._id) setSuppliers(p=>[...p,item]);
-    }
+    if (editItem) { await api("PUT",`/suppliers/${editItem._id}`,data); setSuppliers(p=>p.map(x=>x._id===editItem._id?{...x,...data}:x)); }
+    else { const item = await api("POST","/suppliers",{...data,addedBy:user.name}); if (item._id) setSuppliers(p=>[...p,item]); }
     setModal(false); setEditItem(null); setForm(emptyForm);
   };
 
-  const del = async (id) => {
-    if (!window.confirm("Delete supplier?")) return;
-    await api("DELETE",`/suppliers/${id}`);
-    setSuppliers(p=>p.filter(x=>x._id!==id));
-  };
-
-  const openEdit = (s) => { setForm({...s,customMaterial:""}); setEditItem(s); setModal(true); };
-  const filtered = suppliers.filter(s=>!search||(s.name||"").toLowerCase().includes(search.toLowerCase()));
+  const del = async (id) => { if (!window.confirm("Delete?")) return; await api("DELETE",`/suppliers/${id}`); setSuppliers(p=>p.filter(x=>x._id!==id)); };
 
   if (loading) return <Loader />;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏪 Suppliers</h2>
-        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {canEdit&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search supplier..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
       <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🏪" text="No suppliers yet" />}
-        {filtered.map(s=>(
+        {suppliers.length===0&&<EmptyState icon="🏪" text="No suppliers yet" />}
+        {suppliers.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="font-black text-gray-900">{s.name}</div>
-                <div className="text-xs text-gray-400">📍 {s.location||"—"} · 📞 {s.phone||"—"}</div>
-                <div className="mt-1 flex flex-wrap gap-1">{(s.materials||[]).map(m=><Badge key={m} color="teal">{m}</Badge>)}</div>
-              </div>
-              {(user.role==="admin"||user.role==="user")&&(
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={()=>openEdit(s)} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
-                  <button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
-                </div>
-              )}
+              <div className="flex-1"><div className="font-black text-gray-900">{s.name}</div><div className="text-xs text-gray-400">📍 {s.location||"—"} · 📞 {s.phone||"—"}</div><div className="mt-1 flex gap-1 flex-wrap">{(s.materials||[]).map(m=><Badge key={m} color="teal">{m}</Badge>)}</div></div>
+              {canEdit&&<div className="flex gap-1"><button onClick={()=>{setForm({...s,customMaterial:""});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
             </div>
-            {s.note&&<div className="text-xs text-gray-400 mt-1">{s.note}</div>}
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title={editItem?"Edit Supplier":"Add Supplier"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
-          <div className="space-y-3">
-            <Input label="Supplier Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Company or person name" />
-            <Input label="Location" value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City / area" />
-            <Input label="Phone" type="tel" value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} />
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-2">Materials Supplied</label>
-              <div className="flex flex-wrap gap-1 mb-2">
-                {MATERIAL_OPTIONS.map(m=>(
-                  <button key={m} type="button" onClick={()=>toggleMaterial(m)} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(form.materials||[]).includes(m)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>{m}</button>
-                ))}
-              </div>
-              <Input label="Other / Custom Material" value={form.customMaterial||""} onChange={e=>setForm({...form,customMaterial:e.target.value})} placeholder="Type custom material name..." />
-            </div>
-            <Textarea label="Note" value={form.note||""} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save Changes":"Add Supplier"}</button>
+      {modal&&<Modal title={editItem?"Edit Supplier":"Add Supplier"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
+        <div className="space-y-3">
+          <Input label="Supplier Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <Input label="Location" value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} />
+          <Input label="Phone" type="tel" value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} />
+          <div><label className="block text-xs font-semibold text-gray-600 mb-2">Materials Supplied</label>
+            <div className="flex flex-wrap gap-1 mb-2">{MATERIAL_OPTIONS.map(m=><button key={m} type="button" onClick={()=>{const mats=form.materials||[];setForm({...form,materials:mats.includes(m)?mats.filter(x=>x!==m):[...mats,m]});}} className={`px-2 py-1 rounded-lg text-xs font-bold border ${(form.materials||[]).includes(m)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>{m}</button>)}</div>
+            <Input label="Other Material" value={form.customMaterial||""} onChange={e=>setForm({...form,customMaterial:e.target.value})} placeholder="Custom material..." />
           </div>
-        </Modal>
-      )}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add Supplier"}</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── PURCHASES ────────────────────────────────────────────────────────────────
+function Purchases({ user }) {
+  const [purchases, setPurchases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [viewModal, setViewModal] = useState(null);
+  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", paymentMode:"Cash", vehicleNumber:"", vehicleType:"", driverName:"", driverPhone:"", deliveryAddress:"", note:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(()=>{ api("GET","/purchases").then(d=>{ setPurchases(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
+
+  const save = async () => {
+    if (!form.supplierName||!form.itemName) return;
+    const total = +form.quantity*(+form.unitPrice)||+form.totalAmount||0;
+    const item = await api("POST","/purchases",{...form,totalAmount:total,addedBy:user.name});
+    if (item._id) { setPurchases(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+  };
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
+        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{purchases.length}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(purchases.reduce((a,p)=>a+(+(p.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Spent</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(purchases.map(p=>p.supplierName).filter(Boolean)).size}</div><div className="text-xs text-gray-400">Suppliers</div></div>
+      </div>
+      <div className="space-y-3">
+        {purchases.length===0&&<EmptyState icon="🛒" text="No purchases yet" />}
+        {purchases.map(p=>(
+          <div key={p._id} onClick={()=>setViewModal(p)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1"><div className="flex items-center gap-2"><span className="font-black text-gray-900">{p.itemName}</span><Badge color="teal">{p.itemType}</Badge></div><div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div></div>
+              <div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount)||0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {modal&&<Modal title="Add Purchase" onClose={()=>setModal(false)} wide>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <SectionBox title="Supplier" icon="🏪" color="blue">
+            <Input label="Supplier Name *" value={form.supplierName} onChange={e=>setForm({...form,supplierName:e.target.value})} />
+            <div className="grid grid-cols-2 gap-2"><Input label="Phone" type="tel" value={form.supplierPhone} onChange={e=>setForm({...form,supplierPhone:e.target.value})} /><Input label="Address" value={form.supplierAddress} onChange={e=>setForm({...form,supplierAddress:e.target.value})} /></div>
+          </SectionBox>
+          <SectionBox title="Item" icon="📦" color="amber">
+            <Input label="Item Name *" value={form.itemName} onChange={e=>setForm({...form,itemName:e.target.value})} />
+            <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e=>setForm({...form,itemType:e.target.value})} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,totalAmount:String(+e.target.value*(+(form.unitPrice)||0))})} />
+              <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+              <Input label={`Unit Price(${CURRENCY})`} type="number" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:e.target.value,totalAmount:String(+e.target.value*(+(form.quantity)||0))})} />
+              <Input label={`Total(${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value})} />
+            </div>
+          </SectionBox>
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Submit</button>
+        </div>
+      </Modal>}
+      {viewModal&&<Modal title="Purchase Details" onClose={()=>setViewModal(null)}>
+        <div className="space-y-3">
+          <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
+          <SectionBox title="Supplier" icon="🏪" color="blue"><div className="grid grid-cols-2 gap-2 text-sm"><div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.supplierName}</div></div><div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.supplierPhone||"—"}</div></div></div></SectionBox>
+          <SectionBox title="Item" icon="📦" color="amber"><div className="grid grid-cols-2 gap-2 text-sm"><div><div className="text-xs text-gray-400">Item</div><div className="font-bold">{viewModal.itemName}</div></div><div><div className="text-xs text-gray-400">Qty</div><div className="font-bold">{viewModal.quantity} {viewModal.unit}</div></div></div><div className="bg-red-50 rounded-xl p-2 text-center mt-2"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total</div></div></SectionBox>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2110,41 +2545,33 @@ function ProductionSite({ user }) {
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const [filterDate, setFilterDate] = useState(today());
+  const emptyForm = { date:today(), workType:"", notes:"", attendance:[] };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(()=>{
     Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
       setEntries(Array.isArray(e)?e:[]);
-      setWorkers((Array.isArray(w)?w:[]).filter(x=>x.workerCategory==="Production"||!x.workerCategory));
+      setWorkers(Array.isArray(w)?w:[]);
       setLoading(false);
     });
   },[]);
 
-  const emptyForm = { date:today(), workType:"", notes:"", attendance:[] };
-  const [form, setForm] = useState(emptyForm);
-
   const initAttendance = () => {
-    const att = workers.map(w=>({ workerId:w._id, workerName:w.name, status:"present", workDone:"", workUnit:w.paymentType||"day", rate:w.rateAmount||0, total:0 }));
-    setForm({...emptyForm, date:today(), attendance:att});
+    setForm({...emptyForm,date:today(),attendance:workers.map(w=>({workerId:w._id,workerName:w.name,status:"present",workDone:"",workUnit:w.paymentType||"day",rate:w.rateAmount||0,total:0}))});
     setModal(true);
   };
 
-  const updateAtt = (i, field, val) => {
-    const att = [...form.attendance];
-    att[i] = {...att[i],[field]:val};
-    if (field==="workDone"||field==="rate") att[i].total = +(att[i].workDone||0)*(+(att[i].rate||0));
+  const updateAtt = (i,field,val) => {
+    const att=[...form.attendance]; att[i]={...att[i],[field]:val};
+    if(field==="workDone"||field==="rate") att[i].total=+(att[i].workDone||0)*(+(att[i].rate||0));
     setForm({...form,attendance:att});
   };
 
   const save = async () => {
-    const totalCost = form.attendance.reduce((a,x)=>a+(+(x.total)||0),0);
-    const item = await api("POST","/productionsite",{...form,totalCost,addedBy:user.name});
-    if (item._id) { setEntries(p=>[item,...p]); setModal(false); }
+    const totalCost=form.attendance.reduce((a,x)=>a+(+(x.total)||0),0);
+    const item=await api("POST","/productionsite",{...form,totalCost,addedBy:user.name});
+    if(item._id){setEntries(p=>[item,...p]);setModal(false);}
   };
-
-  const filtered = entries.filter(e=>!filterDate||e.date===filterDate);
-  const presentCount = (e) => (e.attendance||[]).filter(a=>a.status==="present").length;
 
   if (loading) return <Loader />;
   return (
@@ -2153,289 +2580,130 @@ function ProductionSite({ user }) {
         <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
         <button onClick={initAttendance} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Daily Entry</button>
       </div>
-      <div className="flex gap-2 items-end">
-        <div className="flex-1"><Input label="Filter by Date" type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} /></div>
-        <button onClick={()=>setFilterDate("")} className="text-xs text-gray-400 hover:text-gray-600 pb-2.5">Clear</button>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{entries.length}</div><div className="text-xs text-gray-400">Entries</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(entries.reduce((a,e)=>a+(+(e.totalCost)||0),0))}</div><div className="text-xs text-gray-400">Total Cost</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
-      </div>
       <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🏭" text="No entries found" />}
-        {filtered.map(e=>(
-          <div key={e._id} onClick={()=>setViewModal(e)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-            <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">📅 {e.date}</div><div className="text-xs text-gray-400">👷 {presentCount(e)} present · By: {e.addedBy}</div>{e.workType&&<div className="text-xs text-gray-500">{e.workType}</div>}</div>
-              <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(e.totalCost||0)}</div><Badge color="green">{presentCount(e)}/{(e.attendance||[]).length}</Badge></div>
-            </div>
-          </div>
-        ))}
+        {entries.length===0&&<EmptyState icon="🏭" text="No entries yet" />}
+        {entries.map(e=><div key={e._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-center justify-between"><div><div className="font-black">📅 {e.date}</div><div className="text-xs text-gray-400">By: {e.addedBy} · {(e.attendance||[]).filter(a=>a.status==="present").length} present</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(e.totalCost||0)}</div></div></div>)}
       </div>
-      {modal&&(
-        <Modal title="Daily Production Entry" onClose={()=>setModal(false)} wide>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-              <Input label="Work Type" value={form.workType||""} onChange={e=>setForm({...form,workType:e.target.value})} placeholder="e.g. Block Making" />
+      {modal&&<Modal title="Daily Production Entry" onClose={()=>setModal(false)} wide>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2"><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} /><Input label="Work Type" value={form.workType||""} onChange={e=>setForm({...form,workType:e.target.value})} /></div>
+          {form.attendance.map((a,i)=><div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
+            <div className="flex items-center justify-between"><div className="font-bold text-sm">{a.workerName}</div>
+              <div className="flex gap-1">{["present","absent"].map(s=><button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-2 py-1 rounded-lg text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
             </div>
-            <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
-            <div className="text-xs font-bold text-gray-600 uppercase">👷 Worker Attendance</div>
-            {form.attendance.length===0&&<div className="text-xs text-gray-400 text-center py-4">No production workers. Add workers with category "Production" first.</div>}
-            {form.attendance.map((a,i)=>(
-              <div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-sm text-gray-900">{a.workerName}</div>
-                  <div className="flex gap-1">
-                    {["present","absent"].map(s=>(
-                      <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-2 py-1 rounded-lg text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s==="present"?"✓ Present":"✗ Absent"}</button>
-                    ))}
-                  </div>
-                </div>
-                {a.status==="present"&&(
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
-                    <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs/hrs" />
-                    <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
-                  </div>
-                )}
-                {a.status==="present"&&+(a.workDone||0)>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
-              </div>
-            ))}
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-gray-400">Total Cost</div>
-              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(form.attendance.reduce((a,x)=>a+(+(x.workDone||0)*(+(x.rate||0))),0))}</div>
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Entry</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title={`Production — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.workType||""}</div>
-            {(viewModal.attendance||[]).map((a,i)=>(
-              <div key={i} className={`rounded-xl border p-3 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-200 bg-red-50"}`}>
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-sm">{a.workerName}</div>
-                  <Badge color={a.status==="present"?"green":"red"}>{a.status}</Badge>
-                </div>
-                {a.status==="present"&&+(a.workDone||0)>0&&(
-                  <div className="text-xs text-gray-600 mt-1">{a.workDone} {a.workUnit} × {CURRENCY}{a.rate} = <span className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</span></div>
-                )}
-              </div>
-            ))}
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-gray-400">Total Cost</div>
-              <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(viewModal.totalCost||0)}</div>
-            </div>
-          </div>
-        </Modal>
-      )}
+            {a.status==="present"&&<div className="grid grid-cols-3 gap-2"><Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" /><Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} /><Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} /></div>}
+          </div>)}
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xs text-gray-400">Total Cost</div><div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(form.attendance.reduce((a,x)=>a+(+(x.workDone||0)*(+(x.rate||0))),0))}</div></div>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Submit</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
 
-// ─── ATTENDANCE REPORTS ───────────────────────────────────────────────────────
+// ─── ATTENDANCE ───────────────────────────────────────────────────────────────
 function AttendanceReports({ user }) {
-  const [entries, setEntries] = useState([]);
   const [workers, setWorkers] = useState([]);
+  const [entries, setEntries] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [siteReports, setSiteReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("mark");
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [markDate, setMarkDate] = useState(today());
   const [attendance, setAttendance] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [filterWorker, setFilterWorker] = useState("");
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
 
   useEffect(()=>{
-    Promise.all([api("GET","/workers"),api("GET","/productionsite"),api("GET","/workerpayments"),api("GET","/workerreport")]).then(([w,e,p,sr])=>{
+    Promise.all([api("GET","/workers"),api("GET","/productionsite"),api("GET","/workerpayments")]).then(([w,e,p])=>{
       setWorkers(Array.isArray(w)?w:[]);
       setEntries(Array.isArray(e)?e:[]);
       setPayments(Array.isArray(p)?p:[]);
-      setSiteReports(Array.isArray(sr)?sr:[]);
       setLoading(false);
     });
   },[]);
 
   useEffect(()=>{
-    if (workers.length===0) return;
-    const existing = entries.find(e=>e.date===markDate);
-    if (existing) setAttendance(existing.attendance||[]);
+    if(workers.length===0) return;
+    const existing=entries.find(e=>e.date===markDate);
+    if(existing) setAttendance(existing.attendance||[]);
     else setAttendance(workers.map(w=>({workerId:w._id,workerName:w.name,status:"present",workDone:"",workUnit:w.paymentType||"day",rate:+(w.rateAmount||0),total:0})));
   },[markDate,workers]);
 
-  const updateAtt = (i, field, val) => {
-    const att = [...attendance];
-    att[i] = {...att[i],[field]:val};
-    if (field==="workDone"||field==="rate") att[i].total=+(att[i].workDone||0)*(+(att[i].rate||0));
-    setAttendance(att);
-  };
+  const updateAtt=(i,field,val)=>{const att=[...attendance];att[i]={...att[i],[field]:val};if(field==="workDone"||field==="rate")att[i].total=+(att[i].workDone||0)*(+(att[i].rate||0));setAttendance(att);};
 
-  const saveAttendance = async () => {
+  const saveAttendance=async()=>{
     setSaving(true);
-    const totalCost = attendance.reduce((a,x)=>a+(+(x.total)||0),0);
-    const existing = entries.find(e=>e.date===markDate);
-    if (existing) {
-      await api("PUT",`/productionsite/${existing._id}`,{attendance,totalCost});
-      setEntries(p=>p.map(x=>x._id===existing._id?{...x,attendance,totalCost}:x));
-    } else {
-      const item = await api("POST","/productionsite",{date:markDate,attendance,totalCost,addedBy:user.name});
-      if (item._id) setEntries(p=>[item,...p]);
-    }
+    const totalCost=attendance.reduce((a,x)=>a+(+(x.total)||0),0);
+    const existing=entries.find(e=>e.date===markDate);
+    if(existing){await api("PUT",`/productionsite/${existing._id}`,{attendance,totalCost});setEntries(p=>p.map(x=>x._id===existing._id?{...x,attendance,totalCost}:x));}
+    else{const item=await api("POST","/productionsite",{date:markDate,attendance,totalCost,addedBy:user.name});if(item._id)setEntries(p=>[item,...p]);}
     setSaving(false);
-    alert(`✅ Attendance saved for ${markDate}`);
   };
 
-  const getWorkerLedger = (wname) => {
-    const allAtt = entries.flatMap(e=>(e.attendance||[]).filter(a=>a.workerName===wname).map(a=>({...a,date:e.date})));
-    const present = allAtt.filter(a=>a.status==="present");
-    const totalEarned = present.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
-    const totalPaid = payments.filter(p=>p.workerName===wname).reduce((a,p)=>a+(+(p.amount)||0),0);
-    return { allAtt:present.sort((a,b)=>b.date.localeCompare(a.date)), totalDays:present.length, totalWork:present.reduce((a,x)=>a+(+(x.workDone)||0),0), totalEarned, totalPaid, pending:Math.max(0,totalEarned-totalPaid), siteWork:siteReports.filter(r=>r.workerName===wname) };
+  const getWorkerLedger=(wname)=>{
+    const allAtt=entries.flatMap(e=>(e.attendance||[]).filter(a=>a.workerName===wname).map(a=>({...a,date:e.date})));
+    const present=allAtt.filter(a=>a.status==="present");
+    const totalEarned=present.reduce((a,x)=>a+(+(x.total)||0),0);
+    const totalPaid=payments.filter(p=>p.workerName===wname).reduce((a,p)=>a+(+(p.amount)||0),0);
+    return{present,totalDays:present.length,totalEarned,totalPaid,pending:Math.max(0,totalEarned-totalPaid)};
   };
 
-  if (loading) return <Loader />;
+  if(loading) return <Loader />;
 
-  if (selectedWorker) {
-    const w = selectedWorker;
-    const { allAtt, totalDays, totalWork, totalEarned, totalPaid, pending, siteWork } = getWorkerLedger(w.name);
-    const wPayments = payments.filter(p=>p.workerName===w.name).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-    const [ledgerTab, setLedgerTab] = useState("attendance");
-    return (
+  if(selectedWorker){
+    const {present,totalDays,totalEarned,totalPaid,pending}=getWorkerLedger(selectedWorker.name);
+    const wPay=payments.filter(p=>p.workerName===selectedWorker.name).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return(
       <div className="space-y-4">
         <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
-        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-          <div className="font-black text-xl">👷 {w.name}</div>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{w.role}</div></div>
-            <div><div className="text-xs text-gray-400">Category</div><div className="font-bold">{w.workerCategory||"Site"}</div></div>
-            <div><div className="text-xs text-gray-400">Payment</div><div className="font-bold">{w.paymentType||"day"}</div></div>
-            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(w.rateAmount||0)}</div></div>
-          </div>
-        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4"><div className="font-black text-xl">{selectedWorker.name}</div><div className="text-xs text-gray-400">{selectedWorker.role} · {CURRENCY}{fmt(selectedWorker.rateAmount||0)}/{selectedWorker.paymentType||"day"}</div></div>
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
-          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-teal-700">{fmt(totalWork)}</div><div className="text-xs text-gray-400">Output</div></div>
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Earned</div></div>
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+          <div className={`${pending>0?"bg-red-50 border-red-200":"bg-green-50 border-green-200"} border rounded-xl p-3 text-center`}><div className={`text-xl font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-xs text-gray-400">Pending</div></div>
         </div>
-        <div className={`rounded-2xl border p-3 text-center ${pending>0?"bg-red-50 border-red-200":"bg-green-50 border-green-200"}`}>
-          <div className="text-xs text-gray-400">Pending Balance</div>
-          <div className={`text-2xl font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div>
-        </div>
-        <div className="flex gap-1">
-          {["attendance","payments","sites"].map(t=>(
-            <button key={t} onClick={()=>setLedgerTab(t)} className={`flex-1 py-1.5 rounded-xl text-xs font-bold ${ledgerTab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-              {t==="attendance"?"📅 Attendance":t==="payments"?"💸 Payments":"🏗️ Sites"}
-            </button>
-          ))}
-        </div>
-        {ledgerTab==="attendance"&&(<div className="space-y-2">{allAtt.length===0&&<EmptyState icon="📅" text="No records" />;}{allAtt.map((a,i)=>(<div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between"><div><div className="font-bold text-sm">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(a.total||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div></div>))}</div>)}
-        {ledgerTab==="payments"&&(<div className="space-y-2">{wPayments.length===0&&<EmptyState icon="💸" text="No payments" />;}{wPayments.map((p,i)=>(<div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between"><div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div></div><Badge color="green">Paid</Badge></div>))}</div>)}
-        {ledgerTab==="sites"&&(<div className="space-y-2">{siteWork.length===0&&<EmptyState icon="🏗️" text="No site reports" />;}{siteWork.map(r=>(<div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between"><div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div><div className="text-right"><div className="font-black text-teal-700">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div></div>))}</div>)}
+        <div className="font-black text-gray-800">📅 Attendance</div>
+        {present.sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-400">{a.workDone} {a.workUnit}</div>}</div><div className="font-black text-green-700">{CURRENCY}{fmt(a.total)}</div></div>)}
+        <div className="font-black text-gray-800">💸 Payments</div>
+        {wPay.length===0&&<EmptyState icon="💸" text="No payments" />}
+        {wPay.map((p,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">{CURRENCY}{fmt(p.amount)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div></div><Badge color="green">Paid</Badge></div>)}
       </div>
     );
   }
 
-  return (
+  return(
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">📊 Attendance & Workers</h2>
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {["mark","reports","ledger"].map(t=>(
-          <button key={t} onClick={()=>setTab(t)} className={`flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-            {t==="mark"?"✅ Mark":t==="reports"?"📊 Reports":"👷 Ledger"}
-          </button>
-        ))}
+      <h2 className="text-xl font-black text-gray-900">📊 Attendance</h2>
+      <div className="flex gap-1">
+        {["mark","reports","ledger"].map(t=><button key={t} onClick={()=>setTab(t)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t==="mark"?"✅ Mark":t==="reports"?"📊 Reports":"👷 Ledger"}</button>)}
       </div>
       {tab==="mark"&&(
         <div className="space-y-3">
-          <div className="bg-white rounded-2xl border shadow-sm p-4"><Input label="Select Date" type="date" value={markDate} onChange={e=>setMarkDate(e.target.value)} /></div>
-          {workers.length===0&&<EmptyState icon="👷" text="No workers found. Add workers first." />}
-          {attendance.map((a,i)=>(
-            <div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
-              <div className="flex items-center justify-between">
-                <div><div className="font-black text-gray-900">{a.workerName}</div><div className="text-xs text-gray-400">{a.workUnit}</div></div>
-                <div className="flex gap-1">
-                  {["present","absent"].map(s=>(
-                    <button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>
-                      {s==="present"?"✓ Present":"✗ Absent"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {a.status==="present"&&(
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" />
-                  <Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} placeholder="pcs" />
-                  <Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} placeholder="0" />
-                </div>
-              )}
-              {a.status==="present"&&+(a.workDone||0)>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
+          <Input label="Date" type="date" value={markDate} onChange={e=>setMarkDate(e.target.value)} />
+          {attendance.map((a,i)=><div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
+            <div className="flex items-center justify-between"><div className="font-black text-sm">{a.workerName}</div>
+              <div className="flex gap-1">{["present","absent"].map(s=><button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-3 py-1 rounded-xl text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s==="present"?"✓ Present":"✗ Absent"}</button>)}</div>
             </div>
-          ))}
-          {workers.length>0&&<button onClick={saveAttendance} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-60">{saving?"Saving...":"💾 Save Attendance"}</button>}
-        </div>
-      )}
-      {tab==="reports"&&(
-        <div className="space-y-3">
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" value={filterWorker} onChange={e=>setFilterWorker(e.target.value)}>
-            <option value="">All Workers</option>{workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
-          </select>
-          <div className="grid grid-cols-2 gap-2">
-            <Input label="From" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
-            <Input label="To" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
-          </div>
-          {(()=>{
-            const allAtt = entries.flatMap(e=>(e.attendance||[]).map(a=>({...a,date:e.date})));
-            const filtered = allAtt.filter(a=>{
-              if (filterWorker&&a.workerName!==filterWorker) return false;
-              if (filterFrom&&a.date<filterFrom) return false;
-              if (filterTo&&a.date>filterTo) return false;
-              return a.status==="present";
-            });
-            const totalEarned = filtered.reduce((a,x)=>a+(+(x.total)||+(x.workDone||0)*(+(x.rate||0))),0);
-            return (<>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(filtered.map(a=>a.date)).size}</div><div className="text-xs text-gray-400">Days</div></div>
-                <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(filtered.reduce((a,x)=>a+(+(x.workDone)||0),0))}</div><div className="text-xs text-gray-400">Output</div></div>
-                <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Earnings</div></div>
-              </div>
-              {filtered.sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=>(
-                <div key={i} className="bg-white rounded-xl border shadow-sm p-3 flex justify-between items-center">
-                  <div><div className="font-bold text-sm">{a.workerName}</div><div className="text-xs text-gray-400">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-500">{a.workDone} {a.workUnit}</div>}</div>
-                  <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(a.total)||+(a.workDone||0)*(+(a.rate||0)))}</div><Badge color="green">Present</Badge></div>
-                </div>
-              ))}
-              {filtered.length===0&&<EmptyState icon="📊" text="No records" />}
-            </>);
-          })()}
+            {a.status==="present"&&<div className="grid grid-cols-3 gap-2"><Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" /><Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} /><Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} /></div>}
+            {a.status==="present"&&+(a.workDone||0)>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
+          </div>)}
+          {workers.length>0&&<button onClick={saveAttendance} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold disabled:opacity-60">{saving?"Saving...":"💾 Save Attendance"}</button>}
         </div>
       )}
       {tab==="ledger"&&(
         <div className="space-y-3">
-          {workers.length===0&&<EmptyState icon="👷" text="No workers" />}
           {workers.map(w=>{
-            const {totalDays,totalEarned,totalPaid,pending} = getWorkerLedger(w.name);
-            return (
-              <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-                <div className="flex items-center justify-between">
-                  <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role} · <Badge color={w.workerCategory==="Production"?"blue":"green"}>{w.workerCategory||"Site"}</Badge></div><div className="text-xs text-amber-600">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
-                  <span className="text-gray-300 text-xl">›</span>
-                </div>
-                <div className="mt-2 grid grid-cols-4 gap-1 text-xs">
-                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-gray-400">Days</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-gray-400">Earned</div></div>
-                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
-                  <div className={`rounded-lg p-1.5 text-center ${pending>0?"bg-red-50":"bg-green-50"}`}><div className={`font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
-                </div>
+            const{totalDays,totalEarned,totalPaid,pending}=getWorkerLedger(w.name);
+            return(<div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-center justify-between"><div><div className="font-black">{w.name}</div><div className="text-xs text-gray-400">{w.role} · {CURRENCY}{fmt(w.rateAmount||0)}/{w.paymentType||"day"}</div></div><span className="text-gray-300 text-xl">›</span></div>
+              <div className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-gray-400">Days</div></div>
+                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-gray-400">Earned</div></div>
+                <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+                <div className={`${pending>0?"bg-red-50":"bg-green-50"} rounded-lg p-1.5 text-center`}><div className={`font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
               </div>
-            );
+            </div>);
           })}
         </div>
       )}
@@ -2459,10 +2727,7 @@ function WorkPlanning({ siteWorks, user }) {
     if (item._id) { setPlans(p=>[item,...p]); setModal(false); setForm(emptyForm); }
   };
 
-  const updateStatus = async (id, status) => {
-    await api("PUT",`/workplan/${id}`,{status});
-    setPlans(p=>p.map(x=>x._id===id?{...x,status}:x));
-  };
+  const updateStatus = async (id, status) => { await api("PUT",`/workplan/${id}`,{status}); setPlans(p=>p.map(x=>x._id===id?{...x,status}:x)); };
 
   if (loading) return <Loader />;
   return (
@@ -2472,40 +2737,27 @@ function WorkPlanning({ siteWorks, user }) {
         <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
       </div>
       <div className="space-y-3">
-        {plans.length===0&&<EmptyState icon="📅" text="No work plans yet" />}
+        {plans.length===0&&<EmptyState icon="📅" text="No plans yet" />}
         {plans.map(p=>(
           <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <div className="font-black text-gray-900">{p.siteName}</div>
-                <div className="text-xs text-gray-400">📅 {p.date} · By: {p.addedBy}</div>
-                {p.task&&<div className="text-sm text-gray-600 mt-1">{p.task}</div>}
-                {p.workers&&<div className="text-xs text-gray-400 mt-0.5">👷 {p.workers}</div>}
-                {p.materials&&<div className="text-xs text-gray-400">🧱 {p.materials}</div>}
-              </div>
+              <div className="flex-1"><div className="font-black">{p.siteName}</div><div className="text-xs text-gray-400">📅 {p.date}{p.task?` · ${p.task}`:""}</div></div>
               <Badge color={p.status==="done"?"green":p.status==="planned"?"blue":"amber"}>{p.status}</Badge>
             </div>
-            <div className="mt-2 flex gap-1">
-              {["planned","in-progress","done"].map(s=>(
-                <button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"}`}>{s}</button>
-              ))}
-            </div>
+            <div className="mt-2 flex gap-1">{["planned","in-progress","done"].map(s=><button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title="Add Work Plan" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Input label="Site Name *" value={form.siteName} onChange={e=>setForm({...form,siteName:e.target.value})} placeholder="Site / project name" />
-            <Textarea label="Tasks" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} placeholder="Work to be done..." />
-            <Input label="Workers" value={form.workers} onChange={e=>setForm({...form,workers:e.target.value})} placeholder="Worker names" />
-            <Input label="Materials Needed" value={form.materials} onChange={e=>setForm({...form,materials:e.target.value})} placeholder="Required materials" />
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Add Plan</button>
-          </div>
-        </Modal>
-      )}
+      {modal&&<Modal title="Add Work Plan" onClose={()=>setModal(false)}>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Site Name *" value={form.siteName} onChange={e=>setForm({...form,siteName:e.target.value})} placeholder="Site / project" />
+          <Textarea label="Tasks" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} />
+          <Input label="Workers" value={form.workers} onChange={e=>setForm({...form,workers:e.target.value})} />
+          <Input label="Materials" value={form.materials} onChange={e=>setForm({...form,materials:e.target.value})} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Add Plan</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2519,11 +2771,11 @@ function Stock({ stock, setStock, user }) {
 
   const save = async () => {
     if (editItem) { await api("PUT",`/stock/${editItem._id}`,form); setStock(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x)); setEditItem(null); }
-    else { const item = await api("POST","/stock",form); if (item._id) setStock(p=>[...p,item]); }
+    else { const item=await api("POST","/stock",form); if(item._id) setStock(p=>[...p,item]); }
     setModal(false); setForm(emptyForm);
   };
 
-  const del = async (id) => { if (!window.confirm("Delete?")) return; await api("DELETE",`/stock/${id}`); setStock(p=>p.filter(x=>x._id!==id)); };
+  const del = async (id) => { if(!window.confirm("Delete?")) return; await api("DELETE",`/stock/${id}`); setStock(p=>p.filter(x=>x._id!==id)); };
 
   return (
     <div className="space-y-4">
@@ -2534,34 +2786,29 @@ function Stock({ stock, setStock, user }) {
       <div className="space-y-2">
         {stock.length===0&&<EmptyState icon="📦" text="No stock items" />}
         {stock.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">{s.name}</div><div className="text-sm text-gray-600">{s.quantity||s.qty||0} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}</div>
-              {user.role==="admin"&&(<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>)}
-            </div>
-            {s.minStock>0&&(s.quantity||s.qty||0)<=s.minStock&&<div className="mt-1"><Badge color="red">⚠️ Low Stock</Badge></div>}
+          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+            <div><div className="font-black">{s.name}</div><div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}</div>
+            {user.role==="admin"&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title={editItem?"Edit Stock":"Add Stock"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
-          <div className="space-y-3">
-            <Input label="Item Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
-              <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save":"Add"}</button>
+      {modal&&<Modal title={editItem?"Edit":"Add Stock"} onClose={()=>{setModal(false);setEditItem(null);}}>
+        <div className="space-y-3">
+          <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
+            <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
+            <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
+            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
           </div>
-        </Modal>
-      )}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add"}</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
 
-// ─── RAW MATERIAL ────────────────────────────────────────────────────────────
+// ─── RAW MATERIAL ─────────────────────────────────────────────────────────────
 function RawMaterial({ raw, setRaw, user }) {
   const [modal, setModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -2570,11 +2817,11 @@ function RawMaterial({ raw, setRaw, user }) {
 
   const save = async () => {
     if (editItem) { await api("PUT",`/raw/${editItem._id}`,form); setRaw(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x)); setEditItem(null); }
-    else { const item = await api("POST","/raw",form); if (item._id) setRaw(p=>[...p,item]); }
+    else { const item=await api("POST","/raw",form); if(item._id) setRaw(p=>[...p,item]); }
     setModal(false); setForm(emptyForm);
   };
 
-  const del = async (id) => { if (!window.confirm("Delete?")) return; await api("DELETE",`/raw/${id}`); setRaw(p=>p.filter(x=>x._id!==id)); };
+  const del = async (id) => { if(!window.confirm("Delete?")) return; await api("DELETE",`/raw/${id}`); setRaw(p=>p.filter(x=>x._id!==id)); };
 
   return (
     <div className="space-y-4">
@@ -2585,28 +2832,24 @@ function RawMaterial({ raw, setRaw, user }) {
       <div className="space-y-2">
         {raw.length===0&&<EmptyState icon="🧱" text="No raw materials" />}
         {raw.map(r=>(
-          <div key={r._id} className="bg-white rounded-2xl border shadow-sm p-4">
-            <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">{r.name||r.material}</div><div className="text-sm text-gray-600">{r.quantity||r.qty||0} {r.unit}</div>{r.supplier&&<div className="text-xs text-gray-400">Supplier: {r.supplier}</div>}{(r.price||r.costPerUnit)>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(r.price||r.costPerUnit)}/unit</div>}</div>
-              {user.role==="admin"&&(<div className="flex gap-1"><button onClick={()=>{setForm({name:r.name||r.material||"",quantity:r.quantity||r.qty||0,unit:r.unit||"bag",price:r.price||r.costPerUnit||0,supplier:r.supplier||""});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>)}
-            </div>
+          <div key={r._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+            <div><div className="font-black">{r.name||r.material}</div><div className="text-sm text-gray-600">{r.quantity||r.qty} {r.unit}</div>{r.supplier&&<div className="text-xs text-gray-400">Supplier: {r.supplier}</div>}</div>
+            {user.role==="admin"&&<div className="flex gap-1"><button onClick={()=>{setForm({...r});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title={editItem?"Edit":"Add Raw Material"} onClose={()=>{setModal(false);setEditItem(null);}}>
-          <div className="space-y-3">
-            <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
-              <Select label="Unit" value={form.unit} options={["bag","kg","ton","litre","load","nos"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
-              <Input label="Supplier" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})} />
-            </div>
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">{editItem?"Save":"Add"}</button>
+      {modal&&<Modal title={editItem?"Edit":"Add Raw Material"} onClose={()=>{setModal(false);setEditItem(null);}}>
+        <div className="space-y-3">
+          <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
+            <Select label="Unit" value={form.unit} options={["bag","kg","ton","litre","load","nos"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
+            <Input label="Supplier" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})} />
           </div>
-        </Modal>
-      )}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add"}</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2618,8 +2861,8 @@ function Production({ production, setProduction, stock, user }) {
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
-    const item = await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:user.role==="admin"?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
-    if (item._id) { setProduction(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+    const item=await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:user.role==="admin"?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
+    if(item._id){setProduction(p=>[item,...p]);setModal(false);setForm(emptyForm);}
   };
 
   return (
@@ -2630,27 +2873,19 @@ function Production({ production, setProduction, stock, user }) {
       </div>
       <div className="space-y-3">
         {production.length===0&&<EmptyState icon="🏭" text="No production logs" />}
-        {production.map(p=>(
-          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black text-gray-900">{p.product}</div><div className="text-xs text-gray-400">📅 {p.date} · By: {p.supervisor}</div><div className="text-sm text-gray-600 mt-0.5">Target: {p.target} · Produced: <span className="font-bold text-green-700">{p.produced}</span></div></div>
-            <Badge color={p.status==="approved"?"green":p.status==="rejected"?"red":"yellow"}>{p.status}</Badge>
-          </div>
-        ))}
+        {production.map(p=><div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between"><div><div className="font-black">{p.product}</div><div className="text-xs text-gray-400">📅 {p.date} · By: {p.supervisor}</div><div className="text-sm text-gray-600">Target: {p.target} · Done: <span className="font-bold text-green-700">{p.produced}</span></div></div><Badge color={p.status==="approved"?"green":p.status==="rejected"?"red":"yellow"}>{p.status}</Badge></div>)}
       </div>
-      {modal&&(
-        <Modal title="Log Production" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Target" type="number" value={form.target} onChange={e=>setForm({...form,target:+e.target.value})} />
-              <Input label="Produced" type="number" value={form.produced} onChange={e=>setForm({...form,produced:+e.target.value})} />
-            </div>
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Submit</button>
+      {modal&&<Modal title="Log Production" onClose={()=>setModal(false)}>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Target" type="number" value={form.target} onChange={e=>setForm({...form,target:+e.target.value})} />
+            <Input label="Produced" type="number" value={form.produced} onChange={e=>setForm({...form,produced:+e.target.value})} />
           </div>
-        </Modal>
-      )}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Submit</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2662,9 +2897,9 @@ function Sales({ sales, setSales, stock, user }) {
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
-    const total = +form.quantity*(+form.price);
-    const item = await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
-    if (item._id) { setSales(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+    const total=+form.quantity*(+form.price);
+    const item=await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
+    if(item._id){setSales(p=>[item,...p]);setModal(false);setForm(emptyForm);}
   };
 
   return (
@@ -2676,133 +2911,21 @@ function Sales({ sales, setSales, stock, user }) {
       <StatCard label="Total Sales" value={`${CURRENCY}${fmt(sales.reduce((a,s)=>a+(+(s.total)||0),0))}`} icon="💰" color="green" />
       <div className="space-y-2">
         {sales.length===0&&<EmptyState icon="💰" text="No sales yet" />}
-        {sales.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black text-gray-900">{s.product}</div><div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div><div className="text-sm text-gray-600">{s.quantity||s.qty||0} units × {CURRENCY}{s.price||s.unitPrice||0}</div></div>
-            <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div><Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode||"Cash"}</Badge></div>
-          </div>
-        ))}
+        {sales.map(s=><div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between"><div><div className="font-black">{s.product}</div><div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div><div className="text-sm text-gray-600">{s.quantity} × {CURRENCY}{s.price}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div><Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode}</Badge></div></div>)}
       </div>
-      {modal&&(
-        <Modal title="Record Sale" onClose={()=>setModal(false)}>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
-            <Input label="Customer" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,total:+e.target.value*(+form.price)})} />
-              <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value,total:+form.quantity*(+e.target.value)})} />
-            </div>
-            <Select label="Payment" value={form.paymentMode} options={["Cash","Bank","GPay","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
+      {modal&&<Modal title="Record Sale" onClose={()=>setModal(false)}>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
+          <Input label="Customer" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,total:+e.target.value*(+form.price)})} />
+            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value,total:+form.quantity*(+e.target.value)})} />
           </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// ─── PURCHASES ────────────────────────────────────────────────────────────────
-function Purchases({ user }) {
-  const [purchases, setPurchases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(false);
-  const [viewModal, setViewModal] = useState(null);
-  const [search, setSearch] = useState("");
-  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", paymentMode:"Cash", vehicleNumber:"", vehicleType:"", driverName:"", driverPhone:"", deliveryAddress:"", note:"" };
-  const [form, setForm] = useState(emptyForm);
-
-  useEffect(()=>{ api("GET","/purchases").then(d=>{ setPurchases(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
-
-  const save = async () => {
-    if (!form.supplierName||!form.itemName) return;
-    const total = +form.quantity*(+form.unitPrice)||+form.totalAmount||0;
-    const item = await api("POST","/purchases",{...form,totalAmount:total,addedBy:user.name});
-    if (item._id) { setPurchases(p=>[item,...p]); setModal(false); setForm(emptyForm); }
-  };
-
-  const filtered = purchases.filter(p=>!search||(p.supplierName||"").toLowerCase().includes(search.toLowerCase())||(p.itemName||"").toLowerCase().includes(search.toLowerCase()));
-
-  if (loading) return <Loader />;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
-      </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search supplier / item..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{purchases.length}</div><div className="text-xs text-gray-400">Total</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(purchases.reduce((a,p)=>a+(+(p.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Spent</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(purchases.map(p=>p.supplierName).filter(Boolean)).size}</div><div className="text-xs text-gray-400">Suppliers</div></div>
-      </div>
-      <div className="space-y-3">
-        {filtered.length===0&&<EmptyState icon="🛒" text="No purchases yet" />}
-        {filtered.map(p=>(
-          <div key={p._id} onClick={()=>setViewModal(p)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1"><div className="flex items-center gap-2 flex-wrap"><span className="font-black text-gray-900">{p.itemName}</span><Badge color="teal">{p.itemType}</Badge></div><div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div>{p.vehicleNumber&&<div className="text-xs text-gray-400">🚛 {p.vehicleNumber}</div>}</div>
-              <div className="text-right shrink-0"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount)||0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {modal&&(
-        <Modal title="Add Purchase" onClose={()=>setModal(false)} wide>
-          <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <SectionBox title="Supplier" icon="🏪" color="blue">
-              <Input label="Supplier Name *" value={form.supplierName} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Company / Person" />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Phone" type="tel" value={form.supplierPhone} onChange={e=>setForm({...form,supplierPhone:e.target.value})} />
-                <Input label="Address" value={form.supplierAddress} onChange={e=>setForm({...form,supplierAddress:e.target.value})} />
-              </div>
-            </SectionBox>
-            <SectionBox title="Item" icon="📦" color="amber">
-              <Input label="Item Name *" value={form.itemName} onChange={e=>setForm({...form,itemName:e.target.value})} placeholder="What was purchased" />
-              <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e=>setForm({...form,itemType:e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,totalAmount:String(+e.target.value*(+(form.unitPrice)||0))})} />
-                <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-                <Input label={`Unit Price(${CURRENCY})`} type="number" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:e.target.value,totalAmount:String(+e.target.value*(+(form.quantity)||0))})} />
-                <Input label={`Total(${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value})} />
-              </div>
-            </SectionBox>
-            <SectionBox title="Vehicle (Optional)" icon="🚛" color="gray">
-              <div className="grid grid-cols-2 gap-2">
-                <Input label="Vehicle No" value={form.vehicleNumber} onChange={e=>setForm({...form,vehicleNumber:e.target.value})} />
-                <Select label="Type" value={form.vehicleType} options={["","Lorry","Tipper","Van","Auto","Other"]} onChange={e=>setForm({...form,vehicleType:e.target.value})} />
-                <Input label="Driver Name" value={form.driverName} onChange={e=>setForm({...form,driverName:e.target.value})} />
-                <Input label="Driver Phone" type="tel" value={form.driverPhone} onChange={e=>setForm({...form,driverPhone:e.target.value})} />
-              </div>
-            </SectionBox>
-            <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-            <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit</button>
-          </div>
-        </Modal>
-      )}
-      {viewModal&&(
-        <Modal title="Purchase Details" onClose={()=>setViewModal(null)}>
-          <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
-            <SectionBox title="Supplier" icon="🏪" color="blue">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.supplierName||"—"}</div></div>
-                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.supplierPhone||"—"}</div></div>
-              </div>
-            </SectionBox>
-            <SectionBox title="Item" icon="📦" color="amber">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><div className="text-xs text-gray-400">Item</div><div className="font-bold">{viewModal.itemName}</div></div>
-                <div><div className="text-xs text-gray-400">Qty</div><div className="font-bold">{viewModal.quantity} {viewModal.unit}</div></div>
-              </div>
-              <div className="bg-red-50 rounded-xl p-2 text-center mt-2"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total</div></div>
-            </SectionBox>
-            {viewModal.note&&<div className="bg-gray-50 rounded-xl p-3"><div className="text-xs text-gray-400">Note</div><div className="text-sm">{viewModal.note}</div></div>}
-          </div>
-        </Modal>
-      )}
+          <Select label="Payment" value={form.paymentMode} options={["Cash","Bank","GPay","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Record Sale</button>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2816,18 +2939,17 @@ function Users({ currentUser, allUsers, setAllUsers }) {
   const save = async () => {
     if (!form.name||!form.username||!form.password) { setSaveError("All fields required"); return; }
     setSaveError("");
-    const user = await api("POST","/users",form);
-    if (user._id) { setAllUsers(p=>[...p,user]); setModal(false); setForm({name:"",username:"",password:"",role:"user"}); }
+    const user=await api("POST","/users",form);
+    if(user._id){setAllUsers(p=>[...p,user]);setModal(false);setForm({name:"",username:"",password:"",role:"user"});}
     else setSaveError(user.message||"Failed to add user");
   };
 
   const toggleActive = async (u) => {
-    if (u._id===currentUser._id) return;
+    if(u._id===currentUser._id) return;
     await api("PUT",`/users/${u._id}`,{active:!u.active});
     setAllUsers(p=>p.map(x=>x._id===u._id?{...x,active:!x.active}:x));
   };
 
-  const roleColor = {admin:"purple",supervisor:"green",user:"blue"};
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -2837,23 +2959,261 @@ function Users({ currentUser, allUsers, setAllUsers }) {
       <div className="space-y-2">
         {allUsers.map(u=>(
           <div key={u._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="flex items-center gap-2"><span className="font-black text-gray-900">{u.name}</span><Badge color={roleColor[u.role]||"gray"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}</div></div>
-            {u._id!==currentUser._id&&(<button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${u.active?"bg-red-50 text-red-600 border-red-200 hover:bg-red-100":"bg-green-50 text-green-600 border-green-200 hover:bg-green-100"}`}>{u.active?"Deactivate":"Activate"}</button>)}
+            <div><div className="flex items-center gap-2"><span className="font-black">{u.name}</span><Badge color={u.role==="admin"?"purple":u.role==="supervisor"?"green":"blue"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}</div></div>
+            {u._id!==currentUser._id&&<button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${u.active?"bg-red-50 text-red-600 border-red-200":"bg-green-50 text-green-600 border-green-200"}`}>{u.active?"Deactivate":"Activate"}</button>}
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title="Add User" onClose={()=>{setModal(false);setSaveError("");}}>
+      {modal&&<Modal title="Add User" onClose={()=>{setModal(false);setSaveError("");}}>
+        <div className="space-y-3">
+          <Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <Input label="Username" value={form.username} onChange={e=>setForm({...form,username:e.target.value})} />
+          <Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
+          <Select label="Role" value={form.role} options={["admin","supervisor","user"]} onChange={e=>setForm({...form,role:e.target.value})} />
+          {saveError&&<div className="text-xs text-red-600 font-semibold bg-red-50 rounded-xl p-3">{saveError}</div>}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Add User</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
+function AdminSiteReport() {
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks(Array.isArray(sw)?sw:[]);
+      setDailyReports(Array.isArray(dr)?dr:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const getSiteReports = (site) => {
+    let r = dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+    if (filterFrom) r = r.filter(x=>x.date>=filterFrom);
+    if (filterTo) r = r.filter(x=>x.date<=filterTo);
+    return r.sort((a,b)=>b.date.localeCompare(a.date));
+  };
+
+  const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <Loader />;
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const allPayments = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received");
+    const workerPayments = allPayments.filter(p=>p.type==="Worker Payment");
+    const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
+    const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
+    const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalExpenses = [...workerPayments,...materialPayments,...equipmentPayments].reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const allMats = sr.filter(r=>r.materialsUnloaded);
+    const allExtra = sr.filter(r=>r.extraWorkDesc);
+    const allComplaints = sr.filter(r=>r.complaints);
+    const dateReport = selectedDate ? sr.find(r=>r.date===selectedDate) : null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(selectedSite.totalCost||selectedSite.totalAmount||0))}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">Amount Received</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Total Expenses</div></div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+        </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+            <option value="">All Dates ({sr.length} reports)</option>
+            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+          </select>
+        </div>
+
+        {dateReport?(
           <div className="space-y-3">
-            <Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
-            <Input label="Username" value={form.username} onChange={e=>setForm({...form,username:e.target.value})} />
-            <Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
-            <Select label="Role" value={form.role} options={["admin","supervisor","user"]} onChange={e=>setForm({...form,role:e.target.value})} />
-            {saveError&&<div className="text-xs text-red-600 font-semibold bg-red-50 rounded-xl p-3">{saveError}</div>}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold hover:bg-amber-600">Add User</button>
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate} Activity</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
+            </div>
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                  <span><span className={`font-bold ${p.type==="Client Payment Received"?"text-green-700":"text-gray-700"}`}>{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span>
+                  <span className={`font-black ${p.type==="Client Payment Received"?"text-green-700":"text-red-600"}`}>{p.type==="Client Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}</span>
+                </div>)}
+              </SectionBox>
+            )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
           </div>
-        </Modal>
-      )}
+        ):(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
+            {clientPayments.length>0&&<SectionBox title="Client Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
+            {workerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{workerPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span>{p.date} · {p.paidTo||"—"}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
+            {allComplaints.length>0&&<SectionBox title="Complaints" icon="⚠️" color="red">{allComplaints.map((r,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{r.date} · {r.complaints}</div>{r.actionTaken&&<div className="text-gray-400">Action: {r.actionTaken}</div>}</div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports ({sr.length})</div>
+            {sr.length===0&&<EmptyState icon="📋" text="No reports submitted" />}
+            {sr.map(r=><div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus||"running"}</Badge></div></div></div>)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">🏗️ Site Reports</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search site name or location..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="From Date" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
+        <Input label="To Date" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+      </div>
+      <div className="space-y-3">
+        {filteredSites.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
+        {filteredSites.map(s=>{
+          const sr=getSiteReports(s);
+          const received=dailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id).flatMap(r=>(r.payments||[]).filter(p=>p.type==="Client Payment Received")).reduce((a,p)=>a+(+(p.amount)||0),0);
+          return(
+            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-start justify-between">
+                <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div><div className="text-xs text-gray-400">📅 {s.startDate||"—"} · {sr.length} reports</div></div>
+                <div className="text-right"><Badge color={s.status==="completed"?"green":"amber"}>{s.status}</Badge><div className="text-xs text-green-600 font-bold mt-1">Received: {CURRENCY}{fmt(received)}</div><div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.pendingAmount||0))}</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── ADMIN WORKER REPORT ──────────────────────────────────────────────────────
+function AdminWorkerReport() {
+  const [workers, setWorkers] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [search, setSearch] = useState("");
+
+  useEffect(()=>{
+    Promise.all([api("GET","/workers"),api("GET","/dailyreport"),api("GET","/workerpayments")]).then(([w,dr,p])=>{
+      setWorkers(Array.isArray(w)?w:[]);
+      setDailyReports(Array.isArray(dr)?dr:[]);
+      setPayments(Array.isArray(p)?p:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const getWorkerData = (wname) => {
+    // Payments from daily reports
+    let drPayments = dailyReports.flatMap(r=>(r.payments||[]).filter(p=>p.paidTo===wname&&p.type==="Worker Payment").map(p=>({...p,date:r.date,siteName:r.siteName})));
+    // Direct payments
+    let directPay = payments.filter(p=>p.workerName===wname);
+    if (filterFrom) { drPayments=drPayments.filter(p=>p.date>=filterFrom); directPay=directPay.filter(p=>p.date>=filterFrom); }
+    if (filterTo) { drPayments=drPayments.filter(p=>p.date<=filterTo); directPay=directPay.filter(p=>p.date<=filterTo); }
+    const totalPaid = drPayments.reduce((a,p)=>a+(+(p.amount)||0),0) + directPay.reduce((a,p)=>a+(+(p.amount)||0),0);
+    // Worker attendance from daily reports
+    const attendance = dailyReports.flatMap(r=>(r.workers||[]).filter(w=>w.workerName===wname).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    return { drPayments, directPay, totalPaid, attendance };
+  };
+
+  if (loading) return <Loader />;
+
+  if (selectedWorker) {
+    const w = selectedWorker;
+    const {drPayments, directPay, totalPaid, attendance} = getWorkerData(w.name);
+    const allPay = [...drPayments.map(p=>({...p,source:"Daily Report"})),...directPay.map(p=>({...p,source:"Direct",paidTo:p.workerName}))].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{w.name}</div>
+          <div className="text-xs text-gray-400">{w.role} · 📞 {w.phone||"—"}</div>
+          <div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
+          <Input label="To Date" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+          <div className="text-xs text-gray-400 mb-1">Total Salary Paid</div>
+          <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div>
+        </div>
+        <div className="font-black text-gray-800">💸 Payment History</div>
+        {allPay.length===0&&<EmptyState icon="💸" text="No payments in this period" />}
+        {allPay.map((p,i)=>(
+          <div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2">
+            <div className="flex justify-between items-start">
+              <div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date} · {p.mode||"—"}</div>{p.siteName&&<div className="text-xs text-gray-400">🏗️ {p.siteName}</div>}{p.remarks&&<div className="text-xs text-gray-400">{p.remarks}</div>}</div>
+              <Badge color="green">{p.source}</Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const filteredWorkers = workers.filter(w=>!search||(w.name||"").toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search worker name..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="From Date" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
+        <Input label="To Date" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
+      </div>
+      <div className="space-y-3">
+        {filteredWorkers.length===0&&<EmptyState icon="👷" text="No workers found" />}
+        {filteredWorkers.map(w=>{
+          const {totalPaid} = getWorkerData(w.name);
+          return (
+            <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-center justify-between">
+                <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="text-xs text-amber-600">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
+                <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Total Paid</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2861,7 +3221,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
 function Reports({ production, sales, stock, raw, siteWorks }) {
   const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
-  const totalSiteIncome = siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0);
+  const totalIncome = siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0);
   const totalPending = siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0);
   const completed = siteWorks.filter(s=>s.status==="completed").length;
   const running = siteWorks.filter(s=>s.status==="running").length;
@@ -2869,24 +3229,16 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
     <div className="space-y-4">
       <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalSiteIncome)}`} icon="💰" color="green" />
-        <StatCard label="Pending Payment" value={`${CURRENCY}${fmt(totalPending)}`} icon="⏳" color="red" />
-        <StatCard label="Sales Revenue" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="blue" />
-        <StatCard label="Completed Sites" value={completed} icon="✅" color="teal" />
+        <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalIncome)}`} icon="💰" color="green" />
+        <StatCard label="Pending" value={`${CURRENCY}${fmt(totalPending)}`} icon="⏳" color="red" />
+        <StatCard label="Sales" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="blue" />
+        <StatCard label="Completed" value={completed} icon="✅" color="teal" />
       </div>
       <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <div className="font-black text-gray-900 mb-3">📊 Site Work Summary</div>
-        {[["Running",running,"amber"],["Completed",completed,"green"],["Total Sites",siteWorks.length,"blue"],["Total Income",`${CURRENCY}${fmt(totalSiteIncome)}`,"green"],["Pending",`${CURRENCY}${fmt(totalPending)}`,"red"]].map(([l,v,c])=>(
-          <div key={l} className="flex justify-between items-center py-2 border-b border-gray-50">
-            <span className="text-sm text-gray-600">{l}</span>
-            <span className={`font-black text-${c}-700`}>{v}</span>
-          </div>
+        <div className="font-black text-gray-900 mb-3">📊 Summary</div>
+        {[["Running Sites",running,"amber"],["Completed",completed,"green"],["Total Sites",siteWorks.length,"blue"],["Total Income",`${CURRENCY}${fmt(totalIncome)}`,"green"],["Pending",`${CURRENCY}${fmt(totalPending)}`,"red"]].map(([l,v,c])=>(
+          <div key={l} className="flex justify-between py-2 border-b border-gray-50"><span className="text-sm text-gray-600">{l}</span><span className={`font-black text-${c}-700`}>{v}</span></div>
         ))}
-      </div>
-      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
-        <div className="font-black text-gray-900 mb-3">🏭 Production Summary</div>
-        <div className="flex justify-between py-2 border-b"><span className="text-sm text-gray-600">Total Logs</span><span className="font-black">{production.length}</span></div>
-        <div className="flex justify-between py-2"><span className="text-sm text-gray-600">Total Produced</span><span className="font-black text-green-700">{fmt(production.reduce((a,p)=>a+(+(p.produced)||0),0))}</span></div>
       </div>
     </div>
   );
@@ -2904,11 +3256,14 @@ const NAV = {
     { id:"workerreport", label:"Site Report", icon:"📋" },
     { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
     { id:"supervisorwork", label:"Sup. Work", icon:"📋" },
+    { id:"sitereport", label:"Site Reports", icon:"🏗️" },
+    { id:"workerreport2", label:"Worker Reports", icon:"👷" },
     { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"stock", label:"Stock", icon:"📦" },
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
+    { id:"devices", label:"Devices", icon:"📱" },
     { id:"devices", label:"Devices", icon:"📱" },
     { id:"users", label:"Users", icon:"👥" },
     { id:"reports", label:"Reports", icon:"📈" },
@@ -3007,11 +3362,14 @@ export default function App() {
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
+      case "sitereport": return <AdminSiteReport />;
+      case "workerreport2": return <AdminWorkerReport />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
       case "users": return currentUser.role==="admin"?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
+      case "devices": return <DeviceManagement user={currentUser} />;
       case "devices": return <DeviceManagement user={currentUser} />;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
