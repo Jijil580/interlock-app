@@ -1338,23 +1338,38 @@ function DailyReport({ user }) {
 
   const save = async () => {
     if (!form.siteName||!form.date) return;
-    // Auto-save worker payments
+
+    // 1. Save worker entry payments to workerpayments
     for (const we of (form.workerEntries||[])) {
       if (+we.paymentGiven>0) {
-        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,reportDate:form.date});
+        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,siteName:form.siteName});
       }
     }
-    // Auto-save payments
+    // 2. Save worker payments from payments section
     for (const p of (form.payments||[])) {
       if (p.type==="Worker Payment"&&p.workerName) {
-        await api("POST","/workerpayments",{workerName:p.workerName,amount:p.amount,date:p.date||form.date,note:p.remarks,addedBy:user.name,reportDate:form.date});
+        await api("POST","/workerpayments",{workerName:p.workerName,amount:+p.amount,date:form.date,note:`Site: ${form.siteName} | ${p.remarks||""}`,addedBy:user.name,siteName:form.siteName});
       }
     }
     const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
-    const totalReceived = (form.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0);
+
+    // 3. Calculate site payment received & AUTO-UPDATE sitework
+    const sitePayments = (form.payments||[]).filter(p=>p.type==="Site Payment Received");
+    const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    if (totalReceived > 0 && form.siteId) {
+      const site = siteWorks.find(s=>s._id===form.siteId);
+      if (site) {
+        const newAdvance = +(site.advancePaid||0) + totalReceived;
+        const siteCost = +(site.totalCost||site.totalAmount||0);
+        const newPending = Math.max(0, siteCost - newAdvance);
+        const newStatus = newPending===0?"paid":newAdvance>0?"partial":"pending";
+        await api("PUT",`/sitework/${form.siteId}`,{advancePaid:String(newAdvance),pendingAmount:String(newPending),paymentStatus:newStatus});
+        setSiteWorks(p=>p.map(s=>s._id===form.siteId?{...s,advancePaid:String(newAdvance),pendingAmount:String(newPending),paymentStatus:newStatus}:s));
+      }
+    }
     const item = await api("POST","/dailyreport",{...form,totalPayments,totalReceived,addedBy:user.name});
     if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setSiteSearch(""); }
-  };
+  };;
 
   const openAdd = (site) => {
     setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"});
@@ -3011,12 +3026,18 @@ function AdminSiteReport() {
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const allPayments = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
-    const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received");
+    const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received");
     const workerPayments = allPayments.filter(p=>p.type==="Worker Payment");
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
+    const otherPayments = allPayments.filter(p=>p.type==="Other Expense");
     const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
-    const totalExpenses = [...workerPayments,...materialPayments,...equipmentPayments].reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalWorkerExp = workerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalMatExp = materialPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalEquipExp = equipmentPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalExpenses = totalWorkerExp + totalMatExp + totalEquipExp + otherPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const siteCost = +(selectedSite.totalCost||selectedSite.totalAmount||0);
+    const dynamicPending = Math.max(0, siteCost - totalReceived);
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const allMats = sr.filter(r=>r.materialsUnloaded);
     const allExtra = sr.filter(r=>r.extraWorkDesc);
@@ -3035,10 +3056,15 @@ function AdminSiteReport() {
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(+(selectedSite.totalCost||selectedSite.totalAmount||0))}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">Amount Received</div></div>
-          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Total Expenses</div></div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-amber-700">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Amount Received</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dynamicPending)}</div><div className="text-xs text-gray-400">🔴 Pending Amount</div></div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-orange-700">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Total Expenses</div></div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalWorkerExp)}</div><div className="text-gray-400">👷 Workers</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(totalMatExp)}</div><div className="text-gray-400">🧱 Materials</div></div>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center"><div className="font-black text-purple-700">{CURRENCY}{fmt(totalEquipExp)}</div><div className="text-gray-400">🔧 Equipment</div></div>
         </div>
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
@@ -3220,6 +3246,186 @@ function AdminWorkerReport() {
 
 // ─── REPORTS ──────────────────────────────────────────────────────────────────
 
+// ─── SUPERVISOR SITE REPORT ───────────────────────────────────────────────────
+function SupervisorSiteReport({ user }) {
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [search, setSearch] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks((Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name));
+      setDailyReports((Array.isArray(dr)?dr:[]).filter(r=>r.addedBy===user.name));
+      setLoading(false);
+    });
+  },[]);
+
+  const getSiteReports = (site) =>
+    dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id)
+      .sort((a,b)=>b.date.localeCompare(a.date));
+
+  const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <Loader />;
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const clientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
+    const workerPayments = allPayments.filter(p=>p.type==="Worker Payment");
+    const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
+    const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
+    const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalWorkerExp = workerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalMatExp = materialPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalEquipExp = equipmentPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalExpenses = totalWorkerExp+totalMatExp+totalEquipExp;
+    const siteCost = +(selectedSite.totalCost||selectedSite.totalAmount||0);
+    const dynamicPending = Math.max(0, siteCost - totalReceived);
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const allMats = sr.filter(r=>r.materialsUnloaded);
+    const allExtra = sr.filter(r=>r.extraWorkDesc);
+    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Cost</div></div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Received</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dynamicPending)}</div><div className="text-xs text-gray-400">🔴 Pending</div></div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-orange-700">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Expenses</div></div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalWorkerExp)}</div><div className="text-gray-400">👷 Workers</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(totalMatExp)}</div><div className="text-gray-400">🧱 Materials</div></div>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center"><div className="font-black text-purple-700">{CURRENCY}{fmt(totalEquipExp)}</div><div className="text-gray-400">🔧 Equipment</div></div>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+            <option value="">All Dates ({sr.length} reports)</option>
+            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+          </select>
+        </div>
+        {dateReport?(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate} Activity</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+            </div>
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Workers" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                    <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></span>
+                    <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""}{+w.pending>0?` | Pending: ${CURRENCY}${fmt(w.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className={`font-bold ${p.type==="Site Payment Received"?"text-blue-700":"text-gray-700"}`}>{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""} · {p.mode}</span>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-red-600"}`}>{p.type==="Site Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+          </div>
+        ):(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
+            {clientPayments.length>0&&<SectionBox title="Site Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
+            {workerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{workerPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span>{p.date} · {p.workerName||p.paidTo||"—"}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.materialName||p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports ({sr.length})</div>
+            {sr.length===0&&<EmptyState icon="📋" text="No reports submitted yet" />}
+            {sr.map(r=>(
+              <div key={r._id} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right">
+                    {+(r.totalReceived||0)>0&&<div className="font-black text-blue-700 text-xs">+{CURRENCY}{fmt(r.totalReceived)}</div>}
+                    <div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div>
+                    <Badge color="amber">{r.siteStatus||"running"}</Badge>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📊 My Site Reports</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search site..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-gray-400">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-gray-400">Completed</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0))}</div><div className="text-gray-400">Total Rcvd</div></div>
+      </div>
+      <div className="space-y-3">
+        {filteredSites.length===0&&<EmptyState icon="📊" text="No sites found" />}
+        {filteredSites.map(s=>{
+          const sr = getSiteReports(s);
+          const received = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+          const siteCost = +(s.totalCost||s.totalAmount||0);
+          const pending = Math.max(0, siteCost - received);
+          return (
+            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-black text-gray-900">{s.customerName}</div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div>
+                  <div className="text-xs text-gray-400">{sr.length} daily reports</div>
+                </div>
+                <Badge color={s.status==="completed"?"green":s.status==="running"?"amber":"gray"}>{s.status}</Badge>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-gray-400">Cost</div></div>
+                <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(received)}</div><div className="text-gray-400">Received</div></div>
+                <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── SUPERVISOR SITE REPORT ───────────────────────────────────────────────────
+
+
+// ─── SUPERVISOR SITE REPORT VIEW ─────────────────────────────────────────────
+
+
 const NAV = {
   admin: [
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -3246,9 +3452,9 @@ const NAV = {
   ],
   supervisor: [
     { id:"sitework", label:"Site Work", icon:"🏗️" },
-    { id:"supervisorwork", label:"Submitted Work", icon:"📋" },
-    { id:"workerreport", label:"Site Report", icon:"📝" },
     { id:"dailyreport", label:"Daily Report", icon:"📋" },
+    { id:"mysitereports", label:"My Site Reports", icon:"📊" },
+    { id:"workerreport", label:"Site Report", icon:"📝" },
     { id:"workers", label:"Workers", icon:"👷" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
@@ -3333,12 +3539,15 @@ export default function App() {
       case "productionsite": return <ProductionSite user={currentUser} />;
       case "attendance": return <AttendanceReports user={currentUser} />;
       case "supervisorwork": return <SupervisorWorkView user={currentUser} />;
+      case "supervisorsitereport": return <SupervisorSiteReport user={currentUser} />;
+      case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
       case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport user={currentUser} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "sitereport": return <AdminSiteReport />;
+      case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
       case "workerreport2": return <AdminWorkerReport />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
