@@ -3025,14 +3025,17 @@ function AdminSiteReport() {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
-    const allPayments = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
+    const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    // Also get worker entry payments (salary paid via worker section)
+    const allWorkerEntryPayments = siteReportDocs.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,paidTo:w.workerName,amount:+(w.paymentGiven||0),mode:"Cash",date:r.date,remarks:w.remarks||"",fromWorkerEntry:true})));
+    const allWorkerPayments = [...allPayments.filter(p=>p.type==="Worker Payment"), ...allWorkerEntryPayments];
     const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received");
-    const workerPayments = allPayments.filter(p=>p.type==="Worker Payment");
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
     const otherPayments = allPayments.filter(p=>p.type==="Other Expense");
     const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
-    const totalWorkerExp = workerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalWorkerExp = allWorkerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     const totalMatExp = materialPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     const totalEquipExp = equipmentPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     const totalExpenses = totalWorkerExp + totalMatExp + totalEquipExp + otherPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
@@ -3048,12 +3051,22 @@ function AdminSiteReport() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+            {selectedSite.status!=="completed"&&(
+              <button onClick={async()=>{
+                await api("PUT",`/sitework/${selectedSite._id}`,{status:"completed",endDate:today()});
+                setSiteWorks(p=>p.map(s=>s._id===selectedSite._id?{...s,status:"completed",endDate:today()}:s));
+                setSelectedSite(s=>({...s,status:"completed",endDate:today()}));
+              }} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-600">✅ Mark Complete</button>
+            )}
+          </div>
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="font-black text-xl">{selectedSite.customerName}</div>
           <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy||"—"}</div>
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+          {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
@@ -3086,12 +3099,45 @@ function AdminSiteReport() {
             {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
             {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
             {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Worker Payments" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="bg-white rounded-xl px-3 py-2 mb-1 border border-teal-100">
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-sm">{w.workerName}</span>
+                      <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>
+                    </div>
+                    {w.workDone&&<div className="text-xs text-gray-500">Work: {w.workDone}</div>}
+                    <div className="flex justify-between text-xs mt-1">
+                      <span className="text-gray-500">Salary: {CURRENCY}{fmt(w.salary||0)}</span>
+                      {+(w.paymentGiven||0)>0&&<span className="text-green-700 font-black">✅ Paid: {CURRENCY}{fmt(w.paymentGiven)}</span>}
+                      {+(w.pending||0)>0&&<span className="text-red-600 font-bold">🔴 Pending: {CURRENCY}{fmt(w.pending)}</span>}
+                    </div>
+                  </div>
+                ))}
+                {(dateReport.workerEntries||[]).some(w=>+(w.paymentGiven||0)>0)&&(
+                  <div className="text-xs font-black text-green-700 text-right border-t border-teal-200 pt-1">
+                    Total Paid: {CURRENCY}{fmt((dateReport.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven||0)),0))}
+                  </div>
+                )}
+              </SectionBox>
+            )}
             {(dateReport.payments||[]).length>0&&(
-              <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=><div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
-                  <span><span className={`font-bold ${p.type==="Client Payment Received"?"text-green-700":"text-gray-700"}`}>{p.type}</span> → {p.paidTo||"—"} · {p.mode}</span>
-                  <span className={`font-black ${p.type==="Client Payment Received"?"text-green-700":"text-red-600"}`}>{p.type==="Client Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}</span>
-                </div>)}
+              <SectionBox title="Other Payments" icon="💰" color="green">
+                {dateReport.payments.map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <div>
+                      <span className={`font-bold ${p.type==="Site Payment Received"||p.type==="Client Payment Received"?"text-green-700":"text-gray-700"}`}>{p.type}</span>
+                      <span className="text-gray-500 ml-1">→ {p.workerName||p.paidTo||p.receivedFrom||"—"} · {p.mode}</span>
+                    </div>
+                    <span className={`font-black ml-2 ${p.type==="Site Payment Received"||p.type==="Client Payment Received"?"text-green-700":"text-red-600"}`}>
+                      {p.type==="Site Payment Received"||p.type==="Client Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}
+                    </span>
+                  </div>
+                ))}
+                <div className="text-xs font-black text-green-700 text-right pt-1 border-t border-green-200">
+                  Net: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}
+                </div>
               </SectionBox>
             )}
             {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
@@ -3100,7 +3146,7 @@ function AdminSiteReport() {
           <div className="space-y-3">
             <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
             {clientPayments.length>0&&<SectionBox title="Client Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
-            {workerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{workerPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span>{p.date} · {p.paidTo||"—"}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allWorkerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{allWorkerPayments.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span><span className="font-bold">{p.workerName||p.paidTo||"—"}</span> · {p.date} · {p.mode}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-amber-700 text-right pt-1">Total: {CURRENCY}{fmt(allWorkerPayments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div></SectionBox>}
             {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
             {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
             {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
@@ -3294,12 +3340,22 @@ function SupervisorSiteReport({ user }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+            {selectedSite.status!=="completed"&&(
+              <button onClick={async()=>{
+                await api("PUT",`/sitework/${selectedSite._id}`,{status:"completed",endDate:today()});
+                setSiteWorks(p=>p.map(s=>s._id===selectedSite._id?{...s,status:"completed",endDate:today()}:s));
+                setSelectedSite(s=>({...s,status:"completed",endDate:today()}));
+              }} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-600">✅ Mark Complete</button>
+            )}
+          </div>
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="font-black text-xl">{selectedSite.customerName}</div>
           <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"}</div>
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+          {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Cost</div></div>
