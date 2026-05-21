@@ -2908,12 +2908,18 @@ function Production({ production, setProduction, stock, user }) {
 // ─── SALES ────────────────────────────────────────────────────────────────────
 function Sales({ sales, setSales, stock, user }) {
   const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), product:"", quantity:0, price:0, total:0, customer:"", paymentMode:"Cash" };
+  const [interlockTypes, setInterlockTypes] = useState([]);
+  const emptyForm = { date:today(), product:"", interlockDetails:"", quantity:"", unit:"sqft", price:"", total:0, customer:"", paymentMode:"Cash" };
   const [form, setForm] = useState(emptyForm);
 
+  useEffect(()=>{
+    api("GET","/masterdata/interlock").then(d=>setInterlockTypes(Array.isArray(d)?d:[]));
+  },[]);
+
   const save = async () => {
-    const total=+form.quantity*(+form.price);
-    const item=await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
+    if (!form.product) return;
+    const total = +(form.quantity||0)*(+(form.price||0));
+    const item = await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
     if(item._id){setSales(p=>[item,...p]);setModal(false);setForm(emptyForm);}
   };
 
@@ -2926,21 +2932,61 @@ function Sales({ sales, setSales, stock, user }) {
       <StatCard label="Total Sales" value={`${CURRENCY}${fmt(sales.reduce((a,s)=>a+(+(s.total)||0),0))}`} icon="💰" color="green" />
       <div className="space-y-2">
         {sales.length===0&&<EmptyState icon="💰" text="No sales yet" />}
-        {sales.map(s=><div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between"><div><div className="font-black">{s.product}</div><div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div><div className="text-sm text-gray-600">{s.quantity} × {CURRENCY}{s.price}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div><Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode}</Badge></div></div>)}
-      </div>
-      {modal&&<Modal title="Record Sale" onClose={()=>setModal(false)}>
-        <div className="space-y-3">
-          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-          <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
-          <Input label="Customer" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} />
-          <div className="grid grid-cols-2 gap-2">
-            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,total:+e.target.value*(+form.price)})} />
-            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value,total:+form.quantity*(+e.target.value)})} />
+        {sales.map(s=>(
+          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+            <div>
+              <div className="font-black text-gray-900">{s.product}</div>
+              {s.interlockDetails&&<div className="text-xs text-amber-600">{s.interlockDetails}</div>}
+              <div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div>
+              <div className="text-sm text-gray-600">{s.quantity} {s.unit||"units"} × {CURRENCY}{s.price}</div>
+            </div>
+            <div className="text-right">
+              <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div>
+              <Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode}</Badge>
+            </div>
           </div>
-          <Select label="Payment" value={form.paymentMode} options={["Cash","Bank","GPay","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Record Sale</button>
-        </div>
-      </Modal>}
+        ))}
+      </div>
+      {modal&&(
+        <Modal title="Record Sale" onClose={()=>setModal(false)}>
+          <div className="space-y-3">
+            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.product} onChange={e=>{
+                const it = interlockTypes.find(x=>x.name===e.target.value);
+                const details = it?[it.shape,it.color,it.size,it.thickness?`${it.thickness}cm`:""].filter(Boolean).join(" · "):"";
+                const price = it?.pricePerSqft||0;
+                setForm({...form,product:e.target.value,interlockDetails:details,price:String(price),total:+(form.quantity||0)*price});
+              }}>
+                <option value="">-- Select Interlock Type --</option>
+                {interlockTypes.map(i=>(
+                  <option key={i._id} value={i.name}>{i.name}{i.color?` (${i.color})`:""}</option>
+                ))}
+              </select>
+              {form.product&&interlockTypes.find(x=>x.name===form.product)&&(
+                <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
+                  {form.interlockDetails&&<div>📐 {form.interlockDetails}</div>}
+                  {interlockTypes.find(x=>x.name===form.product)?.pricePerSqft&&<div className="text-amber-700 font-bold">💰 {CURRENCY}{interlockTypes.find(x=>x.name===form.product)?.pricePerSqft}/sqft</div>}
+                </div>
+              )}
+              {interlockTypes.length===0&&<div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
+            </div>
+            <Input label="Customer Name" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} placeholder="Customer name" />
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,total:+(e.target.value||0)*(+(form.price||0))})} placeholder="0" />
+              <Select label="Unit" value={form.unit||"sqft"} options={["sqft","sqm","nos","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:e.target.value,total:+(form.quantity||0)*(+(e.target.value||0))})} placeholder="0" />
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <div className="text-xs text-gray-400">Total Amount</div>
+              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(+(form.quantity||0)*(+(form.price||0)))}</div>
+            </div>
+            <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
