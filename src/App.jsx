@@ -24,6 +24,9 @@ function Badge({ children, color = "gray" }) {
 }
 
 function Modal({ title, onClose, children, wide }) {
+
+
+  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3">
       <div className={`bg-white rounded-2xl shadow-2xl w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[92vh] overflow-y-auto`}>
