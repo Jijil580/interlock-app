@@ -24,9 +24,6 @@ function Badge({ children, color = "gray" }) {
 }
 
 function Modal({ title, onClose, children, wide }) {
-
-
-  
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3">
       <div className={`bg-white rounded-2xl shadow-2xl w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[92vh] overflow-y-auto`}>
@@ -3551,7 +3548,6 @@ const NAV = {
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
     { id:"devices", label:"Devices", icon:"📱" },
-    { id:"devices", label:"Devices", icon:"📱" },
     { id:"users", label:"Users", icon:"👥" },
     { id:"reports", label:"Reports", icon:"📈" },
   ],
@@ -3569,11 +3565,21 @@ const NAV = {
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
-    { id:"attendance", label:"Attendance", icon:"📊" },
-    { id:"workers", label:"Workers", icon:"👷" },
+    { id:"masterdata", label:"Master Data", icon:"⚙️" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
+    { id:"workers", label:"Workers", icon:"👷" },
+    { id:"attendance", label:"Attendance", icon:"📊" },
+    { id:"workerreport", label:"Site Report", icon:"📋" },
+    { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
+    { id:"supervisorwork", label:"Sup. Work", icon:"📋" },
+    { id:"sitereport", label:"Site Reports", icon:"🏗️" },
+    { id:"workerreport2", label:"Worker Reports", icon:"👷" },
+    { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"stock", label:"Stock", icon:"📦" },
+    { id:"raw", label:"Raw Material", icon:"🧱" },
+    { id:"sales", label:"Sales", icon:"💰" },
+    { id:"reports", label:"Reports", icon:"📈" },
   ],
 };
 
