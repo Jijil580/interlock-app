@@ -406,49 +406,85 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 // ─── MASTER DATA (Admin) ──────────────────────────────────────────────────────
 function MasterData() {
   const [tab, setTab] = useState("interlock");
-  const [data, setData] = useState({ interlock:[], materials:[], labor:[], extrawork:[] });
+  const [data, setData] = useState({ interlock:[], materials:[], labor:[], extrawork:[], customers:[], suppliers:[] });
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null); // {type, item}
+  const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
+  const [saveError, setSaveError] = useState("");
 
-  useEffect(() => {
-    Promise.all([
-      api("GET","/masterdata/interlock"),
-      api("GET","/masterdata/materials"),
-      api("GET","/masterdata/labor"),
-      api("GET","/masterdata/extrawork"),
-    ]).then(([i,m,l,e])=>{
-      setData({ interlock:Array.isArray(i)?i:[], materials:Array.isArray(m)?m:[], labor:Array.isArray(l)?l:[], extrawork:Array.isArray(e)?e:[] });
-      setLoading(false);
+  const loadAll = () => Promise.all([
+    api("GET","/masterdata/interlock"),
+    api("GET","/masterdata/materials"),
+    api("GET","/masterdata/labor"),
+    api("GET","/masterdata/extrawork"),
+    api("GET","/customers"),
+    api("GET","/suppliers"),
+  ]).then(([i,m,l,e,c,s])=>{
+    setData({
+      interlock:Array.isArray(i)?i:[], materials:Array.isArray(m)?m:[],
+      labor:Array.isArray(l)?l:[], extrawork:Array.isArray(e)?e:[],
+      customers:Array.isArray(c)?c:[], suppliers:Array.isArray(s)?s:[],
     });
-  }, []);
+    setLoading(false);
+  });
+
+  useEffect(() => { loadAll(); }, []);
 
   const save = async () => {
+    setSaveError("");
     const type = modal.type;
-    if (modal.item?._id) {
-      const updated = await api("PUT", `/masterdata/${type}/${modal.item._id}`, form);
+    let ok = true;
+    if (type === "customers") {
+      if (!form.name || !form.mobile) { setSaveError("Name and mobile required"); return; }
+      if (modal.item?._id) {
+        const updated = await api("PUT", `/customers/${modal.item._id}`, form);
+        if (updated._id) setData(d=>({...d,customers:d.customers.map(x=>x._id===modal.item._id?updated:x)}));
+        else { setSaveError(updated.message||"Failed"); ok = false; }
+      } else {
+        const created = await api("POST", "/customers", form);
+        if (created._id) setData(d=>({...d,customers:[...d.customers,created]}));
+        else { setSaveError(created.message||"Failed"); ok = false; }
+      }
+    } else if (type === "suppliers") {
+      if (!form.name) { setSaveError("Supplier name required"); return; }
+      const payload = { ...form, address: form.address || form.location, phone: form.mobile || form.phone };
+      if (modal.item?._id) {
+        const updated = await api("PUT", `/suppliers/${modal.item._id}`, payload);
+        if (updated._id) setData(d=>({...d,suppliers:d.suppliers.map(x=>x._id===modal.item._id?updated:x)}));
+        else ok = false;
+      } else {
+        const created = await api("POST", "/suppliers", payload);
+        if (created._id) setData(d=>({...d,suppliers:[...d.suppliers,created]}));
+        else ok = false;
+      }
+    } else if (modal.item?._id) {
+      await api("PUT", `/masterdata/${type}/${modal.item._id}`, form);
       setData(d=>({...d,[type]:d[type].map(x=>x._id===modal.item._id?{...x,...form}:x)}));
     } else {
       const created = await api("POST", `/masterdata/${type}`, form);
       if (created._id) setData(d=>({...d,[type]:[...d[type],created]}));
     }
-    setModal(null); setForm({});
+    if (ok) { setModal(null); setForm({}); }
   };
 
   const del = async (type, id) => {
     if (!window.confirm("Delete this item?")) return;
-    await api("DELETE", `/masterdata/${type}/${id}`);
+    if (type === "customers") await api("DELETE", `/customers/${id}`);
+    else if (type === "suppliers") await api("DELETE", `/suppliers/${id}`);
+    else await api("DELETE", `/masterdata/${type}/${id}`);
     setData(d=>({...d,[type]:d[type].filter(x=>x._id!==id)}));
   };
 
-  const openAdd = (type) => { setForm({}); setModal({type, item:null}); };
-  const openEdit = (type, item) => { setForm({...item}); setModal({type, item}); };
+  const openAdd = (type) => { setSaveError(""); setForm({}); setModal({type, item:null}); };
+  const openEdit = (type, item) => { setSaveError(""); setForm({...item, mobile: item.mobile || item.phone || ""}); setModal({type, item}); };
 
   const tabs = [
     { id:"interlock", label:"Interlock Types", icon:"🧱" },
     { id:"materials", label:"Raw Materials", icon:"⚙️" },
     { id:"labor", label:"Labor Rates", icon:"👷" },
     { id:"extrawork", label:"Extra Work", icon:"➕" },
+    { id:"customers", label:"Customer Master", icon:"👤" },
+    { id:"suppliers", label:"Supplier Master", icon:"🏪" },
   ];
 
   const renderForm = () => {
@@ -491,6 +527,21 @@ function MasterData() {
       </div>
       <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
     </>;
+    if (t==="customers") return <>
+      <Input label="Customer Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Full name" />
+      <Input label="Mobile Number *" type="tel" value={form.mobile||""} onChange={e=>setForm({...form,mobile:e.target.value})} placeholder="10-digit mobile" />
+      <Input label="Address" value={form.address||""} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Address" />
+      <Input label="GST Number (optional)" value={form.gstNumber||""} onChange={e=>setForm({...form,gstNumber:e.target.value})} placeholder="GSTIN" />
+      <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+    </>;
+    if (t==="suppliers") return <>
+      <Input label="Supplier Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Supplier name" />
+      <Input label="Mobile Number" type="tel" value={form.mobile||form.phone||""} onChange={e=>setForm({...form,mobile:e.target.value})} placeholder="10-digit mobile" />
+      <Input label="Address" value={form.address||form.location||""} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Address" />
+      <Input label="Material Type" value={form.materialType||""} onChange={e=>setForm({...form,materialType:e.target.value})} placeholder="e.g. Cement, Sand" />
+      <Input label="GST Number (optional)" value={form.gstNumber||""} onChange={e=>setForm({...form,gstNumber:e.target.value})} placeholder="GSTIN" />
+      <Textarea label="Notes" value={form.notes||form.note||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+    </>;
   };
 
   if (loading) return <Loader />;
@@ -526,6 +577,10 @@ function MasterData() {
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
                 {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
                 {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
+                {tab==="customers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile} · {item.address||"—"}</div>}
+                {tab==="customers" && <div className="text-xs text-amber-700 mt-0.5">Paid: {CURRENCY}{fmt(item.totalPaid||0)} · Pending: {CURRENCY}{fmt(item.totalPending||0)}</div>}
+                {tab==="suppliers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile||item.phone||"—"} · {item.address||item.location||"—"}</div>}
+                {tab==="suppliers" && <div className="text-xs text-teal-700 mt-0.5">{item.materialType||""} · Paid: {CURRENCY}{fmt(item.totalPaid||0)} · Pending: {CURRENCY}{fmt(item.totalPending||0)}</div>}
               </div>
               <div className="flex gap-1 shrink-0">
                 <button onClick={()=>openEdit(tab,item)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
@@ -537,9 +592,10 @@ function MasterData() {
       </div>
 
       {modal && (
-        <Modal title={`${modal.item?"Edit":"Add"} ${tabs.find(t=>t.id===modal.type)?.label}`} onClose={()=>{setModal(null);setForm({});}}>
+        <Modal title={`${modal.item?"Edit":"Add"} ${tabs.find(t=>t.id===modal.type)?.label}`} onClose={()=>{setModal(null);setForm({});setSaveError("");}}>
           <div className="space-y-3">
             {renderForm()}
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{modal.item?"Save Changes":"Add"}</button>
           </div>
         </Modal>
@@ -2019,23 +2075,42 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
   const [dailyReports, setDailyReports] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [allSiteWorks, setAllSiteWorks] = useState([]);
+  const [customerReports, setCustomerReports] = useState({ customers: [], itemWise: [] });
+  const [supplierReports, setSupplierReports] = useState({ suppliers: [], materialWise: [] });
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("sites"); // sites | workers | financial
+  const [tab, setTab] = useState("sites");
+  const [reportSubTab, setReportSubTab] = useState("all");
   const [selectedSite, setSelectedSite] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [searchSite, setSearchSite] = useState("");
   const [searchWorker, setSearchWorker] = useState("");
+  const [searchCustomer, setSearchCustomer] = useState("");
+  const [searchSupplier, setSearchSupplier] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
   useEffect(()=>{
-    Promise.all([api("GET","/dailyreport"),api("GET","/workers"),api("GET","/sitework")]).then(([dr,w,sw])=>{
+    Promise.all([
+      api("GET","/dailyreport"), api("GET","/workers"), api("GET","/sitework"),
+      api("GET","/customers/reports"), api("GET","/suppliers/reports"),
+    ]).then(([dr,w,sw,cr,sr])=>{
       setDailyReports(Array.isArray(dr)?dr:[]);
       setWorkers(Array.isArray(w)?w:[]);
       setAllSiteWorks(Array.isArray(sw)?sw:[]);
+      setCustomerReports(cr?.customers ? cr : { customers: [], itemWise: cr?.itemWise || [] });
+      setSupplierReports(sr?.suppliers ? sr : { suppliers: [], materialWise: sr?.materialWise || [] });
       setLoading(false);
     });
   },[]);
+
+  const loadCustomerReports = async (type) => {
+    const data = await api("GET", `/customers/reports${type ? `?type=${type}` : ""}`);
+    if (data?.customers) setCustomerReports(data);
+  };
+  const loadSupplierReports = async (type) => {
+    const data = await api("GET", `/suppliers/reports${type ? `?type=${type}` : ""}`);
+    if (data?.suppliers) setSupplierReports(data);
+  };
 
   const filterByDate = (r) => {
     if (fromDate && r.date<fromDate) return false;
@@ -2189,9 +2264,9 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
-      <div className="flex gap-1">
-        {[{id:"sites",label:"🏗️ Sites"},{id:"workers",label:"👷 Workers"},{id:"financial",label:"💰 Financial"}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${tab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {[{id:"sites",label:"🏗️ Sites"},{id:"workers",label:"👷 Workers"},{id:"financial",label:"💰 Financial"},{id:"customers",label:"👤 Customers"},{id:"suppliers",label:"🏪 Suppliers"}].map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);setReportSubTab("all");}} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2275,6 +2350,74 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
               </>
             );
           })()}
+        </div>
+      )}
+
+      {tab==="customers"&&(
+        <div className="space-y-3">
+          <div className="flex gap-1 flex-wrap">
+            {[{id:"all",label:"All Customers"},{id:"pending",label:"Pending"},{id:"paid",label:"Fully Paid"},{id:"items",label:"Item-wise"}].map(t=>(
+              <button key={t.id} onClick={()=>{setReportSubTab(t.id); if(t.id!=="items") loadCustomerReports(t.id==="all"?"":t.id);}} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportSubTab===t.id?"bg-amber-500 text-white border-amber-500":"bg-white text-gray-600"}`}>{t.label}</button>
+            ))}
+          </div>
+          <input value={searchCustomer} onChange={e=>setSearchCustomer(e.target.value)} placeholder="🔍 Search customer..." className="w-full border rounded-xl px-3 py-2 text-sm bg-white" />
+          {reportSubTab==="items" ? (
+            <SectionBox title="Item-wise Sales" icon="📦" color="blue">
+              {(customerReports.itemWise||[]).map((it,i)=>(
+                <div key={i} className="flex justify-between py-2 border-b border-gray-100 text-sm">
+                  <span className="font-bold">{it.item}</span>
+                  <span>{fmt(it.quantity)} {it.unit} · {CURRENCY}{fmt(it.amount)}</span>
+                </div>
+              ))}
+              {(customerReports.itemWise||[]).length===0&&<EmptyState icon="📦" text="No sales data" />}
+            </SectionBox>
+          ) : (
+            (customerReports.customers||[]).filter(c=>!searchCustomer||(c.name||"").toLowerCase().includes(searchCustomer.toLowerCase())||(c.mobile||"").includes(searchCustomer)).map(c=>(
+              <div key={c._id||c.mobile} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black">{c.name}</div>
+                <div className="text-xs text-gray-400">📱 {c.mobile}</div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(c.totalSalesAmount||0)}</div><div className="text-gray-400">Sales</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(c.totalPaid||0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(c.totalPending||0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab==="suppliers"&&(
+        <div className="space-y-3">
+          <div className="flex gap-1 flex-wrap">
+            {[{id:"all",label:"All Suppliers"},{id:"pending",label:"Pending"},{id:"paid",label:"Fully Paid"},{id:"materials",label:"Material-wise"}].map(t=>(
+              <button key={t.id} onClick={()=>{setReportSubTab(t.id); if(t.id!=="materials") loadSupplierReports(t.id==="all"?"":t.id);}} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportSubTab===t.id?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600"}`}>{t.label}</button>
+            ))}
+          </div>
+          <input value={searchSupplier} onChange={e=>setSearchSupplier(e.target.value)} placeholder="🔍 Search supplier..." className="w-full border rounded-xl px-3 py-2 text-sm bg-white" />
+          {reportSubTab==="materials" ? (
+            <SectionBox title="Material-wise Purchases" icon="🧱" color="teal">
+              {(supplierReports.materialWise||[]).map((m,i)=>(
+                <div key={i} className="flex justify-between py-2 border-b border-gray-100 text-sm">
+                  <span className="font-bold">{m.material}</span>
+                  <span>{fmt(m.quantity)} {m.unit} · {CURRENCY}{fmt(m.amount)}</span>
+                </div>
+              ))}
+              {(supplierReports.materialWise||[]).length===0&&<EmptyState icon="🧱" text="No purchase data" />}
+            </SectionBox>
+          ) : (
+            (supplierReports.suppliers||[]).filter(s=>!searchSupplier||(s.name||"").toLowerCase().includes(searchSupplier.toLowerCase())||(s.mobile||"").includes(searchSupplier)).map(s=>(
+              <div key={s._id||s.name} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black">{s.name}</div>
+                <div className="text-xs text-gray-400">📱 {s.mobile||"—"}</div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(s.totalPurchaseAmount||0)}</div><div className="text-gray-400">Purchases</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(s.totalPaid||0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(s.totalPending||0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>
@@ -2483,71 +2626,286 @@ function Suppliers({ user }) {
 // ─── PURCHASES ────────────────────────────────────────────────────────────────
 function Purchases({ user }) {
   const [purchases, setPurchases] = useState([]);
+  const [supplierMaster, setSupplierMaster] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
-  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", paymentMode:"Cash", vehicleNumber:"", vehicleType:"", driverName:"", driverPhone:"", deliveryAddress:"", note:"" };
+  const [supplierMode, setSupplierMode] = useState("existing");
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [saveToMaster, setSaveToMaster] = useState(true);
+  const [quickSearch, setQuickSearch] = useState("");
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({ mobile: "", supplier: "", datePreset: "", customDate: "", fromDate: "", toDate: "" });
+  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierMobile:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", amountPaid:"", paymentMode:"Cash", note:"" };
   const [form, setForm] = useState(emptyForm);
 
-  useEffect(()=>{ api("GET","/purchases").then(d=>{ setPurchases(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
+  useEffect(()=>{
+    Promise.all([api("GET","/purchases"), api("GET","/suppliers")]).then(([p,s])=>{
+      setPurchases(Array.isArray(p)?p:[]);
+      setSupplierMaster(Array.isArray(s)?s:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const calcTotal = () => +form.quantity * (+form.unitPrice || 0) || +(form.totalAmount || 0);
+  const calcPending = () => Math.max(0, calcTotal() - +(form.amountPaid || 0));
+
+  const filterPurchases = () => {
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset && filters.datePreset !== "custom" && filters.datePreset !== "range") {
+      const r = salesDateRange(filters.datePreset);
+      if (r) { from = r.from; to = r.to; }
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    const mob = (filters.mobile || quickSearch).replace(/\D/g, "");
+    const q = quickSearch.trim().toLowerCase();
+    return purchases.filter(p => {
+      if (mob && !(p.supplierMobile || p.supplierPhone || "").includes(mob)) return false;
+      if (filters.supplier && !(p.supplierName || "").toLowerCase().includes(filters.supplier.toLowerCase())) return false;
+      if (q && !mob && !(p.supplierName || "").toLowerCase().includes(q) && !(p.supplierMobile || p.supplierPhone || "").includes(q)) return false;
+      if (from && p.date < from) return false;
+      if (to && p.date > to) return false;
+      return true;
+    });
+  };
+
+  const openSupplierLedger = async (mobile, name) => {
+    setLedgerLoading(true);
+    const qs = [];
+    if (filters.fromDate) qs.push(`fromDate=${filters.fromDate}`);
+    if (filters.toDate) qs.push(`toDate=${filters.toDate}`);
+    const suffix = qs.length ? `?${qs.join("&")}` : "";
+    let data;
+    if (mobile) data = await api("GET", `/suppliers/ledger?mobile=${mobile}${qs.length ? "&" + qs.join("&") : ""}`);
+    else if (name) data = await api("GET", `/suppliers/ledger?name=${encodeURIComponent(name)}${qs.length ? "&" + qs.join("&") : ""}`);
+    setLedgerLoading(false);
+    if (data?.supplier) setLedger(data);
+  };
+
+  const handleQuickSearch = async () => {
+    const q = quickSearch.trim();
+    if (!q) { setLedger(null); return; }
+    if (/^\d{6,}$/.test(q.replace(/\D/g, ""))) await openSupplierLedger(q.replace(/\D/g, "").slice(-10));
+    else await openSupplierLedger(null, q);
+  };
+
+  const selectMasterSupplier = (id) => {
+    setSelectedSupplierId(id);
+    const s = supplierMaster.find(x => x._id === id);
+    if (!s) return;
+    setForm(f => ({ ...f, supplierName: s.name, supplierPhone: s.mobile || s.phone || "", supplierMobile: s.mobile || s.phone || "", supplierAddress: s.address || s.location || "" }));
+  };
 
   const save = async () => {
-    if (!form.supplierName||!form.itemName) return;
-    const total = +form.quantity*(+form.unitPrice)||+form.totalAmount||0;
-    const item = await api("POST","/purchases",{...form,totalAmount:total,addedBy:user.name});
-    if (item._id) { setPurchases(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+    if (!form.supplierName || !form.itemName) return;
+    const total = calcTotal();
+    const amountPaid = +(form.amountPaid || 0);
+    const item = await api("POST", "/purchases", {
+      ...form, totalAmount: total, amountPaid, amountPending: calcPending(),
+      supplierMobile: (form.supplierMobile || form.supplierPhone || "").replace(/\D/g, "").slice(-10),
+      addedBy: user.name, saveToSupplierMaster: supplierMode === "new" ? saveToMaster : true,
+    });
+    if (item._id) {
+      setPurchases(p => [item, ...p]);
+      setModal(false);
+      setForm(emptyForm);
+      setSelectedSupplierId("");
+      api("GET", "/suppliers").then(s => setSupplierMaster(Array.isArray(s) ? s : []));
+    }
   };
+
+  const filtered = filterPurchases();
+  const canAdd = user.role === "admin" || user.role === "user";
 
   if (loading) return <Loader />;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {(user.role==="admin"||user.role==="user")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {canAdd && <button onClick={() => { setForm(emptyForm); setSupplierMode("existing"); setSaveToMaster(true); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{purchases.length}</div><div className="text-xs text-gray-400">Total</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(purchases.reduce((a,p)=>a+(+(p.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Spent</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{new Set(purchases.map(p=>p.supplierName).filter(Boolean)).size}</div><div className="text-xs text-gray-400">Suppliers</div></div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-3">
+        <div className="flex gap-2">
+          <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" placeholder="🔍 Search by Mobile / Supplier Name" value={quickSearch} onChange={e => setQuickSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && handleQuickSearch()} />
+          <button onClick={handleQuickSearch} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold shrink-0">Search</button>
+        </div>
+        {ledgerLoading && <div className="text-xs text-amber-600 mt-2">Loading supplier...</div>}
       </div>
-      <div className="space-y-3">
-        {purchases.length===0&&<EmptyState icon="🛒" text="No purchases yet" />}
-        {purchases.map(p=>(
-          <div key={p._id} onClick={()=>setViewModal(p)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1"><div className="flex items-center gap-2"><span className="font-black text-gray-900">{p.itemName}</span><Badge color="teal">{p.itemType}</Badge></div><div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div></div>
-              <div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount)||0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
+
+      {ledger?.supplier && (
+        <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-teal-500 to-cyan-600 px-4 py-3 flex items-center justify-between">
+            <div className="text-white font-black">📒 Supplier Ledger</div>
+            <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl">×</button>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-gray-400 text-xs">Supplier</span><div className="font-bold">{ledger.supplier.name}</div></div>
+              <div><span className="text-gray-400 text-xs">Mobile</span><div className="font-bold">{ledger.supplier.mobile || "—"}</div></div>
             </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <StatCard label="Total Purchases" value={ledger.supplier.totalPurchases} icon="🛒" color="blue" />
+              <StatCard label="Purchase Amount" value={`${CURRENCY}${fmt(ledger.supplier.totalPurchaseAmount)}`} icon="💰" color="red" />
+              <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.supplier.totalPaid)}`} icon="✅" color="teal" />
+              <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.supplier.totalPending)}`} icon="⏳" color="amber" />
+            </div>
+            {(ledger.materialSummary || []).length > 0 && (
+              <SectionBox title="Materials Purchased" icon="🧱" color="teal">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Material</th><th className="text-right p-1">Total Qty</th></tr></thead>
+                  <tbody>
+                    {ledger.materialSummary.map((m, i) => (
+                      <tr key={i} className="border-t"><td className="p-1 font-semibold">{m.item}</td><td className="p-1 text-right">{fmt(m.quantity)} {m.unit}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionBox>
+            )}
+            <div className="overflow-x-auto">
+              <div className="text-xs font-bold text-gray-600 mb-1">Purchase History</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500">
+                    <th className="text-left p-2">Date</th><th className="text-left p-2">Material</th><th className="text-right p-2">Qty</th>
+                    <th className="text-right p-2">Amount</th><th className="text-right p-2">Paid</th><th className="text-right p-2">Pending</th><th className="text-left p-2">Mode</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(ledger.purchases || []).map(p => (
+                    <tr key={p._id} className="border-t">
+                      <td className="p-2">{p.date}</td><td className="p-2 font-semibold">{p.itemName}</td>
+                      <td className="p-2 text-right">{p.quantity} {p.unit}</td>
+                      <td className="p-2 text-right text-red-700 font-bold">{CURRENCY}{fmt(+(p.totalAmount) || 0)}</td>
+                      <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
+                      <td className="p-2 text-right text-amber-700">{CURRENCY}{fmt(+(p.amountPending) || 0)}</td>
+                      <td className="p-2">{p.paymentMode}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full px-4 py-3 flex justify-between text-sm font-bold text-gray-700">
+          <span>🔎 Purchase Filters</span><span>{showFilters ? "▲" : "▼"}</span>
+        </button>
+        {showFilters && (
+          <div className="px-4 pb-4 space-y-3 border-t pt-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} />
+              <Input label="Supplier Name" value={filters.supplier} onChange={e => setFilters({ ...filters, supplier: e.target.value })} />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "yesterday", label: "Yesterday" }, { id: "thismonth", label: "This Month" }, { id: "range", label: "Date Range" }].map(d => (
+                <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{d.label}</button>
+              ))}
+            </div>
+            {filters.datePreset === "range" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+                <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Total Spent" value={`${CURRENCY}${fmt(filtered.reduce((a, p) => a + (+(p.totalAmount) || 0), 0))}`} icon="💰" color="red" sub={`${filtered.length} record(s)`} />
+        <StatCard label="Total Pending" value={`${CURRENCY}${fmt(filtered.reduce((a, p) => a + (+(p.amountPending) || 0), 0))}`} icon="⏳" color="amber" />
+      </div>
+
+      <div className="space-y-3">
+        {filtered.length === 0 && <EmptyState icon="🛒" text="No purchases found" />}
+        {filtered.map(p => (
+          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
+            <div className="flex justify-between gap-2" onClick={() => setViewModal(p)}>
+              <div className="flex-1 cursor-pointer">
+                <div className="flex items-center gap-2"><span className="font-black">{p.itemName}</span><Badge color="teal">{p.itemType}</Badge></div>
+                <div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div>
+                {(+(p.amountPending) || 0) > 0 && <div className="text-xs text-amber-600">Pending: {CURRENCY}{fmt(+(p.amountPending) || 0)}</div>}
+              </div>
+              <div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount) || 0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
+            </div>
+            {(p.supplierMobile || p.supplierPhone) && (
+              <button onClick={() => openSupplierLedger(p.supplierMobile || p.supplierPhone)} className="mt-2 text-xs text-teal-600 font-bold hover:underline">View Supplier Ledger →</button>
+            )}
           </div>
         ))}
       </div>
-      {modal&&<Modal title="Add Purchase" onClose={()=>setModal(false)} wide>
+
+      {modal && <Modal title="Add Purchase" onClose={() => setModal(false)} wide>
         <div className="space-y-3">
-          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
           <SectionBox title="Supplier" icon="🏪" color="blue">
-            <Input label="Supplier Name *" value={form.supplierName} onChange={e=>setForm({...form,supplierName:e.target.value})} />
-            <div className="grid grid-cols-2 gap-2"><Input label="Phone" type="tel" value={form.supplierPhone} onChange={e=>setForm({...form,supplierPhone:e.target.value})} /><Input label="Address" value={form.supplierAddress} onChange={e=>setForm({...form,supplierAddress:e.target.value})} /></div>
+            <div className="flex gap-2 mb-2">
+              <button type="button" onClick={() => setSupplierMode("existing")} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${supplierMode === "existing" ? "bg-teal-600 text-white" : "bg-white"}`}>Select Existing</button>
+              <button type="button" onClick={() => { setSupplierMode("new"); setSelectedSupplierId(""); }} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${supplierMode === "new" ? "bg-teal-600 text-white" : "bg-white"}`}>New Supplier</button>
+            </div>
+            {supplierMode === "existing" ? (
+              <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white mb-2" value={selectedSupplierId} onChange={e => selectMasterSupplier(e.target.value)}>
+                <option value="">-- Select from Supplier Master --</option>
+                {supplierMaster.map(s => <option key={s._id} value={s._id}>{s.name} ({s.mobile || s.phone || "—"})</option>)}
+              </select>
+            ) : (
+              <>
+                <Input label="Supplier Name *" value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Mobile" type="tel" value={form.supplierPhone} onChange={e => setForm({ ...form, supplierPhone: e.target.value, supplierMobile: e.target.value })} />
+                  <Input label="Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
+                </div>
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                  <input type="checkbox" checked={saveToMaster} onChange={e => setSaveToMaster(e.target.checked)} className="rounded" />
+                  Save to Supplier Master
+                </label>
+              </>
+            )}
+            {supplierMode === "existing" && selectedSupplierId && (
+              <div className="text-xs bg-white border rounded-xl p-2 mt-1">
+                <div><b>{form.supplierName}</b> · {form.supplierPhone}</div>
+                <div>{form.supplierAddress || "—"}</div>
+              </div>
+            )}
           </SectionBox>
           <SectionBox title="Item" icon="📦" color="amber">
-            <Input label="Item Name *" value={form.itemName} onChange={e=>setForm({...form,itemName:e.target.value})} />
-            <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e=>setForm({...form,itemType:e.target.value})} />
+            <Input label="Item / Material Name *" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />
+            <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e => setForm({ ...form, itemType: e.target.value })} />
             <div className="grid grid-cols-2 gap-2">
-              <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,totalAmount:String(+e.target.value*(+(form.unitPrice)||0))})} />
-              <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label={`Unit Price(${CURRENCY})`} type="number" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:e.target.value,totalAmount:String(+e.target.value*(+(form.quantity)||0))})} />
-              <Input label={`Total(${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value})} />
+              <Input label="Qty" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value, totalAmount: String(+e.target.value * (+(form.unitPrice) || 0)) })} />
+              <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e => setForm({ ...form, unit: e.target.value })} />
+              <Input label={`Unit Price (${CURRENCY})`} type="number" value={form.unitPrice} onChange={e => setForm({ ...form, unitPrice: e.target.value, totalAmount: String((+(form.quantity) || 0) * +e.target.value) })} />
+              <Input label={`Total (${CURRENCY})`} type="number" value={form.totalAmount} onChange={e => setForm({ ...form, totalAmount: e.target.value })} />
             </div>
           </SectionBox>
-          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-          <Textarea label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label={`Amount Paid (${CURRENCY})`} type="number" value={form.amountPaid} onChange={e => setForm({ ...form, amountPaid: e.target.value })} placeholder="0" />
+            <div><label className="block text-xs font-semibold text-gray-600 mb-1">Pending</label><div className="border border-amber-200 rounded-xl px-3 py-2.5 text-sm bg-amber-50 text-amber-800 font-bold">{CURRENCY}{fmt(calcPending())}</div></div>
+          </div>
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e => {
+            const mode = e.target.value;
+            setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
+          }} />
+          <Textarea label="Note" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
           <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Submit</button>
         </div>
       </Modal>}
-      {viewModal&&<Modal title="Purchase Details" onClose={()=>setViewModal(null)}>
+      {viewModal && <Modal title="Purchase Details" onClose={() => setViewModal(null)}>
         <div className="space-y-3">
           <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
-          <SectionBox title="Supplier" icon="🏪" color="blue"><div className="grid grid-cols-2 gap-2 text-sm"><div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewModal.supplierName}</div></div><div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewModal.supplierPhone||"—"}</div></div></div></SectionBox>
-          <SectionBox title="Item" icon="📦" color="amber"><div className="grid grid-cols-2 gap-2 text-sm"><div><div className="text-xs text-gray-400">Item</div><div className="font-bold">{viewModal.itemName}</div></div><div><div className="text-xs text-gray-400">Qty</div><div className="font-bold">{viewModal.quantity} {viewModal.unit}</div></div></div><div className="bg-red-50 rounded-xl p-2 text-center mt-2"><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total</div></div></SectionBox>
+          <SectionBox title="Supplier" icon="🏪" color="blue"><div className="text-sm"><div className="font-bold">{viewModal.supplierName}</div><div className="text-xs text-gray-400">{viewModal.supplierPhone} · {viewModal.supplierAddress || "—"}</div></div></SectionBox>
+          <SectionBox title="Item" icon="📦" color="amber">
+            <div className="text-sm font-bold">{viewModal.itemName} — {viewModal.quantity} {viewModal.unit}</div>
+            <div className="grid grid-cols-3 gap-2 mt-2 text-xs text-center">
+              <div className="bg-red-50 rounded-xl p-2"><div className="font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount) || 0)}</div><div className="text-gray-400">Total</div></div>
+              <div className="bg-teal-50 rounded-xl p-2"><div className="font-black text-teal-700">{CURRENCY}{fmt(+(viewModal.amountPaid) || 0)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-amber-50 rounded-xl p-2"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.amountPending) || 0)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+          </SectionBox>
         </div>
       </Modal>}
     </div>
@@ -2947,6 +3305,10 @@ function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, cus
 function Sales({ sales, setSales, stock, user }) {
   const [modal, setModal] = useState(false);
   const [interlockTypes, setInterlockTypes] = useState([]);
+  const [customerMaster, setCustomerMaster] = useState([]);
+  const [customerMode, setCustomerMode] = useState("existing");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [saveToMaster, setSaveToMaster] = useState(true);
   const [quickSearch, setQuickSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [ledger, setLedger] = useState(null);
@@ -2956,11 +3318,14 @@ function Sales({ sales, setSales, stock, user }) {
   const [saveError, setSaveError] = useState("");
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    api("GET", "/masterdata/interlock").then(d => setInterlockTypes(Array.isArray(d) ? d : []));
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/customers")]).then(([d, c]) => {
+      setInterlockTypes(Array.isArray(d) ? d : []);
+      setCustomerMaster(Array.isArray(c) ? c : []);
+    });
   }, []);
 
   const calcSubtotal = () => +(form.quantity || 0) * +(form.price || 0);
@@ -2981,26 +3346,49 @@ function Sales({ sales, setSales, stock, user }) {
     }
   };
 
-  const openLedger = async (mobile) => {
-    const m = (mobile || "").replace(/\D/g, "").slice(-10);
-    if (m.length < 10) return;
+  const ledgerQuery = () => {
+    const q = [];
+    if (filters.fromDate || filters.toDate) {
+      if (filters.fromDate) q.push(`fromDate=${filters.fromDate}`);
+      if (filters.toDate) q.push(`toDate=${filters.toDate}`);
+    } else if (filters.datePreset && filters.datePreset !== "custom" && filters.datePreset !== "range") {
+      const r = salesDateRange(filters.datePreset);
+      if (r) { if (r.from) q.push(`fromDate=${r.from}`); if (r.to) q.push(`toDate=${r.to}`); }
+    } else if (filters.datePreset === "custom" && filters.customDate) {
+      q.push(`fromDate=${filters.customDate}`, `toDate=${filters.customDate}`);
+    }
+    return q.length ? `?${q.join("&")}` : "";
+  };
+
+  const openLedger = async (mobile, name) => {
     setLedgerLoading(true);
-    const data = await api("GET", `/customers/mobile/${m}`);
+    let data;
+    if (mobile) {
+      const m = (mobile || "").replace(/\D/g, "").slice(-10);
+      if (m.length < 10) { setLedgerLoading(false); return; }
+      data = await api("GET", `/customers/mobile/${m}${ledgerQuery()}`);
+    } else if (name) {
+      data = await api("GET", `/customers/search?name=${encodeURIComponent(name)}${ledgerQuery().replace("?", "&")}`);
+    }
     setLedgerLoading(false);
     if (data?.customer) setLedger(data);
+    else if (data?.customers?.length) setLedger({ pickList: data.customers });
   };
 
   const handleQuickSearch = async () => {
     const q = quickSearch.trim();
     if (!q) { setLedger(null); return; }
     const isMobile = /^\d{6,}$/.test(q.replace(/\D/g, ""));
-    if (isMobile) {
-      await openLedger(q.replace(/\D/g, "").slice(-10));
-    } else {
-      setLedger(null);
-      setFilters(f => ({ ...f, customer: q }));
-      setShowFilters(true);
-    }
+    if (isMobile) await openLedger(q.replace(/\D/g, "").slice(-10));
+    else await openLedger(null, q);
+  };
+
+  const selectMasterCustomer = (id) => {
+    setSelectedCustomerId(id);
+    const c = customerMaster.find(x => x._id === id);
+    if (!c) return;
+    setForm(f => ({ ...f, customer: c.name, mobileNumber: c.mobile, address: c.address || "", gstNumber: c.gstNumber || "" }));
+    lookupCustomer(c.mobile);
   };
 
   const save = async () => {
@@ -3015,12 +3403,15 @@ function Sales({ sales, setSales, stock, user }) {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
+      saveToCustomerMaster: customerMode === "new" ? saveToMaster : true,
     });
     if (item._id) {
       setSales(p => [item, ...p]);
       setModal(false);
       setForm(emptyForm);
       setCustomerPreview(null);
+      setSelectedCustomerId("");
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
     } else {
       setSaveError(item.message || "Failed to save sale");
     }
@@ -3036,7 +3427,7 @@ function Sales({ sales, setSales, stock, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
-        <button onClick={() => { setModal(true); setSaveError(""); setCustomerPreview(null); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
+        <button onClick={() => { setModal(true); setSaveError(""); setCustomerPreview(null); setCustomerMode("existing"); setSaveToMaster(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
       </div>
 
       {/* Quick Search */}
@@ -3054,6 +3445,20 @@ function Sales({ sales, setSales, stock, user }) {
         {ledgerLoading && <div className="text-xs text-amber-600 mt-2">Loading customer...</div>}
       </div>
 
+      {/* Customer pick list */}
+      {ledger?.pickList && (
+        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+          <div className="font-bold text-sm">Multiple customers found — select one:</div>
+          {ledger.pickList.map(c => (
+            <button key={c._id} onClick={() => openLedger(c.mobile)} className="w-full text-left bg-gray-50 hover:bg-amber-50 border rounded-xl p-3 text-sm">
+              <div className="font-bold">{c.name}</div>
+              <div className="text-xs text-gray-400">📱 {c.mobile} · Pending: {CURRENCY}{fmt(c.totalPending || 0)}</div>
+            </button>
+          ))}
+          <button onClick={() => setLedger(null)} className="text-xs text-red-500 font-bold">Cancel</button>
+        </div>
+      )}
+
       {/* Customer Ledger */}
       {ledger?.customer && (
         <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
@@ -3069,20 +3474,35 @@ function Sales({ sales, setSales, stock, user }) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <StatCard label="Total Purchases" value={ledger.customer.totalPurchases} icon="🛒" color="blue" />
               <StatCard label="Sales Amount" value={`${CURRENCY}${fmt(ledger.customer.totalSalesAmount)}`} icon="💰" color="green" />
+              <StatCard label="Total Quantity" value={fmt(ledger.customer.totalQuantity)} icon="📦" color="purple" />
               <StatCard label="Discount Given" value={`${CURRENCY}${fmt(ledger.customer.totalDiscount)}`} icon="🏷️" color="amber" />
               <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.customer.totalPaid)}`} icon="✅" color="teal" />
               <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.customer.totalPending)}`} icon="⏳" color="red" />
             </div>
+            {(ledger.itemSummary || []).length > 0 && (
+              <SectionBox title="Purchased Items Summary" icon="📦" color="blue">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty</th></tr></thead>
+                  <tbody>
+                    {ledger.itemSummary.map((it, i) => (
+                      <tr key={i} className="border-t border-gray-100"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{fmt(it.quantity)} {it.unit}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionBox>
+            )}
             <div className="overflow-x-auto">
+              <div className="text-xs font-bold text-gray-600 mb-1">Complete Purchase History</div>
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-50 text-gray-500">
-                    <th className="text-left p-2 rounded-tl-lg">Date</th>
+                    <th className="text-left p-2">Date</th>
                     <th className="text-left p-2">Item</th>
                     <th className="text-right p-2">Qty</th>
                     <th className="text-right p-2">Amount</th>
+                    <th className="text-right p-2">Discount</th>
                     <th className="text-right p-2">Paid</th>
-                    <th className="text-right p-2 rounded-tr-lg">Pending</th>
+                    <th className="text-right p-2">Pending</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3092,12 +3512,13 @@ function Sales({ sales, setSales, stock, user }) {
                       <td className="p-2 font-semibold">{p.product}</td>
                       <td className="p-2 text-right">{p.quantity} {p.unit || ""}</td>
                       <td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(+(p.total) || 0)}</td>
+                      <td className="p-2 text-right text-amber-600">{CURRENCY}{fmt(+(p.discount) || 0)}</td>
                       <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
                       <td className="p-2 text-right text-red-600">{CURRENCY}{fmt(+(p.amountPending) || 0)}</td>
                     </tr>
                   ))}
                   {(ledger.purchases || []).length === 0 && (
-                    <tr><td colSpan={6} className="p-4 text-center text-gray-400">No purchases found</td></tr>
+                    <tr><td colSpan={7} className="p-4 text-center text-gray-400">No purchases found</td></tr>
                   )}
                 </tbody>
               </table>
@@ -3180,24 +3601,48 @@ function Sales({ sales, setSales, stock, user }) {
       {modal && (
         <Modal title="Record Sale" onClose={() => { setModal(false); setSaveError(""); setCustomerPreview(null); }} wide>
           <div className="space-y-3">
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-              <div className="text-xs font-bold text-blue-700 mb-2">Customer Details</div>
-              <Input label="Mobile Number *" value={form.mobileNumber} onChange={e => setForm({ ...form, mobileNumber: e.target.value })} onBlur={e => lookupCustomer(e.target.value)} placeholder="10-digit mobile" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-blue-700">Customer Details</div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setCustomerMode("existing")} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${customerMode === "existing" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600"}`}>Select Existing</button>
+                <button type="button" onClick={() => { setCustomerMode("new"); setSelectedCustomerId(""); setCustomerPreview(null); }} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${customerMode === "new" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600"}`}>New Customer</button>
+              </div>
+              {customerMode === "existing" ? (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Select Customer *</label>
+                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white" value={selectedCustomerId} onChange={e => selectMasterCustomer(e.target.value)}>
+                    <option value="">-- Select from Customer Master --</option>
+                    {customerMaster.map(c => <option key={c._id} value={c._id}>{c.name} ({c.mobile})</option>)}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <Input label="Mobile Number *" value={form.mobileNumber} onChange={e => setForm({ ...form, mobileNumber: e.target.value })} onBlur={e => lookupCustomer(e.target.value)} placeholder="10-digit mobile" />
+                  <Input label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="Customer name" />
+                  <Input label="Address (optional)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Address" />
+                  <Input label="GST Number (optional)" value={form.gstNumber} onChange={e => setForm({ ...form, gstNumber: e.target.value })} placeholder="GSTIN" />
+                  <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={saveToMaster} onChange={e => setSaveToMaster(e.target.checked)} className="rounded" />
+                    Save to Customer Master
+                  </label>
+                </>
+              )}
               {lookupLoading && <div className="text-xs text-amber-600">Looking up customer...</div>}
               {customerPreview?.customer && (
-                <div className="mt-2 bg-green-50 border border-green-200 rounded-xl p-2 text-xs space-y-1">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-xs space-y-1">
                   <div className="font-bold text-green-700">✅ Existing Customer Found</div>
                   <div>Previous Purchases: <b>{customerPreview.customer.totalPurchases}</b></div>
                   <div>Total Paid: <b>{CURRENCY}{fmt(customerPreview.customer.totalPaid)}</b></div>
                   <div>Total Pending: <b className="text-red-600">{CURRENCY}{fmt(customerPreview.customer.totalPending)}</b></div>
                 </div>
               )}
-              <div className="mt-2">
-                <Input label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="Customer name" />
-              </div>
-              <div className="mt-2">
-                <Input label="Address (optional)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Customer address" />
-              </div>
+              {customerMode === "existing" && selectedCustomerId && (
+                <div className="text-xs text-gray-600 bg-white rounded-xl p-2 border">
+                  <div><b>Name:</b> {form.customer}</div>
+                  <div><b>Mobile:</b> {form.mobileNumber}</div>
+                  <div><b>Address:</b> {form.address || "—"}</div>
+                </div>
+              )}
             </div>
 
             <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
