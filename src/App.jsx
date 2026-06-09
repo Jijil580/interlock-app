@@ -2905,84 +2905,345 @@ function Production({ production, setProduction, stock, user }) {
   );
 }
 
+// ─── SALES HELPERS ────────────────────────────────────────────────────────────
+function salesDateRange(preset) {
+  const now = new Date();
+  const td = today();
+  if (preset === "today") return { from: td, to: td };
+  if (preset === "yesterday") {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    const ds = y.toISOString().split("T")[0];
+    return { from: ds, to: ds };
+  }
+  if (preset === "thismonth") {
+    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    return { from, to: td };
+  }
+  return null;
+}
+
+function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, customDate, fromDate, toDate, invoice }) {
+  let from = fromDate, to = toDate;
+  if (datePreset && datePreset !== "custom" && datePreset !== "range") {
+    const r = salesDateRange(datePreset);
+    if (r) { from = r.from; to = r.to; }
+  } else if (datePreset === "custom" && customDate) {
+    from = customDate; to = customDate;
+  }
+  const q = (quickSearch || "").toLowerCase().trim();
+  const mob = (mobile || "").replace(/\D/g, "");
+  return sales.filter(s => {
+    if (q && !(s.mobileNumber || "").includes(q) && !(s.customer || "").toLowerCase().includes(q)) return false;
+    if (mob && !(s.mobileNumber || "").includes(mob)) return false;
+    if (customer && !(s.customer || "").toLowerCase().includes(customer.toLowerCase())) return false;
+    if (invoice && !(s.invoiceNumber || "").toLowerCase().includes(invoice.toLowerCase())) return false;
+    if (from && s.date < from) return false;
+    if (to && s.date > to) return false;
+    return true;
+  });
+}
+
 // ─── SALES ────────────────────────────────────────────────────────────────────
 function Sales({ sales, setSales, stock, user }) {
   const [modal, setModal] = useState(false);
   const [interlockTypes, setInterlockTypes] = useState([]);
-  const emptyForm = { date:today(), product:"", interlockDetails:"", quantity:"", unit:"sqft", price:"", total:0, customer:"", paymentMode:"Cash" };
+  const [quickSearch, setQuickSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [customerPreview, setCustomerPreview] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
+
+  const emptyForm = { date: today(), product: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
-  useEffect(()=>{
-    api("GET","/masterdata/interlock").then(d=>setInterlockTypes(Array.isArray(d)?d:[]));
-  },[]);
+  useEffect(() => {
+    api("GET", "/masterdata/interlock").then(d => setInterlockTypes(Array.isArray(d) ? d : []));
+  }, []);
+
+  const calcSubtotal = () => +(form.quantity || 0) * +(form.price || 0);
+  const calcTotal = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
+  const calcPending = () => Math.max(0, calcTotal() - +(form.amountPaid || 0));
+
+  const lookupCustomer = async (mobile) => {
+    const m = mobile.replace(/\D/g, "").slice(-10);
+    if (m.length < 10) { setCustomerPreview(null); return; }
+    setLookupLoading(true);
+    const data = await api("GET", `/customers/mobile/${m}`);
+    setLookupLoading(false);
+    if (data?.customer) {
+      setCustomerPreview(data);
+      setForm(f => ({ ...f, customer: data.customer.name || f.customer, address: data.customer.address || f.address, mobileNumber: m }));
+    } else {
+      setCustomerPreview(null);
+    }
+  };
+
+  const openLedger = async (mobile) => {
+    const m = (mobile || "").replace(/\D/g, "").slice(-10);
+    if (m.length < 10) return;
+    setLedgerLoading(true);
+    const data = await api("GET", `/customers/mobile/${m}`);
+    setLedgerLoading(false);
+    if (data?.customer) setLedger(data);
+  };
+
+  const handleQuickSearch = async () => {
+    const q = quickSearch.trim();
+    if (!q) { setLedger(null); return; }
+    const isMobile = /^\d{6,}$/.test(q.replace(/\D/g, ""));
+    if (isMobile) {
+      await openLedger(q.replace(/\D/g, "").slice(-10));
+    } else {
+      setLedger(null);
+      setFilters(f => ({ ...f, customer: q }));
+      setShowFilters(true);
+    }
+  };
 
   const save = async () => {
-    if (!form.product) return;
-    const total = +(form.quantity||0)*(+(form.price||0));
-    const item = await api("POST","/sales",{...form,total,quantity:+form.quantity,price:+form.price,addedBy:user.name});
-    if(item._id){setSales(p=>[item,...p]);setModal(false);setForm(emptyForm);}
+    setSaveError("");
+    const mobile = (form.mobileNumber || "").replace(/\D/g, "").slice(-10);
+    if (!mobile || mobile.length < 10) { setSaveError("Mobile number is required (10 digits)"); return; }
+    if (!form.customer) { setSaveError("Customer name is required"); return; }
+    if (!form.product) { setSaveError("Select an interlock type"); return; }
+    const total = calcTotal();
+    const amountPaid = +(form.amountPaid || 0);
+    const item = await api("POST", "/sales", {
+      ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
+      amountPaid, amountPending: Math.max(0, total - amountPaid),
+      quantity: +form.quantity, price: +form.price, addedBy: user.name,
+    });
+    if (item._id) {
+      setSales(p => [item, ...p]);
+      setModal(false);
+      setForm(emptyForm);
+      setCustomerPreview(null);
+    } else {
+      setSaveError(item.message || "Failed to save sale");
+    }
   };
+
+  const filtered = filterSalesList(sales, { quickSearch, ...filters });
+  const filteredTotal = filtered.reduce((a, s) => a + (+(s.total) || 0), 0);
+  const filteredPaid = filtered.reduce((a, s) => a + (+(s.amountPaid) || 0), 0);
+  const filteredPending = filtered.reduce((a, s) => a + (+(s.amountPending) || 0), 0);
+  const filteredQty = filtered.reduce((a, s) => a + (+(s.quantity) || 0), 0);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
+        <button onClick={() => { setModal(true); setSaveError(""); setCustomerPreview(null); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
       </div>
-      <StatCard label="Total Sales" value={`${CURRENCY}${fmt(sales.reduce((a,s)=>a+(+(s.total)||0),0))}`} icon="💰" color="green" />
-      <div className="space-y-2">
-        {sales.length===0&&<EmptyState icon="💰" text="No sales yet" />}
-        {sales.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+
+      {/* Quick Search */}
+      <div className="bg-white rounded-2xl border shadow-sm p-3">
+        <div className="flex gap-2">
+          <input
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
+            placeholder="🔍 Search by Mobile Number / Customer Name"
+            value={quickSearch}
+            onChange={e => setQuickSearch(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleQuickSearch()}
+          />
+          <button onClick={handleQuickSearch} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shrink-0">Search</button>
+        </div>
+        {ledgerLoading && <div className="text-xs text-amber-600 mt-2">Loading customer...</div>}
+      </div>
+
+      {/* Customer Ledger */}
+      {ledger?.customer && (
+        <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 flex items-center justify-between">
+            <div className="text-white font-black">📒 Customer Ledger</div>
+            <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl leading-none">×</button>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-gray-400 text-xs">Customer</span><div className="font-bold">{ledger.customer.name || "—"}</div></div>
+              <div><span className="text-gray-400 text-xs">Mobile</span><div className="font-bold">{ledger.customer.mobile}</div></div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <StatCard label="Total Purchases" value={ledger.customer.totalPurchases} icon="🛒" color="blue" />
+              <StatCard label="Sales Amount" value={`${CURRENCY}${fmt(ledger.customer.totalSalesAmount)}`} icon="💰" color="green" />
+              <StatCard label="Discount Given" value={`${CURRENCY}${fmt(ledger.customer.totalDiscount)}`} icon="🏷️" color="amber" />
+              <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.customer.totalPaid)}`} icon="✅" color="teal" />
+              <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.customer.totalPending)}`} icon="⏳" color="red" />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500">
+                    <th className="text-left p-2 rounded-tl-lg">Date</th>
+                    <th className="text-left p-2">Item</th>
+                    <th className="text-right p-2">Qty</th>
+                    <th className="text-right p-2">Amount</th>
+                    <th className="text-right p-2">Paid</th>
+                    <th className="text-right p-2 rounded-tr-lg">Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(ledger.purchases || []).map(p => (
+                    <tr key={p._id} className="border-t border-gray-100">
+                      <td className="p-2">{p.date}</td>
+                      <td className="p-2 font-semibold">{p.product}</td>
+                      <td className="p-2 text-right">{p.quantity} {p.unit || ""}</td>
+                      <td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(+(p.total) || 0)}</td>
+                      <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
+                      <td className="p-2 text-right text-red-600">{CURRENCY}{fmt(+(p.amountPending) || 0)}</td>
+                    </tr>
+                  ))}
+                  {(ledger.purchases || []).length === 0 && (
+                    <tr><td colSpan={6} className="p-4 text-center text-gray-400">No purchases found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search Filters */}
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-50">
+          <span>🔎 Sales Reports & Filters</span>
+          <span>{showFilters ? "▲" : "▼"}</span>
+        </button>
+        {showFilters && (
+          <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile Number" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} placeholder="9876543210" />
+              <Input label="Customer Name" value={filters.customer} onChange={e => setFilters({ ...filters, customer: e.target.value })} placeholder="Name" />
+            </div>
+            <Input label="Invoice Number" value={filters.invoice} onChange={e => setFilters({ ...filters, invoice: e.target.value })} placeholder="Future use" />
             <div>
-              <div className="font-black text-gray-900">{s.product}</div>
-              {s.interlockDetails&&<div className="text-xs text-amber-600">{s.interlockDetails}</div>}
-              <div className="text-xs text-gray-400">📅 {s.date}{s.customer?` · 👤 ${s.customer}`:""}</div>
-              <div className="text-sm text-gray-600">{s.quantity} {s.unit||"units"} × {CURRENCY}{s.price}</div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Date Filter</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "yesterday", label: "Yesterday" }, { id: "thismonth", label: "This Month" }, { id: "custom", label: "Custom Date" }, { id: "range", label: "Date Range" }].map(d => (
+                  <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white border-amber-500" : "bg-gray-50 text-gray-600 border-gray-200"}`}>{d.label}</button>
+                ))}
+              </div>
             </div>
-            <div className="text-right">
-              <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total)||0)}</div>
-              <Badge color={s.paymentMode==="Cash"?"green":"blue"}>{s.paymentMode}</Badge>
+            {filters.datePreset === "custom" && (
+              <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />
+            )}
+            {filters.datePreset === "range" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+                <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+              </div>
+            )}
+            <button onClick={() => setFilters({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" })} className="text-xs text-red-500 font-bold">Clear Filters</button>
+          </div>
+        )}
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Total Sales" value={`${CURRENCY}${fmt(filteredTotal)}`} icon="💰" color="green" sub={`${filtered.length} record(s)`} />
+        <StatCard label="Total Quantity" value={fmt(filteredQty)} icon="📦" color="blue" />
+        <StatCard label="Total Paid" value={`${CURRENCY}${fmt(filteredPaid)}`} icon="✅" color="teal" />
+        <StatCard label="Total Pending" value={`${CURRENCY}${fmt(filteredPending)}`} icon="⏳" color="red" />
+      </div>
+
+      {/* Sales List */}
+      <div className="space-y-2">
+        {filtered.length === 0 && <EmptyState icon="💰" text="No sales found" />}
+        {filtered.map(s => (
+          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-black text-gray-900">{s.product}</div>
+                {s.interlockDetails && <div className="text-xs text-amber-600">{s.interlockDetails}</div>}
+                <div className="text-xs text-gray-400 mt-0.5">📅 {s.date}{s.customer ? ` · 👤 ${s.customer}` : ""}</div>
+                {s.mobileNumber && <div className="text-xs text-gray-500">📱 {s.mobileNumber}</div>}
+                <div className="text-sm text-gray-600">{s.quantity} {s.unit || "units"} × {CURRENCY}{s.price}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total) || 0)}</div>
+                {(+(s.amountPaid) || 0) > 0 && <div className="text-xs text-teal-600">Paid: {CURRENCY}{fmt(+(s.amountPaid) || 0)}</div>}
+                {(+(s.amountPending) || 0) > 0 && <div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.amountPending) || 0)}</div>}
+                <Badge color={s.paymentMode === "Cash" ? "green" : s.paymentMode === "Credit" ? "red" : "blue"}>{s.paymentMode}</Badge>
+              </div>
             </div>
+            {s.mobileNumber && (
+              <button onClick={() => openLedger(s.mobileNumber)} className="mt-2 text-xs text-amber-600 font-bold hover:underline">View Customer Ledger →</button>
+            )}
           </div>
         ))}
       </div>
-      {modal&&(
-        <Modal title="Record Sale" onClose={()=>setModal(false)}>
+
+      {/* Record Sale Modal */}
+      {modal && (
+        <Modal title="Record Sale" onClose={() => { setModal(false); setSaveError(""); setCustomerPreview(null); }} wide>
           <div className="space-y-3">
-            <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
-              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.product} onChange={e=>{
-                const it = interlockTypes.find(x=>x.name===e.target.value);
-                const details = it?[it.shape,it.color,it.size,it.thickness?`${it.thickness}cm`:""].filter(Boolean).join(" · "):"";
-                const price = it?.pricePerSqft||0;
-                setForm({...form,product:e.target.value,interlockDetails:details,price:String(price),total:+(form.quantity||0)*price});
-              }}>
-                <option value="">-- Select Interlock Type --</option>
-                {interlockTypes.map(i=>(
-                  <option key={i._id} value={i.name}>{i.name}{i.color?` (${i.color})`:""}</option>
-                ))}
-              </select>
-              {form.product&&interlockTypes.find(x=>x.name===form.product)&&(
-                <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
-                  {form.interlockDetails&&<div>📐 {form.interlockDetails}</div>}
-                  {interlockTypes.find(x=>x.name===form.product)?.pricePerSqft&&<div className="text-amber-700 font-bold">💰 {CURRENCY}{interlockTypes.find(x=>x.name===form.product)?.pricePerSqft}/sqft</div>}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <div className="text-xs font-bold text-blue-700 mb-2">Customer Details</div>
+              <Input label="Mobile Number *" value={form.mobileNumber} onChange={e => setForm({ ...form, mobileNumber: e.target.value })} onBlur={e => lookupCustomer(e.target.value)} placeholder="10-digit mobile" />
+              {lookupLoading && <div className="text-xs text-amber-600">Looking up customer...</div>}
+              {customerPreview?.customer && (
+                <div className="mt-2 bg-green-50 border border-green-200 rounded-xl p-2 text-xs space-y-1">
+                  <div className="font-bold text-green-700">✅ Existing Customer Found</div>
+                  <div>Previous Purchases: <b>{customerPreview.customer.totalPurchases}</b></div>
+                  <div>Total Paid: <b>{CURRENCY}{fmt(customerPreview.customer.totalPaid)}</b></div>
+                  <div>Total Pending: <b className="text-red-600">{CURRENCY}{fmt(customerPreview.customer.totalPending)}</b></div>
                 </div>
               )}
-              {interlockTypes.length===0&&<div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
+              <div className="mt-2">
+                <Input label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="Customer name" />
+              </div>
+              <div className="mt-2">
+                <Input label="Address (optional)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Customer address" />
+              </div>
             </div>
-            <Input label="Customer Name" value={form.customer} onChange={e=>setForm({...form,customer:e.target.value})} placeholder="Customer name" />
+
+            <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.product} onChange={e => {
+                const it = interlockTypes.find(x => x.name === e.target.value);
+                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" · ") : "";
+                const price = it?.pricePerSqft || 0;
+                setForm({ ...form, product: e.target.value, interlockDetails: details, price: String(price) });
+              }}>
+                <option value="">-- Select Interlock Type --</option>
+                {interlockTypes.map(i => (
+                  <option key={i._id} value={i.name}>{i.name}{i.color ? ` (${i.color})` : ""}</option>
+                ))}
+              </select>
+              {form.product && interlockTypes.find(x => x.name === form.product) && (
+                <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
+                  {form.interlockDetails && <div>📐 {form.interlockDetails}</div>}
+                  {interlockTypes.find(x => x.name === form.product)?.pricePerSqft && <div className="text-amber-700 font-bold">💰 {CURRENCY}{interlockTypes.find(x => x.name === form.product)?.pricePerSqft}/sqft</div>}
+                </div>
+              )}
+              {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
+            </div>
             <div className="grid grid-cols-3 gap-2">
-              <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value,total:+(e.target.value||0)*(+(form.price||0))})} placeholder="0" />
-              <Select label="Unit" value={form.unit||"sqft"} options={["sqft","sqm","nos","load"]} onChange={e=>setForm({...form,unit:e.target.value})} />
-              <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:e.target.value,total:+(form.quantity||0)*(+(e.target.value||0))})} placeholder="0" />
+              <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="0" />
+              <Select label="Unit" value={form.unit || "sqft"} options={["sqft", "sqm", "nos", "load"]} onChange={e => setForm({ ...form, unit: e.target.value })} />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
             </div>
+            <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
             <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
               <div className="text-xs text-gray-400">Total Amount</div>
-              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(+(form.quantity||0)*(+(form.price||0)))}</div>
+              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
             </div>
-            <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input label={`Amount Paid (${CURRENCY})`} type="number" value={form.amountPaid} onChange={e => setForm({ ...form, amountPaid: e.target.value })} placeholder="0" />
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Pending Amount</label>
+                <div className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm bg-red-50 text-red-700 font-bold">{CURRENCY}{fmt(calcPending())}</div>
+              </div>
+            </div>
+            <Select label="Payment Mode" value={form.paymentMode} options={["Cash", "Bank", "GPay", "UPI", "Credit"]} onChange={e => {
+              const mode = e.target.value;
+              setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
+            }} />
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
           </div>
         </Modal>
