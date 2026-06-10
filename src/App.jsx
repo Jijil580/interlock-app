@@ -1398,13 +1398,13 @@ function DailyReport({ user }) {
     // 1. Save worker entry payments to workerpayments
     for (const we of (form.workerEntries||[])) {
       if (+we.paymentGiven>0) {
-        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,siteName:form.siteName});
+        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,source:"daily-report",siteName:form.siteName});
       }
     }
     // 2. Save worker payments from payments section
     for (const p of (form.payments||[])) {
       if (p.type==="Worker Payment"&&p.workerName) {
-        await api("POST","/workerpayments",{workerName:p.workerName,amount:+p.amount,date:form.date,note:`Site: ${form.siteName} | ${p.remarks||""}`,addedBy:user.name,siteName:form.siteName});
+        await api("POST","/workerpayments",{workerName:p.workerName,amount:+p.amount,date:form.date,note:`Site: ${form.siteName} | ${p.remarks||""}`,addedBy:user.name,source:"daily-report",siteName:form.siteName});
       }
     }
     const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
@@ -2916,60 +2916,341 @@ function Purchases({ user }) {
 function ProductionSite({ user }) {
   const [entries, setEntries] = useState([]);
   const [workers, setWorkers] = useState([]);
+  const [interlockTypes, setInterlockTypes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("entry");
   const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), workType:"", notes:"", attendance:[] };
+  const [saveError, setSaveError] = useState("");
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [reports, setReports] = useState(null);
+  const [reportType, setReportType] = useState("worker");
+  const [filters, setFilters] = useState({ worker: "", datePreset: "", fromDate: "", toDate: "", customDate: "" });
+  const [workerSearch, setWorkerSearch] = useState("");
+
+  const emptyForm = {
+    date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
+    shape: "", color: "", unitType: "sqft", producedQty: "", unit: "sqft",
+    productionRate: "", paymentGiven: "", remarks: "",
+  };
   const [form, setForm] = useState(emptyForm);
 
-  useEffect(()=>{
-    Promise.all([api("GET","/productionsite"),api("GET","/workers")]).then(([e,w])=>{
-      setEntries(Array.isArray(e)?e:[]);
-      setWorkers(Array.isArray(w)?w:[]);
+  const canEdit = user.role === "admin" || user.role === "supervisor" || user.role === "user";
+
+  useEffect(() => {
+    Promise.all([
+      api("GET", "/productionsite"), api("GET", "/workers"), api("GET", "/masterdata/interlock"),
+    ]).then(([e, w, i]) => {
+      setEntries(Array.isArray(e) ? e : []);
+      setWorkers(Array.isArray(w) ? w : []);
+      setInterlockTypes(Array.isArray(i) ? i : []);
       setLoading(false);
     });
-  },[]);
+  }, []);
 
-  const initAttendance = () => {
-    setForm({...emptyForm,date:today(),attendance:workers.map(w=>({workerId:w._id,workerName:w.name,status:"present",workDone:"",workUnit:w.paymentType||"day",rate:w.rateAmount||0,total:0}))});
-    setModal(true);
+  const dateFilterParams = () => {
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset === "today") { const r = salesDateRange("today"); from = r.from; to = r.to; }
+    else if (filters.datePreset === "month") {
+      const now = new Date();
+      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      to = today();
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    const q = [];
+    if (from) q.push(`fromDate=${from}`);
+    if (to) q.push(`toDate=${to}`);
+    return q.length ? `&${q.join("&")}` : "";
   };
 
-  const updateAtt = (i,field,val) => {
-    const att=[...form.attendance]; att[i]={...att[i],[field]:val};
-    if(field==="workDone"||field==="rate") att[i].total=+(att[i].workDone||0)*(+(att[i].rate||0));
-    setForm({...form,attendance:att});
+  const calcTotal = () => +(form.producedQty || 0) * +(form.productionRate || 0);
+  const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
+
+  const selectWorker = (id) => {
+    const w = workers.find(x => x._id === id);
+    if (!w) return;
+    setForm(f => ({ ...f, workerId: id, workerName: w.name, productionRate: String(w.rateAmount || f.productionRate || "") }));
+  };
+
+  const selectItem = (id) => {
+    const it = interlockTypes.find(x => x._id === id);
+    if (!it) return;
+    const unitType = it.unit || "sqft";
+    const rate = unitType === "sqft" ? (it.pricePerSqft || it.rate || 0) : (it.pricePerSqm || it.price || it.rate || 0);
+    setForm(f => ({
+      ...f, itemId: id, itemName: it.name, shape: it.shape || "", color: it.color || "",
+      unitType, unit: unitType, productionRate: String(rate),
+    }));
   };
 
   const save = async () => {
-    const totalCost=form.attendance.reduce((a,x)=>a+(+(x.total)||0),0);
-    const item=await api("POST","/productionsite",{...form,totalCost,addedBy:user.name});
-    if(item._id){setEntries(p=>[item,...p]);setModal(false);}
+    setSaveError("");
+    if (!form.workerName) { setSaveError("Select a worker"); return; }
+    if (!form.itemName) { setSaveError("Select an item"); return; }
+    if (!+(form.producedQty)) { setSaveError("Enter produced quantity"); return; }
+    const item = await api("POST", "/productionsite", {
+      ...form,
+      producedQty: +form.producedQty,
+      productionRate: +form.productionRate,
+      paymentGiven: +(form.paymentGiven || 0),
+      addedBy: user.name,
+    });
+    if (item._id) {
+      setEntries(p => [item, ...p]);
+      setModal(false);
+      setForm(emptyForm);
+      api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+    } else setSaveError(item.message || "Failed to save");
   };
 
+  const openLedger = async (name) => {
+    if (!name) return;
+    setLedgerLoading(true);
+    const data = await api("GET", `/workers/ledger?name=${encodeURIComponent(name)}${dateFilterParams()}`);
+    setLedger(data);
+    setLedgerLoading(false);
+  };
+
+  const loadReports = async () => {
+    const data = await api("GET", `/productionsite/reports?type=detail${dateFilterParams()}`);
+    setReports(data);
+  };
+
+  const productionEntries = entries.filter(e => e.producedQty > 0);
+  const filteredEntries = productionEntries.filter(e => {
+    if (filters.worker && !(e.workerName || "").toLowerCase().includes(filters.worker.toLowerCase())) return false;
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset === "today") { const r = salesDateRange("today"); from = r.from; to = r.to; }
+    else if (filters.datePreset === "month") {
+      const now = new Date();
+      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      to = today();
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    if (from && e.date < from) return false;
+    if (to && e.date > to) return false;
+    return true;
+  });
+
+  const todayEntries = productionEntries.filter(e => e.date === today());
+  const todayEarned = todayEntries.reduce((a, e) => a + (+(e.totalAmount) || 0), 0);
+  const todayPaid = todayEntries.reduce((a, e) => a + (+(e.paymentGiven) || 0), 0);
+
   if (loading) return <Loader />;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
-        <button onClick={initAttendance} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Daily Entry</button>
+        {canEdit && tab === "entry" && (
+          <button onClick={() => { setModal(true); setSaveError(""); setForm(emptyForm); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Production</button>
+        )}
       </div>
-      <div className="space-y-3">
-        {entries.length===0&&<EmptyState icon="🏭" text="No entries yet" />}
-        {entries.map(e=><div key={e._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-center justify-between"><div><div className="font-black">📅 {e.date}</div><div className="text-xs text-gray-400">By: {e.addedBy} · {(e.attendance||[]).filter(a=>a.status==="present").length} present</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(e.totalCost||0)}</div></div></div>)}
+
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {[{ id: "entry", label: "📝 Entry" }, { id: "ledger", label: "👷 Worker Ledger" }, { id: "reports", label: "📊 Reports" }].map(t => (
+          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === "reports") loadReports(); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
+        ))}
       </div>
-      {modal&&<Modal title="Daily Production Entry" onClose={()=>setModal(false)} wide>
+
+      {tab === "entry" && (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <StatCard label="Today's Production" value={fmt(todayEntries.reduce((a, e) => a + (+(e.producedQty) || 0), 0))} icon="📦" color="blue" />
+            <StatCard label="Today's Earnings" value={`${CURRENCY}${fmt(todayEarned)}`} icon="💰" color="green" />
+            <StatCard label="Today's Paid" value={`${CURRENCY}${fmt(todayPaid)}`} icon="✅" color="teal" />
+          </div>
+          <div className="space-y-2">
+            {filteredEntries.length === 0 && <EmptyState icon="🏭" text="No production entries" />}
+            {filteredEntries.map(e => (
+              <div key={e._id} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="flex justify-between gap-2">
+                  <div>
+                    <div className="font-black">{e.workerName} · {e.itemName}</div>
+                    <div className="text-xs text-gray-400">📅 {e.date}{e.shift ? ` · ${e.shift}` : ""}{e.color ? ` · ${e.color}` : ""}</div>
+                    <div className="text-sm text-gray-600">{e.producedQty} {e.unit} × {CURRENCY}{e.productionRate}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-green-700">{CURRENCY}{fmt(+(e.totalAmount) || 0)}</div>
+                    {(+(e.paymentGiven) || 0) > 0 && <div className="text-xs text-teal-600">Paid: {CURRENCY}{fmt(+(e.paymentGiven) || 0)}</div>}
+                    {(+(e.amountPending) || 0) > 0 && <div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(e.amountPending) || 0)}</div>}
+                  </div>
+                </div>
+                <button onClick={() => openLedger(e.workerName)} className="mt-2 text-xs text-amber-600 font-bold hover:underline">View Worker Ledger →</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tab === "ledger" && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2"><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} /><Input label="Work Type" value={form.workType||""} onChange={e=>setForm({...form,workType:e.target.value})} /></div>
-          {form.attendance.map((a,i)=><div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
-            <div className="flex items-center justify-between"><div className="font-bold text-sm">{a.workerName}</div>
-              <div className="flex gap-1">{["present","absent"].map(s=><button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-2 py-1 rounded-lg text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
+          <div className="flex gap-2">
+            <input className="flex-1 border rounded-xl px-3 py-2.5 text-sm bg-gray-50" placeholder="🔍 Search Worker Name" value={workerSearch} onChange={e => setWorkerSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && openLedger(workerSearch)} />
+            <button onClick={() => openLedger(workerSearch)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold shrink-0">Search</button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "month", label: "This Month" }, { id: "custom", label: "Custom Date" }, { id: "range", label: "Date Range" }].map(d => (
+              <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{d.label}</button>
+            ))}
+          </div>
+          {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
+          {filters.datePreset === "range" && (
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+              <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
             </div>
-            {a.status==="present"&&<div className="grid grid-cols-3 gap-2"><Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" /><Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} /><Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} /></div>}
-          </div>)}
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xs text-gray-400">Total Cost</div><div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(form.attendance.reduce((a,x)=>a+(+(x.workDone||0)*(+(x.rate||0))),0))}</div></div>
-          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Submit</button>
+          )}
+          {ledgerLoading && <div className="text-xs text-amber-600">Loading...</div>}
+          {ledger?.worker && (
+            <div className="bg-white rounded-2xl border-2 border-amber-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-violet-500 to-purple-600 px-4 py-3 text-white font-black">👷 {ledger.worker.name}</div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <StatCard label="Total Production" value={fmt(ledger.worker.totalProduction)} icon="📦" color="blue" />
+                  <StatCard label="Total Earnings" value={`${CURRENCY}${fmt(ledger.worker.totalEarnings)}`} icon="💰" color="green" />
+                  <StatCard label="Payment Given" value={`${CURRENCY}${fmt(ledger.worker.totalPaid)}`} icon="✅" color="teal" />
+                  <StatCard label="Pending" value={`${CURRENCY}${fmt(ledger.worker.totalPending)}`} icon="⏳" color="red" />
+                </div>
+                {(ledger.itemSummary || []).length > 0 && (
+                  <SectionBox title="Production Summary" icon="📦" color="blue">
+                    <table className="w-full text-xs"><thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty</th></tr></thead>
+                      <tbody>{ledger.itemSummary.map((it, i) => <tr key={i} className="border-t"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{fmt(it.quantity)} {it.unit}</td></tr>)}</tbody>
+                    </table>
+                  </SectionBox>
+                )}
+                <div className="overflow-x-auto">
+                  <div className="text-xs font-bold mb-1">Day-wise Production</div>
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th></tr></thead>
+                    <tbody>
+                      {(ledger.productions || []).map(p => (
+                        <tr key={p._id} className="border-t"><td className="p-2">{p.date}</td><td className="p-2 font-semibold">{p.itemName}</td><td className="p-2">{p.color || "—"}</td><td className="p-2 text-right">{p.producedQty} {p.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(p.productionRate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(p.totalAmount) || 0)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {(ledger.payments || []).length > 0 && (
+                  <SectionBox title="Payment History" icon="💸" color="green">
+                    {ledger.payments.map((p, i) => (
+                      <div key={i} className="flex justify-between text-xs py-1 border-b border-green-100">
+                        <span>{p.date} · <Badge color="blue">{p.source || "payment"}</Badge> {p.note || ""}</span>
+                        <span className="font-bold text-green-700">{CURRENCY}{fmt(+(p.amount) || 0)}</span>
+                      </div>
+                    ))}
+                  </SectionBox>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            {workers.filter(w => !workerSearch || w.name.toLowerCase().includes(workerSearch.toLowerCase())).map(w => (
+              <div key={w._id} onClick={() => openLedger(w.name)} className="bg-white rounded-2xl border p-4 cursor-pointer hover:border-amber-300">
+                <div className="flex justify-between"><div className="font-black">{w.name}</div><span className="text-gray-300">›</span></div>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-xs">
+                  <div className="text-center bg-green-50 rounded p-1"><div className="font-bold text-green-700">{CURRENCY}{fmt(w.totalEarnings || 0)}</div><div className="text-gray-400">Earned</div></div>
+                  <div className="text-center bg-teal-50 rounded p-1"><div className="font-bold text-teal-700">{CURRENCY}{fmt(w.totalPaid || 0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="text-center bg-red-50 rounded p-1"><div className="font-bold text-red-600">{CURRENCY}{fmt(w.totalPending || 0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </Modal>}
+      )}
+
+      {tab === "reports" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            {[{ id: "worker", label: "Worker-wise" }, { id: "item", label: "Item-wise" }, { id: "color", label: "Color-wise" }, { id: "pending", label: "Pending Salary" }].map(t => (
+              <button key={t.id} onClick={() => setReportType(t.id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportType === t.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{t.label}</button>
+            ))}
+            <button onClick={loadReports} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-500 text-white ml-auto">Refresh</button>
+          </div>
+          {reports && (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <StatCard label="Total Qty" value={fmt(reports.totalQuantity || 0)} icon="📦" color="blue" />
+                <StatCard label="Total Amount" value={`${CURRENCY}${fmt(reports.totalAmount || 0)}`} icon="💰" color="green" />
+                <StatCard label="Entries" value={reports.totalEntries || 0} icon="📋" color="purple" />
+              </div>
+              {reportType === "worker" && (reports.workerWise || []).map((w, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{w.worker}</span><span>{fmt(w.quantity)} qty · {CURRENCY}{fmt(w.earnings)} · Paid {CURRENCY}{fmt(w.paid)}</span></div>
+              ))}
+              {reportType === "item" && (reports.itemWise || []).map((it, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{it.item}</span><span>{fmt(it.quantity)} {it.unit} · {CURRENCY}{fmt(it.amount)}</span></div>
+              ))}
+              {reportType === "color" && (reports.colorWise || []).map((c, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{c.color}</span><span>{fmt(c.quantity)} · {CURRENCY}{fmt(c.amount)}</span></div>
+              ))}
+              {reportType === "pending" && (reports.pendingWorkers || []).map((w, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3"><div className="font-bold">{w.name}</div><div className="text-xs text-red-600 mt-1">Pending: {CURRENCY}{fmt(w.totalPending)} · Earned: {CURRENCY}{fmt(w.totalEarnings)} · Paid: {CURRENCY}{fmt(w.totalPaid)}</div></div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title="Production Entry" onClose={() => { setModal(false); setSaveError(""); }} wide>
+          <div className="space-y-3">
+            <SectionBox title="Worker Details" icon="👷" color="purple">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                <Input label="Shift (optional)" value={form.shift} onChange={e => setForm({ ...form, shift: e.target.value })} placeholder="Morning / Evening" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name *</label>
+                <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.workerId} onChange={e => selectWorker(e.target.value)}>
+                  <option value="">-- Select Worker --</option>
+                  {workers.map(w => <option key={w._id} value={w._id}>{w.name} ({w.role})</option>)}
+                </select>
+              </div>
+            </SectionBox>
+
+            <SectionBox title="Product Details" icon="🧱" color="amber">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Select Item (Master Interlock) *</label>
+                <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.itemId} onChange={e => selectItem(e.target.value)}>
+                  <option value="">-- Select Interlock Type --</option>
+                  {interlockTypes.map(it => <option key={it._id} value={it._id}>{it.name}{it.color ? ` (${it.color})` : ""}</option>)}
+                </select>
+              </div>
+              {form.itemName && (
+                <div className="bg-amber-50 rounded-xl p-2 text-xs space-y-0.5">
+                  <div><b>Item:</b> {form.itemName}</div>
+                  {form.shape && <div><b>Shape:</b> {form.shape}</div>}
+                  {form.color && <div><b>Color:</b> {form.color}</div>}
+                  <div><b>Unit:</b> {form.unitType}</div>
+                </div>
+              )}
+            </SectionBox>
+
+            <SectionBox title="Production Details" icon="📦" color="green">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Produced Quantity *" type="number" value={form.producedQty} onChange={e => setForm({ ...form, producedQty: e.target.value })} placeholder="0" />
+                <Select label="Unit" value={form.unit} options={["sqft", "piece", "nos", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />
+                <Input label={`Production Rate (${CURRENCY})`} type="number" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} />
+                <Input label={`Payment Given Today (${CURRENCY})`} type="number" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                  <div className="text-xs text-gray-400">Total Production Amount</div>
+                  <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                  <div className="text-xs text-gray-400">Pending Amount</div>
+                  <div className="text-xl font-black text-red-600">{CURRENCY}{fmt(calcPending())}</div>
+                </div>
+              </div>
+              <Textarea label="Remarks" value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} placeholder="Optional notes" />
+            </SectionBox>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-xs text-blue-700">
+              ✅ On submit: Stock increases automatically · Worker earnings update · Payment reduces pending
+            </div>
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Production</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
