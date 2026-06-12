@@ -2969,17 +2969,18 @@ function ProductionSite({ user }) {
   const selectWorker = (id) => {
     const w = workers.find(x => x._id === id);
     if (!w) return;
-    setForm(f => ({ ...f, workerId: id, workerName: w.name, productionRate: String(w.rateAmount || f.productionRate || "") }));
+    setForm(f => ({ ...f, workerId: id, workerName: w.name }));
   };
 
   const selectItem = (id) => {
     const it = interlockTypes.find(x => x._id === id);
     if (!it) return;
-    const unitType = it.unit || "sqft";
-    const rate = unitType === "sqft" ? (it.pricePerSqft || it.rate || 0) : (it.pricePerSqm || it.price || it.rate || 0);
+    let unitType = (it.unit || "sqft").toLowerCase();
+    if (unitType === "nos" || unitType === "load") unitType = "piece";
+    if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "sqft";
     setForm(f => ({
       ...f, itemId: id, itemName: it.name, shape: it.shape || "", color: it.color || "",
-      unitType, unit: unitType, productionRate: String(rate),
+      unitType, unit: unitType,
     }));
   };
 
@@ -2988,6 +2989,7 @@ function ProductionSite({ user }) {
     if (!form.workerName) { setSaveError("Select a worker"); return; }
     if (!form.itemName) { setSaveError("Select an item"); return; }
     if (!+(form.producedQty)) { setSaveError("Enter produced quantity"); return; }
+    if (!+(form.productionRate)) { setSaveError("Enter rate per unit manually"); return; }
     const item = await api("POST", "/productionsite", {
       ...form,
       producedQty: +form.producedQty,
@@ -3207,23 +3209,28 @@ function ProductionSite({ user }) {
               {form.itemName && (
                 <div className="bg-amber-50 rounded-xl p-2 text-xs space-y-0.5">
                   <div><b>Item:</b> {form.itemName}</div>
-                  {form.shape && <div><b>Shape:</b> {form.shape}</div>}
-                  {form.color && <div><b>Color:</b> {form.color}</div>}
-                  <div><b>Unit:</b> {form.unitType}</div>
+                  <div><b>Color:</b> {form.color || "—"}</div>
+                  <div><b>Unit:</b> {form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
                 </div>
               )}
+              <div className="text-xs text-gray-500 mt-1">Rate is not taken from Master Data — enter manually below.</div>
             </SectionBox>
 
             <SectionBox title="Production Details" icon="📦" color="green">
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Produced Quantity *" type="number" value={form.producedQty} onChange={e => setForm({ ...form, producedQty: e.target.value })} placeholder="0" />
-                <Select label="Unit" value={form.unit} options={["sqft", "piece", "nos", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />
-                <Input label={`Production Rate (${CURRENCY})`} type="number" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} />
-                <Input label={`Payment Given Today (${CURRENCY})`} type="number" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
+                <Input label="Produced Quantity *" type="number" step="any" value={form.producedQty} onChange={e => setForm({ ...form, producedQty: e.target.value })} placeholder="e.g. 500" />
+                <Select label="Unit" value={form.unit} options={["sqft", "piece", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />
+                <Input label={`Rate per Unit (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder="Enter rate manually e.g. 7.50" />
+                <Input label={`Payment Given (${CURRENCY})`} type="number" step="any" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
               </div>
+              {+(form.producedQty) > 0 && +(form.productionRate) > 0 && (
+                <div className="bg-gray-50 rounded-xl p-2 text-xs text-gray-600 text-center">
+                  {form.producedQty} {form.unit} × {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-                  <div className="text-xs text-gray-400">Total Production Amount</div>
+                  <div className="text-xs text-gray-400">Total Amount (auto)</div>
                   <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
                 </div>
                 <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
