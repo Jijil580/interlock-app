@@ -1357,11 +1357,15 @@ function DailyReport({ user }) {
     materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"",
     extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"",
     complaints:"", actionTaken:"",
-    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks}]
+    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks, workCategory, workArea, unit, rate, paymentMode}]
     payments:[], // [{type, workerName, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
   };
   const [form, setForm] = useState(emptyForm);
-  const [workerEntry, setWorkerEntry] = useState({workerName:"",attendance:"present",dutyArea:"",workDone:"",salary:"",paymentGiven:"",pending:"",remarks:""});
+  const [workerEntry, setWorkerEntry] = useState({
+    workerName:"", attendance:"present", dutyArea:"", workDone:"",
+    workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+    paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+  });
   const [payForm, setPayForm] = useState({type:"Worker Payment",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""});
 
   useEffect(()=>{
@@ -1381,9 +1385,35 @@ function DailyReport({ user }) {
 
   const addWorkerEntry = () => {
     if (!workerEntry.workerName) return;
-    const pending = Math.max(0, +(workerEntry.salary||0) - +(workerEntry.paymentGiven||0));
-    setForm(f=>({...f, workerEntries:[...(f.workerEntries||[]),{...workerEntry,pending:String(pending)}]}));
-    setWorkerEntry({workerName:"",attendance:"present",dutyArea:"",workDone:"",salary:"",paymentGiven:"",pending:"",remarks:""});
+    const area = parseFloat(workerEntry.workArea) || 0;
+    const rate = parseFloat(workerEntry.rate) || 0;
+    const totalAmount = area * rate;
+    const paid = parseFloat(workerEntry.paymentGiven) || 0;
+    const pending = Math.max(0, totalAmount - paid);
+
+    const salaryVal = String(totalAmount);
+    const pendingVal = String(pending);
+
+    setForm(f=>({
+      ...f,
+      workerEntries:[
+        ...(f.workerEntries||[]),
+        {
+          ...workerEntry,
+          salary: salaryVal,
+          amountEarned: totalAmount,
+          pending: pendingVal,
+          workArea: area,
+          rate: rate
+        }
+      ]
+    }));
+
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
   };
 
   const addPayment = () => {
@@ -1640,30 +1670,69 @@ function DailyReport({ user }) {
                   <datalist id="worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
+                  <Select label="Work Category" value={workerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setWorkerEntry({...workerEntry,workCategory:e.target.value})} />
                   <Select label="Attendance" value={workerEntry.attendance} options={["present","absent","half-day"]} onChange={e=>setWorkerEntry({...workerEntry,attendance:e.target.value})} />
                   <Input label="Duty Area" value={workerEntry.dutyArea} onChange={e=>setWorkerEntry({...workerEntry,dutyArea:e.target.value})} placeholder="e.g. Front yard" />
-                  <Input label="Work Done" value={workerEntry.workDone} onChange={e=>setWorkerEntry({...workerEntry,workDone:e.target.value})} placeholder="e.g. 50 sqft" />
-                  <Input label={`Salary/Wage (${CURRENCY})`} type="number" value={workerEntry.salary} onChange={e=>{
-                    const pending = Math.max(0,+(e.target.value||0)-(+(workerEntry.paymentGiven||0)));
-                    setWorkerEntry({...workerEntry,salary:e.target.value,pending:String(pending)});
-                  }} placeholder="0" />
-                  <Input label={`Payment Given (${CURRENCY})`} type="number" value={workerEntry.paymentGiven} onChange={e=>{
-                    const pending = Math.max(0,+(workerEntry.salary||0)-(+(e.target.value||0)));
-                    setWorkerEntry({...workerEntry,paymentGiven:e.target.value,pending:String(pending)});
-                  }} placeholder="0" />
+                  <Input label="Work Done Description" value={workerEntry.workDone} onChange={e=>setWorkerEntry({...workerEntry,workDone:e.target.value})} placeholder="e.g. Completed fitting" />
                 </div>
-                {+(workerEntry.salary||0)>0&&<div className="bg-white rounded-xl p-2 border border-teal-200 flex justify-between text-xs"><span>Pending Salary</span><span className="font-black text-red-600">{CURRENCY}{fmt(Math.max(0,+(workerEntry.salary||0)-(+(workerEntry.paymentGiven||0))))}</span></div>}
-                <Input label="Remarks" value={workerEntry.remarks} onChange={e=>setWorkerEntry({...workerEntry,remarks:e.target.value})} placeholder="Optional" />
-                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-teal-600">+ Add Worker Entry</button>
+                <div className="grid grid-cols-3 gap-2">
+                  <Input label="Work Area" type="number" value={workerEntry.workArea} onChange={e=>{
+                    const area = e.target.value;
+                    const tot = (parseFloat(area) || 0) * (parseFloat(workerEntry.rate) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,workArea:area,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                  <Select label="Unit" value={workerEntry.unit} options={["Sqft","Sqm","Piece","Meter"]} onChange={e=>setWorkerEntry({...workerEntry,unit:e.target.value})} />
+                  <Input label="Rate" type="number" value={workerEntry.rate} onChange={e=>{
+                    const rate = e.target.value;
+                    const tot = (parseFloat(workerEntry.workArea) || 0) * (parseFloat(rate) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,rate:rate,salary:String(tot),pending:String(pend)});
+                  }} placeholder="₹" />
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-center text-sm font-bold text-amber-800">
+                  Total Amount: {CURRENCY}{fmt((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Payment Given Today" type="number" value={workerEntry.paymentGiven} onChange={e=>{
+                    const paid = e.target.value;
+                    const tot = (parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0);
+                    const pend = Math.max(0, tot - (parseFloat(paid) || 0));
+                    setWorkerEntry({...workerEntry,paymentGiven:paid,pending:String(pend)});
+                  }} placeholder="0" />
+                  <Select label="Payment Mode" value={workerEntry.paymentMode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setWorkerEntry({...workerEntry,paymentMode:e.target.value})} />
+                </div>
+
+                {Math.max(0, ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) - (parseFloat(workerEntry.paymentGiven)||0)) > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-2 flex justify-between text-xs font-bold text-red-700">
+                    <span>Pending Amount:</span>
+                    <span>{CURRENCY}{fmt(Math.max(0, ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) - (parseFloat(workerEntry.paymentGiven)||0)))}</span>
+                  </div>
+                )}
+
+                <Input label="Remarks" value={workerEntry.remarks} onChange={e=>setWorkerEntry({...workerEntry,remarks:e.target.value})} placeholder="Optional remarks..." />
+                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-teal-600">+ Add Worker Entry</button>
               </div>
               {(form.workerEntries||[]).map((w,i)=>(
-                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-teal-200 text-xs mt-1">
-                  <div><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>{w.workDone?` · ${w.workDone}`:""}</div>
-                  <div className="flex items-center gap-1">
-                    {w.paymentGiven&&<span className="text-green-700 font-bold">{CURRENCY}{fmt(w.paymentGiven)}</span>}
-                    {+w.pending>0&&<span className="text-red-500">(P:{CURRENCY}{fmt(w.pending)})</span>}
-                    <button onClick={()=>setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}))} className="text-red-400 font-black ml-1">×</button>
+                <div key={i} className="bg-white rounded-xl p-3 border border-teal-200 text-xs mt-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-sm text-gray-800">{w.workerName}</span>
+                    <div className="flex items-center gap-1">
+                      <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>
+                      <button onClick={()=>setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}))} className="text-red-500 font-bold text-base hover:text-red-700 ml-2">×</button>
+                    </div>
                   </div>
+                  <div className="grid grid-cols-2 gap-2 text-gray-600">
+                    <div>Category: <span className="font-semibold text-gray-900">{w.workCategory || "—"}</span></div>
+                    <div>Area: <span className="font-semibold text-gray-900">{w.workArea} {w.unit}</span></div>
+                    <div>Rate: <span className="font-semibold text-gray-900">{CURRENCY}{w.rate}</span></div>
+                    <div>Earned: <span className="font-semibold text-green-700">{CURRENCY}{w.salary}</span></div>
+                    <div>Paid: <span className="font-semibold text-blue-700">{CURRENCY}{w.paymentGiven || 0} ({w.paymentMode})</span></div>
+                    <div>Pending: <span className="font-semibold text-red-600">{CURRENCY}{w.pending}</span></div>
+                  </div>
+                  {w.remarks && <div className="text-gray-400 italic">Notes: {w.remarks}</div>}
                 </div>
               ))}
             </SectionBox>
@@ -4228,6 +4297,7 @@ function AdminWorkerReport() {
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("production");
+  const [siteSubTab, setSiteSubTab] = useState("daily");
   const [report, setReport] = useState(null);
   const [overall, setOverall] = useState(null);
   const [selectedSite, setSelectedSite] = useState(null);
@@ -4304,30 +4374,81 @@ function AdminWorkerReport() {
     const site = report.sites.find(s => s.siteName === selectedSite);
     return (
       <div className="space-y-4">
-        <button onClick={() => setSelectedSite(null)} className="text-amber-600 font-bold text-sm">← Back to {selectedWorker}</button>
-        <div className="bg-white rounded-2xl border p-4">
-          <div className="font-black text-xl">🏗️ {site?.siteName}</div>
-          <div className="text-xs text-gray-400 mt-1">Duty Area: {site?.dutyArea || "—"}</div>
-          <div className="text-xs text-gray-400">Work: {site?.workCompleted || "—"}</div>
-          <div className="grid grid-cols-3 gap-2 mt-3 text-xs text-center">
-            <div className="bg-green-50 rounded p-2"><div className="font-black text-green-700">{CURRENCY}{fmt(site?.totalEarned || 0)}</div><div className="text-gray-400">Earned</div></div>
-            <div className="bg-teal-50 rounded p-2"><div className="font-black text-teal-700">{CURRENCY}{fmt(site?.totalPaid || 0)}</div><div className="text-gray-400">Paid</div></div>
-            <div className="bg-red-50 rounded p-2"><div className="font-black text-red-600">{CURRENCY}{fmt(site?.pending || 0)}</div><div className="text-gray-400">Pending</div></div>
+        <button onClick={() => setSelectedSite(null)} className="text-amber-600 font-bold text-sm">← Back to Site List</button>
+        <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-4">
+          <div>
+            <h3 className="font-black text-xl text-gray-800">🏗️ Site: {site?.siteName}</h3>
+            <div className="text-xs text-gray-400 mt-1">Work Category: <span className="font-semibold text-gray-700">{site?.workCategory}</span></div>
+          </div>
+          
+          <div className="grid grid-cols-4 gap-2 text-center text-xs">
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-2.5">
+              <div className="font-black text-blue-700">{site?.totalArea || 0} {site?.unit || "Sqft"}</div>
+              <div className="text-gray-400 mt-0.5">Total Area</div>
+            </div>
+            <div className="bg-green-50 border border-green-100 rounded-xl p-2.5">
+              <div className="font-black text-green-700">{CURRENCY}{fmt(site?.totalEarned || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Total Earned</div>
+            </div>
+            <div className="bg-teal-50 border border-teal-100 rounded-xl p-2.5">
+              <div className="font-black text-teal-700">{CURRENCY}{fmt(site?.totalPaid || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Total Paid</div>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-xl p-2.5">
+              <div className="font-black text-red-600">{CURRENCY}{fmt(site?.pending || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Pending</div>
+            </div>
           </div>
         </div>
-        <table className="w-full text-xs">
-          <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Duty Area</th><th className="p-2 text-left">Work</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th></tr></thead>
-          <tbody>
-            {(site?.entries || []).map((h, i) => (
-              <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2">{h.dutyArea || "—"}</td><td className="p-2">{h.workDone}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.amountEarned)}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.paymentGiven)}</td></tr>
-            ))}
-          </tbody>
-        </table>
+
+        <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+          <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📅 Chronological Entries & Pending Logic</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="p-2 text-left">Date</th>
+                  <th className="p-2 text-left">Work Category</th>
+                  <th className="p-2 text-right">Area</th>
+                  <th className="p-2">Unit</th>
+                  <th className="p-2 text-right">Rate</th>
+                  <th className="p-2 text-right">Earned</th>
+                  <th className="p-2 text-right">Paid</th>
+                  <th className="p-2 text-right">Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(site?.entries || []).map((h, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="p-2">{h.date}</td>
+                    <td className="p-2">{h.workCategory || "—"}</td>
+                    <td className="p-2 text-right">{h.workArea || 0}</td>
+                    <td className="p-2">{h.unit || "—"}</td>
+                    <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                    <td className="p-2 text-right font-semibold text-green-700">{CURRENCY}{fmt(h.amountEarned)}</td>
+                    <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                    <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (selectedWorker && (report || overall)) {
+    const filteredDailyHistory = (report?.history || []).filter(h => {
+      if (h.isExtraPayment) return false;
+      if (filters.site && !(h.siteName || "").toLowerCase().includes(filters.site.toLowerCase())) return false;
+      if (filters.item && !(h.workCategory || "").toLowerCase().includes(filters.item.toLowerCase())) return false;
+      return true;
+    });
+    const dailyEarnedSum = filteredDailyHistory.reduce((sum, h) => sum + (h.amountEarned || 0), 0);
+    const dailyPaidSum = filteredDailyHistory.reduce((sum, h) => sum + (h.paymentGiven || 0), 0);
+    const dailyPendingSum = Math.max(0, dailyEarnedSum - dailyPaidSum);
+
     return (
       <div className="space-y-4">
         <button onClick={() => { setSelectedWorker(null); setReport(null); setOverall(null); }} className="text-amber-600 font-bold text-sm">← Back</button>
@@ -4364,30 +4485,167 @@ function AdminWorkerReport() {
 
         {tab === "site" && report?.worker && (
           <>
-            <div className="bg-white rounded-2xl border p-4"><div className="font-black text-xl">🏗️ {report.worker.name}</div><div className="text-xs text-gray-400">Site Work Workers Report</div></div>
-            <div className="grid grid-cols-2 gap-2">
-              <StatCard label="Sites Worked" value={report.worker.totalSites} icon="🏗️" color="blue" />
-              <StatCard label="Site Earnings" value={`${CURRENCY}${fmt(report.worker.totalEarnings)}`} icon="💰" color="green" />
-              <StatCard label="Payments Given" value={`${CURRENCY}${fmt(report.worker.totalPaid)}`} icon="✅" color="teal" />
-              <StatCard label="Pending" value={`${CURRENCY}${fmt(report.worker.totalPending)}`} icon="⏳" color="red" />
+            <div className="bg-white rounded-2xl border p-4">
+              <div className="font-black text-xl">🏗️ {report.worker.name}</div>
+              <div className="text-xs text-gray-400 font-semibold uppercase tracking-wider text-amber-600 mt-1">Site Work Worker Report</div>
             </div>
-            <div className="text-xs font-bold">Site-wise History (tap site for details)</div>
-            {(report.sites || []).map((s, i) => (
-              <div key={i} onClick={() => setSelectedSite(s.siteName)} className="bg-white rounded-xl border p-3 cursor-pointer hover:border-amber-300">
-                <div className="font-bold">{s.siteName}</div>
-                <div className="text-xs text-gray-400">{s.dutyArea} · Earned {CURRENCY}{fmt(s.totalEarned)} · Pending {CURRENCY}{fmt(s.pending)}</div>
+
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {[{ id: "daily", label: "Daily View" }, { id: "total", label: "Total View" }, { id: "sitewise", label: "Site-wise View" }, { id: "datewise", label: "Date-wise View" }].map(sub => (
+                <button key={sub.id} onClick={() => { setSiteSubTab(sub.id); setSelectedSite(null); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${siteSubTab === sub.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}>{sub.label}</button>
+              ))}
+            </div>
+
+            {siteSubTab === "daily" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-green-700">{CURRENCY}{fmt(dailyEarnedSum)}</div>
+                    <div className="text-xs text-gray-400">Total Earned</div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(dailyPaidSum)}</div>
+                    <div className="text-xs text-gray-400">Total Paid</div>
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dailyPendingSum)}</div>
+                    <div className="text-xs text-gray-400">Daily Pending</div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                  <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📋 Daily History</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 text-gray-500">
+                          <th className="p-2 text-left">Date</th>
+                          <th className="p-2 text-left">Site Name</th>
+                          <th className="p-2 text-left">Category</th>
+                          <th className="p-2 text-right">Area</th>
+                          <th className="p-2">Unit</th>
+                          <th className="p-2 text-right">Rate</th>
+                          <th className="p-2 text-right">Amount</th>
+                          <th className="p-2 text-right">Payment Given</th>
+                          <th className="p-2 text-right">Pending</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDailyHistory.length === 0 && (
+                          <tr><td colSpan="9" className="p-4 text-center text-gray-400">No daily entries found</td></tr>
+                        )}
+                        {filteredDailyHistory.map((h, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="p-2">{h.date}</td>
+                            <td className="p-2 font-bold">{h.siteName}</td>
+                            <td className="p-2">{h.workCategory || "—"}</td>
+                            <td className="p-2 text-right">{h.workArea || 0}</td>
+                            <td className="p-2">{h.unit || "—"}</td>
+                            <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                            <td className="p-2 text-right text-green-700 font-semibold">{CURRENCY}{fmt(h.amountEarned)}</td>
+                            <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                            <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            ))}
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Site</th><th className="p-2">Duty Area</th><th className="p-2">Work Done</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Balance</th></tr></thead>
-                <tbody>
-                  {(report.history || []).map((h, i) => (
-                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2">{h.siteName}</td><td className="p-2">{h.dutyArea || "—"}</td><td className="p-2">{h.workDone}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.amountEarned)}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.paymentGiven)}</td><td className="p-2 text-right text-red-600">{CURRENCY}{fmt(h.balance)}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            )}
+
+            {siteSubTab === "total" && (
+              <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-4">
+                <h3 className="font-black text-gray-800 text-base border-b pb-2">👷 Worker Overall Summary</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>Worker Name: <span className="font-bold text-gray-900">{report.worker.name}</span></div>
+                  <div>Total Sites Worked: <span className="font-bold text-gray-900">{report.worker.totalSites}</span></div>
+                  <div>Total Area Completed: <span className="font-bold text-gray-900">{report.worker.totalAreaCompleted || 0} Sqft</span></div>
+                  <div>Total Amount Earned: <span className="font-bold text-green-700">{CURRENCY}{fmt(report.worker.totalEarnings)}</span></div>
+                  <div>Total Payments Given: <span className="font-bold text-blue-700">{CURRENCY}{fmt(report.worker.totalPaid)}</span></div>
+                  <div className="col-span-2 bg-red-50 border border-red-200 rounded-xl p-3 flex justify-between font-black text-red-700">
+                    <span>Total Pending Amount:</span>
+                    <span>{CURRENCY}{fmt(report.worker.totalPending)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {siteSubTab === "sitewise" && (
+              <div className="space-y-3">
+                <div className="text-xs font-bold text-gray-400">Site-wise Summary (click a site to view details)</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500">
+                        <th className="p-2 text-left">Site Name</th>
+                        <th className="p-2 text-left">Category</th>
+                        <th className="p-2 text-right">Total Area</th>
+                        <th className="p-2 text-right">Total Earned</th>
+                        <th className="p-2 text-right">Total Paid</th>
+                        <th className="p-2 text-right">Pending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.sites || []).length === 0 && (
+                        <tr><td colSpan="6" className="p-4 text-center text-gray-400">No site data found</td></tr>
+                      )}
+                      {(report.sites || []).map((s, i) => (
+                        <tr key={i} onClick={() => setSelectedSite(s.siteName)} className="border-t hover:bg-amber-50 cursor-pointer transition-all">
+                          <td className="p-2 font-bold text-blue-600 underline">{s.siteName}</td>
+                          <td className="p-2">{s.workCategory || "—"}</td>
+                          <td className="p-2 text-right">{s.totalArea || 0}</td>
+                          <td className="p-2 text-right font-semibold text-green-700">{CURRENCY}{fmt(s.totalEarned)}</td>
+                          <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(s.totalPaid)}</td>
+                          <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(s.pending)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {siteSubTab === "datewise" && (
+              <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📅 Date-wise View</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500">
+                        <th className="p-2 text-left">Date</th>
+                        <th className="p-2 text-left">Site Name</th>
+                        <th className="p-2 text-left">Work Category</th>
+                        <th className="p-2 text-right">Area</th>
+                        <th className="p-2">Unit</th>
+                        <th className="p-2 text-right">Rate</th>
+                        <th className="p-2 text-right">Amount Earned</th>
+                        <th className="p-2 text-right">Payment Given</th>
+                        <th className="p-2 text-right">Pending Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.history || []).length === 0 && (
+                        <tr><td colSpan="9" className="p-4 text-center text-gray-400">No entries found</td></tr>
+                      )}
+                      {(report.history || []).map((h, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-2">{h.date}</td>
+                          <td className="p-2 font-bold">{h.siteName}</td>
+                          <td className="p-2">{h.workCategory || "—"}</td>
+                          <td className="p-2 text-right">{h.workArea || 0}</td>
+                          <td className="p-2">{h.unit || "—"}</td>
+                          <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                          <td className="p-2 text-right text-green-700 font-semibold">{CURRENCY}{fmt(h.amountEarned)}</td>
+                          <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                          <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -4411,7 +4669,7 @@ function AdminWorkerReport() {
       <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
       <div className="flex gap-1 overflow-x-auto pb-1">
         {[{ id: "production", label: "🏭 Production" }, { id: "site", label: "🏗️ Site Work" }, { id: "overall", label: "📊 Overall" }].map(t => (
-          <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
+          <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
         ))}
       </div>
       <FilterBar />
