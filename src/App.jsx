@@ -1358,7 +1358,7 @@ function DailyReport({ user }) {
     extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"",
     complaints:"", actionTaken:"",
     workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks, workCategory, workArea, unit, rate, paymentMode}]
-    payments:[], // [{type, workerName, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
+    payments:[], // [{type, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
   };
   const [form, setForm] = useState(emptyForm);
   const [workerEntry, setWorkerEntry] = useState({
@@ -1366,7 +1366,8 @@ function DailyReport({ user }) {
     workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
     paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
   });
-  const [payForm, setPayForm] = useState({type:"Worker Payment",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""});
+  const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""};
+  const [payForm, setPayForm] = useState(emptyPayForm);
 
   useEffect(()=>{
     Promise.all([api("GET","/sitework"),api("GET","/workers"),api("GET","/dailyreport")]).then(([sw,w,dr])=>{
@@ -1385,6 +1386,43 @@ function DailyReport({ user }) {
 
   const addWorkerEntry = () => {
     if (!workerEntry.workerName) return;
+    const normalize = (v) => String(v || "").trim().toLowerCase();
+    const duplicateInFormIndex = (form.workerEntries || []).findIndex(w =>
+      normalize(w.workerName) === normalize(workerEntry.workerName) &&
+      normalize(w.workCategory) === normalize(workerEntry.workCategory)
+    );
+    if (duplicateInFormIndex >= 0) {
+      const editExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
+      if (editExisting) {
+        const existing = form.workerEntries[duplicateInFormIndex];
+        setWorkerEntry({
+          ...existing,
+          workArea: String(existing.workArea || ""),
+          rate: String(existing.rate || ""),
+          salary: String(existing.salary || existing.amountEarned || ""),
+          paymentGiven: String(existing.paymentGiven || ""),
+          pending: String(existing.pending || "")
+        });
+        setForm(f => ({ ...f, workerEntries: f.workerEntries.filter((_, i) => i !== duplicateInFormIndex) }));
+      }
+      return;
+    }
+    const duplicateSaved = reports.find(r =>
+      r.date === form.date &&
+      (normalize(r.siteName) === normalize(form.siteName) || (form.siteId && r.siteId === form.siteId)) &&
+      (r.workerEntries || []).some(w =>
+        normalize(w.workerName) === normalize(workerEntry.workerName) &&
+        normalize(w.workCategory) === normalize(workerEntry.workCategory)
+      )
+    );
+    if (duplicateSaved) {
+      const viewExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
+      if (viewExisting) {
+        setViewModal(duplicateSaved);
+        setAddModal(false);
+      }
+      return;
+    }
     const area = parseFloat(workerEntry.workArea) || 0;
     const rate = parseFloat(workerEntry.rate) || 0;
     const totalAmount = area * rate;
@@ -1418,29 +1456,20 @@ function DailyReport({ user }) {
 
   const addPayment = () => {
     if (!payForm.amount) return;
+    if (payForm.type === "Worker Payment") return;
     setForm(f=>({...f, payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount,pending:+payForm.pending||0,siteName:payForm.siteName||f.siteName}]}));
-    setPayForm({type:"Worker Payment",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""});
+    setPayForm(emptyPayForm);
   };
 
   const save = async () => {
     if (!form.siteName||!form.date) return;
 
-    // 1. Save worker entry payments to workerpayments
-    for (const we of (form.workerEntries||[])) {
-      if (+we.paymentGiven>0) {
-        await api("POST","/workerpayments",{workerName:we.workerName,amount:+we.paymentGiven,date:form.date,note:`Site: ${form.siteName}`,addedBy:user.name,source:"daily-report",siteName:form.siteName});
-      }
-    }
-    // 2. Save worker payments from payments section
-    for (const p of (form.payments||[])) {
-      if (p.type==="Worker Payment"&&p.workerName) {
-        await api("POST","/workerpayments",{workerName:p.workerName,amount:+p.amount,date:form.date,note:`Site: ${form.siteName} | ${p.remarks||""}`,addedBy:user.name,source:"daily-report",siteName:form.siteName});
-      }
-    }
-    const totalPayments = (form.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0);
+    const cleanPayments = (form.payments||[]).filter(p=>p.type!=="Worker Payment");
+    const workerPaidTotal = (form.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven)||0),0);
+    const totalPayments = cleanPayments.reduce((a,p)=>a+(+(p.amount)||0),0) + workerPaidTotal;
 
     // 3. Calculate site payment received & AUTO-UPDATE sitework
-    const sitePayments = (form.payments||[]).filter(p=>p.type==="Site Payment Received");
+    const sitePayments = cleanPayments.filter(p=>p.type==="Site Payment Received");
     const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     if (totalReceived > 0 && form.siteId) {
       const site = siteWorks.find(s=>s._id===form.siteId);
@@ -1453,8 +1482,9 @@ function DailyReport({ user }) {
         setSiteWorks(p=>p.map(s=>s._id===form.siteId?{...s,advancePaid:String(newAdvance),pendingAmount:String(newPending),paymentStatus:newStatus}:s));
       }
     }
-    const item = await api("POST","/dailyreport",{...form,totalPayments,totalReceived,addedBy:user.name});
-    if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setSiteSearch(""); }
+    const item = await api("POST","/dailyreport",{...form,payments:cleanPayments,totalPayments,totalReceived,addedBy:user.name});
+    if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch(""); }
+    else if (item.message) window.alert(item.message);
   };;
 
   const openAdd = (site) => {
@@ -1471,7 +1501,7 @@ function DailyReport({ user }) {
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
     const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
-    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
     const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
     const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
@@ -1531,9 +1561,9 @@ function DailyReport({ user }) {
                 ))}
               </SectionBox>
             )}
-            {(dateReport.payments||[]).length>0&&(
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
               <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=>(
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                   <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
                     <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}{p.remarks?` · ${p.remarks}`:""}</div></div>
                     <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
@@ -1541,7 +1571,7 @@ function DailyReport({ user }) {
                 ))}
                 <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
                   <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Site Payment Received"&&p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
                 </div>
               </SectionBox>
             )}
@@ -1738,15 +1768,7 @@ function DailyReport({ user }) {
             </SectionBox>
 
             <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Worker Payment","Material Payment","Equipment Payment","Site Payment Received","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""})} />
-              
-              {payForm.type==="Worker Payment"&&(
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
-                  <input list="pay-worker-list" value={payForm.workerName} onChange={e=>setPayForm({...payForm,workerName:e.target.value})} placeholder="Select worker..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50" />
-                  <datalist id="pay-worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
-                </div>
-              )}
+              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""})} />
               {payForm.type==="Material Payment"&&(
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
@@ -1768,7 +1790,7 @@ function DailyReport({ user }) {
               </div>
               <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
               <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
-              {(form.payments||[]).map((p,i)=>(
+              {(form.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                 <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs mt-1">
                   <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}</div></div>
                   <div className="flex items-center gap-1">
@@ -1780,7 +1802,7 @@ function DailyReport({ user }) {
               {(form.payments||[]).length>0&&(
                 <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
                   <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
-                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type!=="Site Payment Received"&&p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
                 </div>
               )}
             </SectionBox>
@@ -1831,9 +1853,9 @@ function DailyReport({ user }) {
                 ))}
               </SectionBox>
             )}
-            {(viewModal.payments||[]).length>0&&(
+            {(viewModal.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
               <SectionBox title="Payments" icon="💰" color="green">
-                {viewModal.payments.map((p,i)=>(
+                {(viewModal.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                   <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
                     <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
                     <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
@@ -1900,7 +1922,7 @@ function SupervisorReports({ allUsers }) {
     const totalComp = allReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const totalReceived = allReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
     const totalPaid = allReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
-    const allPayments = allReports.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allPayments = allReports.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const allWorkers = allReports.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
     const allMats = allReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
     const allExtra = allReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
@@ -1971,9 +1993,9 @@ function SupervisorReports({ allUsers }) {
                     ))}
                   </SectionBox>
                 )}
-                {(dateReport.payments||[]).length>0&&(
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
                   <SectionBox title="Payments" icon="💰" color="green">
-                    {dateReport.payments.map((p,i)=>(
+                    {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                       <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
                         <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
                         <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
@@ -2051,7 +2073,7 @@ function SupervisorReports({ allUsers }) {
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="font-black text-blue-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Received from Site</div></div>
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="font-black text-green-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid Out</div></div>
             </div>
-            {["Site Payment Received","Worker Payment","Material Payment","Equipment Payment","Other Expense"].map(type=>{
+            {["Site Payment Received","Material Payment","Equipment Payment","Other Expense"].map(type=>{
               const pts = allPayments.filter(p=>p.type===type);
               if (pts.length===0) return null;
               return (
@@ -2195,7 +2217,7 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
   // Site Report
   if (selectedSite) {
     const sr = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).filter(filterByDate).sort((a,b)=>b.date.localeCompare(a.date));
-    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
@@ -4126,10 +4148,10 @@ function AdminSiteReport() {
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
-    const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     // Also get worker entry payments (salary paid via worker section)
     const allWorkerEntryPayments = siteReportDocs.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,paidTo:w.workerName,amount:+(w.paymentGiven||0),mode:"Cash",date:r.date,remarks:w.remarks||"",fromWorkerEntry:true})));
-    const allWorkerPayments = [...allPayments.filter(p=>p.type==="Worker Payment"), ...allWorkerEntryPayments];
+    const allWorkerPayments = allWorkerEntryPayments;
     const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received");
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
@@ -4222,9 +4244,9 @@ function AdminSiteReport() {
                 )}
               </SectionBox>
             )}
-            {(dateReport.payments||[]).length>0&&(
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
               <SectionBox title="Other Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=>(
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                   <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
                     <div>
                       <span className={`font-bold ${p.type==="Site Payment Received"||p.type==="Client Payment Received"?"text-green-700":"text-gray-700"}`}>{p.type}</span>
@@ -4236,7 +4258,7 @@ function AdminSiteReport() {
                   </div>
                 ))}
                 <div className="text-xs font-black text-green-700 text-right pt-1 border-t border-green-200">
-                  Net: {CURRENCY}{fmt((dateReport.payments||[]).reduce((a,p)=>a+(+(p.amount)||0),0))}
+                  Net: {CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}
                 </div>
               </SectionBox>
             )}
@@ -4293,19 +4315,31 @@ function AdminSiteReport() {
 }
 
 // ─── WORKER REPORTS (Production / Site / Overall) ───────────────────────────
-function AdminWorkerReport() {
+function AdminWorkerReport({ user }) {
   const [workers, setWorkers] = useState([]);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("production");
   const [siteSubTab, setSiteSubTab] = useState("daily");
   const [report, setReport] = useState(null);
   const [overall, setOverall] = useState(null);
+  const [addModal, setAddModal] = useState(false);
   const [selectedSite, setSelectedSite] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({ fromDate: "", toDate: "", customDate: "", datePreset: "", item: "", color: "", site: "" });
+  const emptySiteWorkerEntry = { date: today(), workerName: "", siteName: "", siteId: "", workCategory: "Fitting", workArea: "", unit: "Sqft", rate: "", paymentGiven: "", paymentMode: "Cash", remarks: "" };
+  const [siteWorkerEntry, setSiteWorkerEntry] = useState(emptySiteWorkerEntry);
 
-  useEffect(() => { api("GET", "/workers").then(w => { setWorkers(Array.isArray(w) ? w : []); setLoading(false); }); }, []);
+  useEffect(() => {
+    Promise.all([api("GET", "/workers"), api("GET", "/sitework"), api("GET", "/dailyreport")]).then(([w, sw, dr]) => {
+      setWorkers(Array.isArray(w) ? w : []);
+      setSiteWorks(Array.isArray(sw) ? sw : []);
+      setDailyReports(Array.isArray(dr) ? dr : []);
+      setLoading(false);
+    });
+  }, []);
 
   const queryParams = () => {
     const q = [];
@@ -4340,6 +4374,85 @@ function AdminWorkerReport() {
       const data = await api("GET", `/workers/reports/overall?name=${encodeURIComponent(name)}${queryParams()}`);
       setOverall(data);
       setReport(null);
+    }
+  };
+
+  const saveSiteWorkerEntry = async () => {
+    if (!siteWorkerEntry.date || !siteWorkerEntry.workerName || !siteWorkerEntry.siteName || !siteWorkerEntry.workCategory) return;
+    const normalize = (v) => String(v || "").trim().toLowerCase();
+    const site = siteWorks.find(s => s.customerName === siteWorkerEntry.siteName || s._id === siteWorkerEntry.siteId);
+    const existingReport = dailyReports.find(r =>
+      r.date === siteWorkerEntry.date &&
+      (normalize(r.siteName) === normalize(siteWorkerEntry.siteName) || (siteWorkerEntry.siteId && r.siteId === siteWorkerEntry.siteId))
+    );
+    const hasDuplicate = (existingReport?.workerEntries || []).some(w =>
+      normalize(w.workerName) === normalize(siteWorkerEntry.workerName) &&
+      normalize(w.workCategory) === normalize(siteWorkerEntry.workCategory)
+    );
+    if (hasDuplicate) {
+      window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
+      return;
+    }
+
+    const area = parseFloat(siteWorkerEntry.workArea) || 0;
+    const rate = parseFloat(siteWorkerEntry.rate) || 0;
+    const earned = area * rate;
+    const paid = parseFloat(siteWorkerEntry.paymentGiven) || 0;
+    const entry = {
+      workerName: siteWorkerEntry.workerName,
+      attendance: "present",
+      dutyArea: "",
+      workDone: siteWorkerEntry.workCategory,
+      workCategory: siteWorkerEntry.workCategory,
+      workArea: area,
+      unit: siteWorkerEntry.unit,
+      rate,
+      salary: String(earned),
+      amountEarned: earned,
+      paymentGiven: paid,
+      paymentMode: siteWorkerEntry.paymentMode,
+      pending: String(Math.max(0, earned - paid)),
+      remarks: siteWorkerEntry.remarks
+    };
+
+    const paymentsTotal = (rows, payments) =>
+      (payments || []).filter(p => p.type !== "Worker Payment").reduce((a, p) => a + (+(p.amount) || 0), 0) +
+      (rows || []).reduce((a, w) => a + (+(w.paymentGiven) || 0), 0);
+
+    let saved;
+    if (existingReport?._id) {
+      const workerEntries = [...(existingReport.workerEntries || []), entry];
+      const payments = (existingReport.payments || []).filter(p => p.type !== "Worker Payment");
+      saved = await api("PUT", `/dailyreport/${existingReport._id}`, {
+        ...existingReport,
+        payments,
+        workerEntries,
+        totalPayments: paymentsTotal(workerEntries, payments)
+      });
+      if (saved?._id) setDailyReports(p => p.map(r => r._id === saved._id ? saved : r));
+    } else {
+      const body = {
+        date: siteWorkerEntry.date,
+        siteName: siteWorkerEntry.siteName,
+        siteId: site?._id || siteWorkerEntry.siteId || "",
+        siteStatus: site?.status || "running",
+        interlockType: site?.interlockType || "",
+        workerEntries: [entry],
+        payments: [],
+        totalPayments: paid,
+        totalReceived: 0,
+        addedBy: user?.name || "Office"
+      };
+      saved = await api("POST", "/dailyreport", body);
+      if (saved?._id) setDailyReports(p => [saved, ...p]);
+    }
+
+    if (saved?._id) {
+      setAddModal(false);
+      setSiteWorkerEntry(emptySiteWorkerEntry);
+      if (selectedWorker) loadReport(selectedWorker);
+    } else if (saved?.message) {
+      window.alert(saved.message);
     }
   };
 
@@ -4666,7 +4779,10 @@ function AdminWorkerReport() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
+        {tab === "site" && <button onClick={() => setAddModal(true)} className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-amber-600">+ Add Worker Entry</button>}
+      </div>
       <div className="flex gap-1 overflow-x-auto pb-1">
         {[{ id: "production", label: "🏭 Production" }, { id: "site", label: "🏗️ Site Work" }, { id: "overall", label: "📊 Overall" }].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
@@ -4681,6 +4797,43 @@ function AdminWorkerReport() {
           </div>
         ))}
       </div>
+      {addModal&&(
+        <Modal title="Add Worker Entry" onClose={()=>setAddModal(false)}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={siteWorkerEntry.date} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,date:e.target.value})} />
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+                <input list="wr-worker-list" value={siteWorkerEntry.workerName} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" />
+                <datalist id="wr-worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name</label>
+              <input list="wr-site-list" value={siteWorkerEntry.siteName} onChange={e=>{
+                const site = siteWorks.find(s=>s.customerName===e.target.value);
+                setSiteWorkerEntry({...siteWorkerEntry,siteName:e.target.value,siteId:site?._id||""});
+              }} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" />
+              <datalist id="wr-site-list">{siteWorks.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
+            </div>
+            <Select label="Work Category" value={siteWorkerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workCategory:e.target.value})} />
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Area" type="number" value={siteWorkerEntry.workArea} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workArea:e.target.value})} />
+              <Select label="Unit" value={siteWorkerEntry.unit} options={["Sqft","Sqm","Piece","Meter"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,unit:e.target.value})} />
+              <Input label="Rate" type="number" value={siteWorkerEntry.rate} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,rate:e.target.value})} />
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center text-sm font-black text-amber-800">
+              Total Amount: {CURRENCY}{fmt((parseFloat(siteWorkerEntry.workArea)||0)*(parseFloat(siteWorkerEntry.rate)||0))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Payment Given" type="number" value={siteWorkerEntry.paymentGiven} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,paymentGiven:e.target.value})} />
+              <Select label="Payment Mode" value={siteWorkerEntry.paymentMode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,paymentMode:e.target.value})} />
+            </div>
+            <Input label="Remarks" value={siteWorkerEntry.remarks} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,remarks:e.target.value})} />
+            <button onClick={saveSiteWorkerEntry} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Save Worker Entry</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -4714,9 +4867,9 @@ function SupervisorSiteReport({ user }) {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
-    const allPayments = sr.flatMap(r=>(r.payments||[]).map(p=>({...p,date:r.date})));
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const clientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
-    const workerPayments = allPayments.filter(p=>p.type==="Worker Payment");
+    const workerPayments = sr.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,amount:+(w.paymentGiven||0),mode:w.paymentMode||"Cash",date:r.date,remarks:w.remarks||""})));
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
     const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
@@ -4791,9 +4944,9 @@ function SupervisorSiteReport({ user }) {
             )}
             {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
             {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
-            {(dateReport.payments||[]).length>0&&(
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
               <SectionBox title="Payments" icon="💰" color="green">
-                {dateReport.payments.map((p,i)=>(
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
                   <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
                     <span><span className={`font-bold ${p.type==="Site Payment Received"?"text-blue-700":"text-gray-700"}`}>{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""} · {p.mode}</span>
                     <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-red-600"}`}>{p.type==="Site Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}</span>
@@ -5008,7 +5161,7 @@ export default function App() {
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "sitereport": return <AdminSiteReport />;
       case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
-      case "workerreport2": return <AdminWorkerReport />;
+      case "workerreport2": return <AdminWorkerReport user={currentUser} />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
