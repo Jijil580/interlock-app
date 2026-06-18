@@ -1366,7 +1366,7 @@ function DailyReport({ user }) {
     workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
     paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
   });
-  const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""};
+  const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""};
   const [payForm, setPayForm] = useState(emptyPayForm);
 
   useEffect(()=>{
@@ -1768,7 +1768,7 @@ function DailyReport({ user }) {
             </SectionBox>
 
             <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:""})} />
+              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Worker Payment","Vehicle Charge","Material Payment","Equipment Payment","Other Expense"].filter(type=>type!=="Worker Payment")} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
               {payForm.type==="Material Payment"&&(
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
@@ -1777,6 +1777,18 @@ function DailyReport({ user }) {
               )}
               {payForm.type==="Equipment Payment"&&(
                 <Input label="Equipment Name" value={payForm.equipmentName||""} onChange={e=>setPayForm({...payForm,equipmentName:e.target.value})} placeholder="Equipment" />
+              )}
+              {payForm.type==="Vehicle Charge"&&(
+                <Input label="Vehicle / Charge Name" value={payForm.expenseName||""} onChange={e=>setPayForm({...payForm,expenseName:e.target.value})} placeholder="Vehicle number or charge" />
+              )}
+              {payForm.type==="Other Expense"&&(
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Expense Name</label>
+                  <input list="other-expense-names" value={payForm.expenseName||""} onChange={e=>setPayForm({...payForm,expenseName:e.target.value})} placeholder="Select or type expense name" className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50" />
+                  <datalist id="other-expense-names">
+                    {["Tea Expense","Generator Fuel","Accommodation","Food","Miscellaneous"].map(name=><option key={name} value={name} />)}
+                  </datalist>
+                </div>
               )}
               {payForm.type==="Site Payment Received"&&(
                 <div className="grid grid-cols-2 gap-2">
@@ -5030,8 +5042,175 @@ function SupervisorSiteReport({ user }) {
 // ─── SUPERVISOR SITE REPORT VIEW ─────────────────────────────────────────────
 
 
+function DailyCashFlow({ user, allUsers }) {
+  const [view, setView] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [dateMode, setDateMode] = useState("all");
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [personFilter, setPersonFilter] = useState(user.role === "admin" ? "role:supervisor" : "");
+  const [data, setData] = useState({ history: [], total: {} });
+  const [loading, setLoading] = useState(true);
+
+  const getRange = () => {
+    if (view === "daily") return { from: selectedDate, to: selectedDate };
+    if (dateMode === "all") return { from: "", to: "" };
+    if (dateMode === "today") return { from: today(), to: today() };
+    if (dateMode === "monthly") {
+      const d = new Date();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      return { from: `${d.getFullYear()}-${month}-01`, to: `${d.getFullYear()}-${month}-${last}` };
+    }
+    if (dateMode === "custom") return { from: fromDate, to: fromDate };
+    return { from: fromDate, to: toDate };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const range = getRange();
+    const params = new URLSearchParams({ role: user.role, name: user.name, fromDate: range.from, toDate: range.to });
+    if (user.role === "admin") {
+      const [kind, role, ...nameParts] = personFilter.split(":");
+      if (kind === "role") params.set("personRole", role);
+      if (kind === "person") {
+        params.set("personRole", role);
+        params.set("person", nameParts.join(":"));
+      }
+    }
+    setLoading(true);
+    api("GET", `/cashflow?${params.toString()}`).then(result => {
+      if (!active) return;
+      setData(result?.history ? result : { history: [], total: {} });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, user.name, view, selectedDate, dateMode, fromDate, toDate, personFilter]);
+
+  const isSupervisor = user.role === "supervisor" || (user.role === "admin" && personFilter.includes(":supervisor"));
+  const total = data.total || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const dateLabel = value => {
+    if (!value) return "—";
+    const [y,m,d] = value.split("-");
+    return `${d}-${m}-${y}`;
+  };
+  const personOptions = [
+    { value:"role:supervisor", label:"All Supervisors" },
+    { value:"role:user", label:"All Users" },
+    ...(allUsers || []).filter(u=>u.role==="supervisor"||u.role==="user").map(u=>({
+      value:`person:${u.role}:${u.name}`, label:`${u.name} (${u.role})`
+    }))
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Daily Cash Flow</h2>
+          <div className="text-xs text-gray-400">Read-only totals from reports, sales, purchases and payments</div>
+        </div>
+        <div className="flex bg-white border rounded-xl p-1">
+          <button onClick={()=>setView("daily")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="daily"?"bg-amber-500 text-white":"text-gray-500"}`}>Daily View</button>
+          <button onClick={()=>setView("total")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="total"?"bg-amber-500 text-white":"text-gray-500"}`}>Total View</button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {user.role==="admin"&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
+        {view==="daily" ? (
+          <Input label="Select Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
+        ) : (
+          <>
+            <Select label="Date Filter" value={dateMode} options={[
+              {value:"all",label:"All Time"},{value:"today",label:"Today"},{value:"monthly",label:"Monthly"},
+              {value:"custom",label:"Custom Date"},{value:"range",label:"Date Range"}
+            ]} onChange={e=>setDateMode(e.target.value)} />
+            {(dateMode==="custom"||dateMode==="range")&&<Input label={dateMode==="custom"?"Date":"From Date"} type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+            {dateMode==="range"&&<Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+          </>
+        )}
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          {view==="daily"&&<div className="text-sm font-black text-gray-700">Date: {dateLabel(selectedDate)}</div>}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {isSupervisor ? (
+              <>
+                <StatCard label="Cash Received" value={money(total.received)} icon="₹" color="green" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+                <StatCard label="Vehicle Charges" value={money(total.vehicleCharges)} icon="V" color="blue" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Material Payments" value={money(total.materialPayments)} icon="M" color="teal" />
+                <StatCard label="Equipment Payments" value={money(total.equipmentPayments)} icon="E" color="gray" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            ) : (
+              <>
+                <StatCard label="Total Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" />
+                <StatCard label="Customer Payments Received" value={money(total.customerPayments)} icon="₹" color="green" />
+                <StatCard label="Purchase Payments" value={money(total.purchasePayments)} icon="P" color="amber" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            )}
+          </div>
+
+          {data.history.length===0 ? <EmptyState icon="₹" text="No cash flow records for this filter" /> : (
+            <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+              <div className="p-4 border-b font-black text-gray-800">
+                {isSupervisor ? "Supervisor Cash Flow History" : "User Cash Flow History"}
+              </div>
+              <table className="w-full text-xs min-w-[760px]">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="p-3 text-left">Date</th>
+                    {user.role==="admin"&&<th className="p-3 text-left">Person</th>}
+                    {isSupervisor ? <>
+                      <th className="p-3 text-right">Received</th><th className="p-3 text-right">Worker Payment</th>
+                      <th className="p-3 text-right">Vehicle</th><th className="p-3 text-right">Materials</th>
+                      <th className="p-3 text-right">Equipment</th><th className="p-3 text-right">Others</th>
+                    </> : <>
+                      <th className="p-3 text-right">Sales Received</th><th className="p-3 text-right">Purchase Paid</th>
+                      <th className="p-3 text-right">Other Expense</th>
+                    </>}
+                    <th className="p-3 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.history.map((row,i)=><tr key={`${row.date}-${row.person}-${i}`} className="border-t">
+                    <td className="p-3 font-semibold">{dateLabel(row.date)}</td>
+                    {user.role==="admin"&&<td className="p-3">{row.person}</td>}
+                    {isSupervisor ? <>
+                      <td className="p-3 text-right text-green-700">{money(row.received)}</td>
+                      <td className="p-3 text-right">{money(row.workerPayments)}</td>
+                      <td className="p-3 text-right">{money(row.vehicleCharges)}</td>
+                      <td className="p-3 text-right">{money(row.materialPayments)}</td>
+                      <td className="p-3 text-right">{money(row.equipmentPayments)}</td>
+                      <td className="p-3 text-right">{money(row.otherExpenses)}</td>
+                    </> : <>
+                      <td className="p-3 text-right text-green-700">{money(row.customerPayments)}</td>
+                      <td className="p-3 text-right">{money(row.purchasePayments)}</td>
+                      <td className="p-3 text-right">{money(row.otherExpenses)}</td>
+                    </>}
+                    <td className={`p-3 text-right font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const NAV = {
   admin: [
+    { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
@@ -5054,6 +5233,7 @@ const NAV = {
     { id:"reports", label:"Reports", icon:"📈" },
   ],
   supervisor: [
+    { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"dailyreport", label:"Daily Report", icon:"📋" },
     { id:"mysitereports", label:"My Site Reports", icon:"📊" },
@@ -5064,6 +5244,7 @@ const NAV = {
     { id:"workplan", label:"Work Planning", icon:"📅" },
   ],
   user: [
+    { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
@@ -5160,14 +5341,13 @@ export default function App() {
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "sitereport": return <AdminSiteReport />;
-      case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
       case "workerreport2": return <AdminWorkerReport user={currentUser} />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
+      case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "users": return currentUser.role==="admin"?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
-      case "devices": return <DeviceManagement user={currentUser} />;
       case "devices": return <DeviceManagement user={currentUser} />;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
