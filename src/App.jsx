@@ -647,18 +647,18 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
     extraWork:[], extraMaterials:[],
     materialCost:"", laborCost:"", totalCost:"",
-    advancePaid:"", pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
+    payments:[], totalReceived:0, pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
   };
 
   const save = async (f) => {
     if (!f.customerName) return;
-    const item = await api("POST", "/sitework", {...f, addedBy:user.name});
+    const item = await api("POST", "/sitework", {...f, advancePaid:undefined, addedBy:user.name});
     if (item._id) { setSiteWorks(p=>[item,...p]); setShowAdd(false); }
   };
 
   const saveEdit = async (f) => {
-    await api("PUT", `/sitework/${f._id}`, f);
-    setSiteWorks(p=>p.map(x=>x._id===f._id?{...x,...f}:x));
+    const item = await api("PUT", `/sitework/${f._id}`, {...f, advancePaid:undefined});
+    setSiteWorks(p=>p.map(x=>x._id===f._id?item:x));
     setEditItem(null);
   };
 
@@ -699,7 +699,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       +(s.materialCost||0)>0?`Material : ${CURRENCY}${fmt(s.materialCost)}`:"",
       +(s.laborCost||0)>0?`Labour   : ${CURRENCY}${fmt(s.laborCost)}`:"",
       `TOTAL    : ${CURRENCY}${fmt(+(s.totalCost||s.totalAmount||0))}`,
-      `Advance  : ${CURRENCY}${fmt(s.advancePaid||0)}`,
+      `Received : ${CURRENCY}${fmt(s.totalReceived||s.paidAmount||0)}`,
       `PENDING  : ${CURRENCY}${fmt(s.pendingAmount||0)}`,
       "────────────────────────────────",
       `Payment  : ${s.paymentMode||"—"} | ${s.paymentStatus||"—"}`,
@@ -823,10 +823,18 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
                 {+(viewItem.materialCost||0)>0&&<div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.materialCost)}</span></div>}
                 {+(viewItem.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.laborCost)}</span></div>}
                 <div className="flex justify-between border-t pt-1 mt-1"><span className="font-black">TOTAL</span><span className="font-black text-green-700 text-lg">{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
-                <div className="flex justify-between"><span>Advance Paid</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewItem.advancePaid||0)}</span></div>
+                <div className="flex justify-between"><span>Total Amount Received</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewItem.totalReceived||viewItem.paidAmount||0)}</span></div>
                 <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
               </div>
             </SectionBox>
+            {(viewItem.payments||[]).length>0&&(
+              <SectionBox title="Payment History" icon="💳" color="blue">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Date</th><th className="text-left p-1">Source</th><th className="text-left p-1">Mode</th><th className="text-right p-1">Amount</th></tr></thead>
+                  <tbody>{(viewItem.payments||[]).map((p,i)=><tr key={i} className="border-t"><td className="p-1">{p.date||"—"}</td><td className="p-1">Site Work</td><td className="p-1">{p.mode||viewItem.paymentMode||"—"}</td><td className="p-1 text-right font-bold text-green-700">{CURRENCY}{fmt(p.amount)}</td></tr>)}</tbody>
+                </table>
+              </SectionBox>
+            )}
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Payment Mode</div><div className="font-bold">{viewItem.paymentMode||"—"}</div></div>
               <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
@@ -843,13 +851,17 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
   const [f, setF] = useState({...initData});
   const [ewForm, setEwForm] = useState({name:"",qty:"1",rate:""});
   const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:""});
+  const [payEntry, setPayEntry] = useState({date:today(), amount:"", mode:"Cash", remarks:""});
   const [saving, setSaving] = useState(false);
+  const receivedTotal = (items = f.payments || []) => items.reduce((a,p)=>a+(+(p.amount)||0),0);
+  const paymentStatusFor = (total, received) => Math.max(0,total-received)===0&&total>0 ? "paid" : received>0 ? "partial" : "pending";
 
   const updateCalc = (updates) => {
     const nf = {...f,...updates};
     const total = calcTotal(nf);
-    const pending = Math.max(0, total-(+(nf.advancePaid||0)));
-    setF({...nf, baseWorkCost:String(+(nf.workSize||0)*(+(nf.ratePerUnit||0))), totalCost:String(total), pendingAmount:String(pending)});
+    const received = receivedTotal(nf.payments || []);
+    const pending = Math.max(0, total-received);
+    setF({...nf, baseWorkCost:String(+(nf.workSize||0)*(+(nf.ratePerUnit||0))), totalCost:String(total), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(total, received)});
   };
 
   const addEW = () => {
@@ -857,16 +869,18 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const total = +(ewForm.qty||1)*(+(ewForm.rate)||0);
     const updated = [...(f.extraWork||[]), {...ewForm,total}];
     const totalCost = calcTotal({...f,extraWork:updated});
-    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
-    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received);
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
     setEwForm({name:"",qty:"1",rate:""});
   };
 
   const removeEW = (i) => {
     const updated = f.extraWork.filter((_,j)=>j!==i);
     const totalCost = calcTotal({...f,extraWork:updated});
-    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
-    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received);
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
   };
 
   const addEM = () => {
@@ -874,16 +888,27 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const total = +(emForm.qty||0)*(+(emForm.rate)||0);
     const updated = [...(f.extraMaterials||[]), {...emForm,total}];
     const totalCost = calcTotal({...f,extraMaterials:updated});
-    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
-    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received);
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
     setEmForm({name:"",qty:"",unit:"nos",rate:""});
   };
 
   const removeEM = (i) => {
     const updated = f.extraMaterials.filter((_,j)=>j!==i);
     const totalCost = calcTotal({...f,extraMaterials:updated});
-    const pending = Math.max(0, totalCost-(+(f.advancePaid||0)));
-    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), pendingAmount:String(pending)}));
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received);
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
+  };
+
+  const addPayment = () => {
+    if (!+(payEntry.amount || 0)) return;
+    const payments = [...(f.payments||[]), {...payEntry, amount:+payEntry.amount, source:"Site Work"}];
+    const total = calcTotal(f);
+    const received = receivedTotal(payments);
+    setF({...f, payments, totalReceived:received, pendingAmount:String(Math.max(0,total-received)), paymentStatus:paymentStatusFor(total, received)});
+    setPayEntry({date:today(), amount:"", mode:"Cash", remarks:""});
   };
 
   const handleSave = async () => {
@@ -1033,11 +1058,25 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
             <div className="flex justify-between border-t pt-1 font-black text-green-700 text-base"><span>TOTAL</span><span>{CURRENCY}{fmt(+(f.totalCost||0))}</span></div>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Input label="Advance Paid" type="number" value={f.advancePaid||""} onChange={e=>updateCalc({advancePaid:e.target.value})} placeholder="0" />
+            <div className="bg-green-50 rounded-xl p-2 border border-green-200 text-center">
+              <div className="text-xs text-gray-400">Total Amount Received</div>
+              <div className="font-black text-green-700">{CURRENCY}{fmt(+(f.totalReceived||receivedTotal())||0)}</div>
+            </div>
             <div className="bg-red-50 rounded-xl p-2 border border-red-200 text-center">
               <div className="text-xs text-gray-400">Pending</div>
               <div className="font-black text-red-600">{CURRENCY}{fmt(+(f.pendingAmount||0))}</div>
             </div>
+          </div>
+          <div className="bg-white rounded-xl border border-green-200 p-3 space-y-2">
+            <div className="text-xs font-black text-green-700">Site Payment Received</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={payEntry.date} onChange={e=>setPayEntry({...payEntry,date:e.target.value})} />
+              <Input label={`Amount (${CURRENCY})`} type="number" value={payEntry.amount} onChange={e=>setPayEntry({...payEntry,amount:e.target.value})} />
+              <Select label="Payment Mode" value={payEntry.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayEntry({...payEntry,mode:e.target.value})} />
+              <Input label="Remarks" value={payEntry.remarks} onChange={e=>setPayEntry({...payEntry,remarks:e.target.value})} />
+            </div>
+            <button type="button" onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold">+ Add Site Payment</button>
+            {(f.payments||[]).map((p,i)=><div key={i} className="flex justify-between text-xs border-t pt-1"><span>{p.date} · {p.mode}</span><span className="font-bold text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Select label="Payment Mode" value={f.paymentMode||"Cash"} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setF({...f,paymentMode:e.target.value})} />
@@ -1471,19 +1510,12 @@ function DailyReport({ user }) {
     // 3. Calculate site payment received & AUTO-UPDATE sitework
     const sitePayments = cleanPayments.filter(p=>p.type==="Site Payment Received");
     const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
-    if (totalReceived > 0 && form.siteId) {
-      const site = siteWorks.find(s=>s._id===form.siteId);
-      if (site) {
-        const newAdvance = +(site.advancePaid||0) + totalReceived;
-        const siteCost = +(site.totalCost||site.totalAmount||0);
-        const newPending = Math.max(0, siteCost - newAdvance);
-        const newStatus = newPending===0?"paid":newAdvance>0?"partial":"pending";
-        await api("PUT",`/sitework/${form.siteId}`,{advancePaid:String(newAdvance),pendingAmount:String(newPending),paymentStatus:newStatus});
-        setSiteWorks(p=>p.map(s=>s._id===form.siteId?{...s,advancePaid:String(newAdvance),pendingAmount:String(newPending),paymentStatus:newStatus}:s));
-      }
-    }
     const item = await api("POST","/dailyreport",{...form,payments:cleanPayments,totalPayments,totalReceived,addedBy:user.name});
-    if(item._id){ setReports(p=>[item,...p]); setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch(""); }
+    if(item._id){
+      setReports(p=>[item,...p]);
+      if (form.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
+      setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch("");
+    }
     else if (item.message) window.alert(item.message);
   };;
 
@@ -1768,7 +1800,7 @@ function DailyReport({ user }) {
             </SectionBox>
 
             <SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Worker Payment","Vehicle Charge","Material Payment","Equipment Payment","Other Expense"].filter(type=>type!=="Worker Payment")} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
+              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Vehicle Charge","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
               {payForm.type==="Material Payment"&&(
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
@@ -3471,46 +3503,70 @@ function WorkPlanning({ siteWorks, user }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
-  const emptyForm = { date:today(), siteName:"", task:"", workers:"", materials:"", note:"", status:"planned" };
+  const [editItem, setEditItem] = useState(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const emptyForm = { date:today(), siteName:"", plannedWork:"", supervisor:"", workersAllocated:"", materialsNeeded:"", estimatedCost:"", notes:"", status:"Planned" };
   const [form, setForm] = useState(emptyForm);
 
-  useEffect(()=>{ api("GET","/workplan").then(d=>{ setPlans(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
+  useEffect(()=>{ api("GET",`/workplan${showArchive?"?archive=true&role=admin":""}`).then(d=>{ setPlans(Array.isArray(d)?d:[]); setLoading(false); }); },[showArchive]);
 
   const save = async () => {
     if (!form.siteName) return;
-    const item = await api("POST","/workplan",{...form,addedBy:user.name});
-    if (item._id) { setPlans(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+    const payload = {...form, task:form.plannedWork, workers:form.workersAllocated, materials:form.materialsNeeded, note:form.notes, estimatedCost:+form.estimatedCost||0, addedBy:user.name};
+    const item = editItem ? await api("PUT",`/workplan/${editItem._id}`,payload) : await api("POST","/workplan",payload);
+    if (item._id) {
+      setPlans(p=>editItem?p.map(x=>x._id===item._id?item:x):[item,...p]);
+      setModal(false); setEditItem(null); setForm(emptyForm);
+    }
   };
 
   const updateStatus = async (id, status) => { await api("PUT",`/workplan/${id}`,{status}); setPlans(p=>p.map(x=>x._id===id?{...x,status}:x)); };
+  const openEdit = (p) => {
+    setEditItem(p);
+    setForm({
+      date:p.date||today(), siteName:p.siteName||p.site||"", plannedWork:p.plannedWork||p.task||"",
+      supervisor:p.supervisor||"", workersAllocated:p.workersAllocated||p.workers||"",
+      materialsNeeded:p.materialsNeeded||p.materials||"", estimatedCost:p.estimatedCost||"",
+      notes:p.notes||p.note||"", status:p.status||"Planned"
+    });
+    setModal(true);
+  };
 
   if (loading) return <Loader />;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
-        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
+        <div className="flex gap-2">
+          {user.role==="admin"&&<button onClick={()=>setShowArchive(!showArchive)} className="bg-gray-100 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold">{showArchive?"Current Plans":"Archive"}</button>}
+          <button onClick={()=>{setEditItem(null);setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
+        </div>
       </div>
       <div className="space-y-3">
         {plans.length===0&&<EmptyState icon="📅" text="No plans yet" />}
         {plans.map(p=>(
           <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1"><div className="font-black">{p.siteName}</div><div className="text-xs text-gray-400">📅 {p.date}{p.task?` · ${p.task}`:""}</div></div>
-              <Badge color={p.status==="done"?"green":p.status==="planned"?"blue":"amber"}>{p.status}</Badge>
+              <div className="flex-1"><div className="font-black">{p.siteName}</div><div className="text-xs text-gray-400">📅 {p.date}{(p.plannedWork||p.task)?` · ${p.plannedWork||p.task}`:""}</div><div className="text-xs text-gray-400">{p.supervisor?`Supervisor: ${p.supervisor} · `:""}Workers: {p.workersAllocated||p.workers||"—"}</div></div>
+              <Badge color={p.status==="Completed"?"green":p.status==="Cancelled"?"red":p.status==="In Progress"?"amber":"blue"}>{p.status}</Badge>
             </div>
-            <div className="mt-2 flex gap-1">{["planned","in-progress","done"].map(s=><button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
+            <div className="mt-2 flex gap-1">{["Planned","In Progress","Completed","Cancelled"].map(s=><button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
+            <button onClick={()=>openEdit(p)} className="mt-2 w-full bg-blue-50 text-blue-700 py-1.5 rounded-xl text-xs font-bold">Edit Plan</button>
           </div>
         ))}
       </div>
-      {modal&&<Modal title="Add Work Plan" onClose={()=>setModal(false)}>
+      {modal&&<Modal title={editItem?"Edit Work Plan":"Add Work Plan"} onClose={()=>{setModal(false);setEditItem(null);}}>
         <div className="space-y-3">
           <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
           <Input label="Site Name *" value={form.siteName} onChange={e=>setForm({...form,siteName:e.target.value})} placeholder="Site / project" />
-          <Textarea label="Tasks" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} />
-          <Input label="Workers" value={form.workers} onChange={e=>setForm({...form,workers:e.target.value})} />
-          <Input label="Materials" value={form.materials} onChange={e=>setForm({...form,materials:e.target.value})} />
-          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Add Plan</button>
+          <Textarea label="Planned Work" value={form.plannedWork} onChange={e=>setForm({...form,plannedWork:e.target.value})} />
+          <Input label="Supervisor" value={form.supervisor} onChange={e=>setForm({...form,supervisor:e.target.value})} />
+          <Input label="Workers Planned" value={form.workersAllocated} onChange={e=>setForm({...form,workersAllocated:e.target.value})} />
+          <Input label="Materials Needed" value={form.materialsNeeded} onChange={e=>setForm({...form,materialsNeeded:e.target.value})} />
+          <Input label={`Estimated Cost (${CURRENCY})`} type="number" value={form.estimatedCost} onChange={e=>setForm({...form,estimatedCost:e.target.value})} />
+          <Select label="Status" value={form.status} options={["Planned","In Progress","Completed","Cancelled"]} onChange={e=>setForm({...form,status:e.target.value})} />
+          <Textarea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">{editItem?"Save Plan":"Add Plan"}</button>
         </div>
       </Modal>}
     </div>
@@ -4160,11 +4216,15 @@ function AdminSiteReport() {
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
+    const siteWorkPayments = (selectedSite.payments||[]).map(p=>({...p,date:p.date||selectedSite.startDate,source:"Site Work"}));
     const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const supervisorSitePayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received").map(p=>({...p,source:"Supervisor Daily Report"}));
+    const paymentHistory = [...siteWorkPayments, ...supervisorSitePayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const allWorkerDetails = siteReportDocs.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date,siteName:r.siteName})));
     // Also get worker entry payments (salary paid via worker section)
     const allWorkerEntryPayments = siteReportDocs.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,paidTo:w.workerName,amount:+(w.paymentGiven||0),mode:"Cash",date:r.date,remarks:w.remarks||"",fromWorkerEntry:true})));
     const allWorkerPayments = allWorkerEntryPayments;
-    const clientPayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received");
+    const clientPayments = paymentHistory;
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
     const otherPayments = allPayments.filter(p=>p.type==="Other Expense");
@@ -4176,6 +4236,13 @@ function AdminSiteReport() {
     const siteCost = +(selectedSite.totalCost||selectedSite.totalAmount||0);
     const dynamicPending = Math.max(0, siteCost - totalReceived);
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const workerSummary = {
+      totalWorkers: new Set(allWorkerDetails.map(w=>w.workerName).filter(Boolean)).size,
+      totalArea: allWorkerDetails.reduce((a,w)=>a+(+(w.workArea)||0),0),
+      totalCost: allWorkerDetails.reduce((a,w)=>a+(+(w.amountEarned||w.salary)||0),0),
+      totalPaid: allWorkerDetails.reduce((a,w)=>a+(+(w.paymentGiven)||0),0),
+      totalPending: allWorkerDetails.reduce((a,w)=>a+(+(w.pending)||0),0),
+    };
     const allMats = sr.filter(r=>r.materialsUnloaded);
     const allExtra = sr.filter(r=>r.extraWorkDesc);
     const allComplaints = sr.filter(r=>r.complaints);
@@ -4213,6 +4280,30 @@ function AdminSiteReport() {
           <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(totalMatExp)}</div><div className="text-gray-400">🧱 Materials</div></div>
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center"><div className="font-black text-purple-700">{CURRENCY}{fmt(totalEquipExp)}</div><div className="text-gray-400">🔧 Equipment</div></div>
         </div>
+        {paymentHistory.length>0&&(
+          <SectionBox title="Payment History" icon="💳" color="blue">
+            {paymentHistory.map((p,i)=><div key={i} className="grid grid-cols-4 gap-2 text-xs py-1 border-b border-blue-100">
+              <span>{p.date||"—"}</span><span>{p.source}</span><span>{p.mode||p.paymentMode||"—"}</span><span className="text-right font-bold text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+            </div>)}
+          </SectionBox>
+        )}
+        {allWorkerDetails.length>0&&(
+          <SectionBox title="Worker Work Details" icon="👷" color="teal">
+            <div className="grid grid-cols-5 gap-1 text-xs">
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black">{workerSummary.totalWorkers}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black">{fmt(workerSummary.totalArea)}</div><div className="text-gray-400">Area</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(workerSummary.totalCost)}</div><div className="text-gray-400">Cost</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(workerSummary.totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(workerSummary.totalPending)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[760px]">
+                <thead><tr className="text-gray-400"><th className="text-left p-1">Date</th><th className="text-left p-1">Worker</th><th className="text-left p-1">Category</th><th className="text-right p-1">Area</th><th className="p-1">Unit</th><th className="text-right p-1">Rate</th><th className="text-right p-1">Amount</th><th className="text-right p-1">Paid</th><th className="text-right p-1">Pending</th></tr></thead>
+                <tbody>{allWorkerDetails.map((w,i)=><tr key={i} className="border-t"><td className="p-1">{w.date}</td><td className="p-1 font-bold">{w.workerName}</td><td className="p-1">{w.workCategory||"—"}</td><td className="p-1 text-right">{fmt(w.workArea)}</td><td className="p-1">{w.unit||"—"}</td><td className="p-1 text-right">{CURRENCY}{fmt(w.rate)}</td><td className="p-1 text-right text-green-700">{CURRENCY}{fmt(w.amountEarned||w.salary)}</td><td className="p-1 text-right text-blue-700">{CURRENCY}{fmt(w.paymentGiven)}</td><td className="p-1 text-right text-red-600">{CURRENCY}{fmt(w.pending)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </SectionBox>
+        )}
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
@@ -4793,10 +4884,9 @@ function AdminWorkerReport({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
-        {tab === "site" && <button onClick={() => setAddModal(true)} className="bg-amber-500 text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-amber-600">+ Add Worker Entry</button>}
       </div>
       <div className="flex gap-1 overflow-x-auto pb-1">
-        {[{ id: "production", label: "🏭 Production" }, { id: "site", label: "🏗️ Site Work" }, { id: "overall", label: "📊 Overall" }].map(t => (
+        {[{ id: "production", label: "🏭 Production Workers Report" }].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
         ))}
       </div>
@@ -4809,7 +4899,7 @@ function AdminWorkerReport({ user }) {
           </div>
         ))}
       </div>
-      {addModal&&(
+      {false&&addModal&&(
         <Modal title="Add Worker Entry" onClose={()=>setAddModal(false)}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
@@ -5160,46 +5250,36 @@ function DailyCashFlow({ user, allUsers }) {
           </div>
 
           {data.history.length===0 ? <EmptyState icon="₹" text="No cash flow records for this filter" /> : (
-            <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
-              <div className="p-4 border-b font-black text-gray-800">
-                {isSupervisor ? "Supervisor Cash Flow History" : "User Cash Flow History"}
-              </div>
-              <table className="w-full text-xs min-w-[760px]">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr>
-                    <th className="p-3 text-left">Date</th>
-                    {user.role==="admin"&&<th className="p-3 text-left">Person</th>}
-                    {isSupervisor ? <>
-                      <th className="p-3 text-right">Received</th><th className="p-3 text-right">Worker Payment</th>
-                      <th className="p-3 text-right">Vehicle</th><th className="p-3 text-right">Materials</th>
-                      <th className="p-3 text-right">Equipment</th><th className="p-3 text-right">Others</th>
-                    </> : <>
-                      <th className="p-3 text-right">Sales Received</th><th className="p-3 text-right">Purchase Paid</th>
-                      <th className="p-3 text-right">Other Expense</th>
-                    </>}
-                    <th className="p-3 text-right">Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.history.map((row,i)=><tr key={`${row.date}-${row.person}-${i}`} className="border-t">
-                    <td className="p-3 font-semibold">{dateLabel(row.date)}</td>
-                    {user.role==="admin"&&<td className="p-3">{row.person}</td>}
-                    {isSupervisor ? <>
-                      <td className="p-3 text-right text-green-700">{money(row.received)}</td>
-                      <td className="p-3 text-right">{money(row.workerPayments)}</td>
-                      <td className="p-3 text-right">{money(row.vehicleCharges)}</td>
-                      <td className="p-3 text-right">{money(row.materialPayments)}</td>
-                      <td className="p-3 text-right">{money(row.equipmentPayments)}</td>
-                      <td className="p-3 text-right">{money(row.otherExpenses)}</td>
-                    </> : <>
-                      <td className="p-3 text-right text-green-700">{money(row.customerPayments)}</td>
-                      <td className="p-3 text-right">{money(row.purchasePayments)}</td>
-                      <td className="p-3 text-right">{money(row.otherExpenses)}</td>
-                    </>}
-                    <td className={`p-3 text-right font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</td>
-                  </tr>)}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              {data.history.map((row,i)=>(
+                <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
+                  <div className="flex justify-between gap-2">
+                    <div><div className="font-black">{dateLabel(row.date)}{user.role==="admin"?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
+                    <div className={`font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</div>
+                  </div>
+                  {isSupervisor ? (
+                    <>
+                      <SectionBox title="Cash Received" icon="₹" color="green">
+                        {(row.receivedDetails||[]).length===0?<div className="text-xs text-gray-400">No cash received</div>:(row.receivedDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.site||"—"}</span><span>{d.source}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                      </SectionBox>
+                      <SectionBox title="Cash Spent" icon="−" color="red">
+                        {(row.spentDetails||[]).length===0?<div className="text-xs text-gray-400">No cash spent</div>:(row.spentDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details||"—"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                      </SectionBox>
+                    </>
+                  ) : (
+                    <>
+                      <SectionBox title="Sales" icon="₹" color="green">
+                        {(row.salesDetails||[]).length===0?<div className="text-xs text-gray-400">No sales</div>:(row.salesDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.customer||"—"}</span><span>{d.item||"—"}</span><span className="text-right font-bold">{money(d.amountReceived)}</span></div>)}
+                      </SectionBox>
+                      <SectionBox title="Purchases & Expenses" icon="−" color="red">
+                        {(row.purchaseDetails||[]).map((d,j)=><div key={`p${j}`} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.supplier||"—"}</span><span>{d.material||"—"}</span><span className="text-right font-bold">{money(d.amountPaid)}</span></div>)}
+                        {(row.spentDetails||[]).map((d,j)=><div key={`e${j}`} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details||"—"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                        {!(row.purchaseDetails||[]).length&&!(row.spentDetails||[]).length&&<div className="text-xs text-gray-400">No purchases or expenses</div>}
+                      </SectionBox>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </>
