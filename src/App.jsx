@@ -4447,7 +4447,8 @@ function AdminWorkerReport({ user }) {
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("production");
+  const isSupervisorLedger = user?.role === "supervisor";
+  const [tab, setTab] = useState(isSupervisorLedger ? "site" : "production");
   const [siteSubTab, setSiteSubTab] = useState("daily");
   const [report, setReport] = useState(null);
   const [overall, setOverall] = useState(null);
@@ -4467,6 +4468,18 @@ function AdminWorkerReport({ user }) {
       setLoading(false);
     });
   }, []);
+
+  const permittedSiteWorks = isSupervisorLedger
+    ? siteWorks.filter(s => s.addedBy === user?.name)
+    : siteWorks;
+  const permittedWorkerNames = new Set(permittedSiteWorks.flatMap(s => s.selectedWorkers || []));
+  const visibleWorkers = workers.filter(w => {
+    if (workerTypeOf(w) !== (tab === "production" ? "Production Worker" : "Site Worker")) return false;
+    if (!isActiveWorker(w)) return false;
+    if (isSupervisorLedger && !permittedWorkerNames.has(w.name)) return false;
+    if (search && !w.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   const queryParams = () => {
     const q = [];
@@ -4607,7 +4620,12 @@ function AdminWorkerReport({ user }) {
           <Input label="Color" value={filters.color} onChange={e => setFilters({ ...filters, color: e.target.value })} placeholder="Filter by color" />
         </div>
       )}
-      {tab === "site" && <Input label="Site Name" value={filters.site} onChange={e => setFilters({ ...filters, site: e.target.value })} placeholder="Filter by site" />}
+      {tab === "site" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Site Name" value={filters.site} onChange={e => setFilters({ ...filters, site: e.target.value })} placeholder="Filter by site" />
+          <Input label="Work Category" value={filters.item} onChange={e => setFilters({ ...filters, item: e.target.value })} placeholder="Filter by category" />
+        </div>
+      )}
     </div>
   );
 
@@ -4686,6 +4704,7 @@ function AdminWorkerReport({ user }) {
       if (filters.item && !(h.workCategory || "").toLowerCase().includes(filters.item.toLowerCase())) return false;
       return true;
     });
+    const dailyAreaSum = filteredDailyHistory.reduce((sum, h) => sum + (+(h.workArea) || 0), 0);
     const dailyEarnedSum = filteredDailyHistory.reduce((sum, h) => sum + (h.amountEarned || 0), 0);
     const dailyPaidSum = filteredDailyHistory.reduce((sum, h) => sum + (h.paymentGiven || 0), 0);
     const dailyPendingSum = Math.max(0, dailyEarnedSum - dailyPaidSum);
@@ -4739,7 +4758,11 @@ function AdminWorkerReport({ user }) {
 
             {siteSubTab === "daily" && (
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-blue-700">{fmt(dailyAreaSum)}</div>
+                    <div className="text-xs text-gray-400">Total Area</div>
+                  </div>
                   <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
                     <div className="text-lg font-black text-green-700">{CURRENCY}{fmt(dailyEarnedSum)}</div>
                     <div className="text-xs text-gray-400">Total Earned</div>
@@ -4761,6 +4784,7 @@ function AdminWorkerReport({ user }) {
                       <thead>
                         <tr className="bg-gray-50 text-gray-500">
                           <th className="p-2 text-left">Date</th>
+                          <th className="p-2 text-left">Worker</th>
                           <th className="p-2 text-left">Site Name</th>
                           <th className="p-2 text-left">Category</th>
                           <th className="p-2 text-right">Area</th>
@@ -4773,11 +4797,12 @@ function AdminWorkerReport({ user }) {
                       </thead>
                       <tbody>
                         {filteredDailyHistory.length === 0 && (
-                          <tr><td colSpan="9" className="p-4 text-center text-gray-400">No daily entries found</td></tr>
+                          <tr><td colSpan="10" className="p-4 text-center text-gray-400">No daily entries found</td></tr>
                         )}
                         {filteredDailyHistory.map((h, i) => (
                           <tr key={i} className="border-t">
                             <td className="p-2">{h.date}</td>
+                            <td className="p-2 font-semibold">{h.workerName || report.worker.name}</td>
                             <td className="p-2 font-bold">{h.siteName}</td>
                             <td className="p-2">{h.workCategory || "—"}</td>
                             <td className="p-2 text-right">{h.workArea || 0}</td>
@@ -4836,6 +4861,18 @@ function AdminWorkerReport({ user }) {
                     <span>{CURRENCY}{fmt(report.worker.totalPending)}</span>
                   </div>
                 </div>
+                <div className="overflow-x-auto border-t pt-3">
+                  <div className="text-xs font-bold text-gray-500 mb-2">Full Daily History</div>
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Site</th><th className="p-2 text-left">Category</th><th className="p-2 text-right">Area</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th></tr></thead>
+                    <tbody>
+                      {filteredDailyHistory.length === 0 && <tr><td colSpan="8" className="p-4 text-center text-gray-400">No history found</td></tr>}
+                      {filteredDailyHistory.map((h, i) => (
+                        <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-bold">{h.siteName}</td><td className="p-2">{h.workCategory || "—"}</td><td className="p-2 text-right">{h.workArea || 0}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td><td className="p-2 text-right text-green-700">{CURRENCY}{fmt(h.amountEarned)}</td><td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -4847,6 +4884,7 @@ function AdminWorkerReport({ user }) {
                     <thead>
                       <tr className="bg-gray-50 text-gray-500">
                         <th className="p-2 text-left">Site Name</th>
+                        <th className="p-2 text-left">Worker Name</th>
                         <th className="p-2 text-left">Category</th>
                         <th className="p-2 text-right">Total Area</th>
                         <th className="p-2 text-right">Total Earned</th>
@@ -4856,11 +4894,12 @@ function AdminWorkerReport({ user }) {
                     </thead>
                     <tbody>
                       {(report.sites || []).length === 0 && (
-                        <tr><td colSpan="6" className="p-4 text-center text-gray-400">No site data found</td></tr>
+                        <tr><td colSpan="7" className="p-4 text-center text-gray-400">No site data found</td></tr>
                       )}
                       {(report.sites || []).map((s, i) => (
                         <tr key={i} onClick={() => setSelectedSite(s.siteName)} className="border-t hover:bg-amber-50 cursor-pointer transition-all">
                           <td className="p-2 font-bold text-blue-600 underline">{s.siteName}</td>
+                          <td className="p-2 font-semibold">{report.worker.name}</td>
                           <td className="p-2">{s.workCategory || "—"}</td>
                           <td className="p-2 text-right">{s.totalArea || 0}</td>
                           <td className="p-2 text-right font-semibold text-green-700">{CURRENCY}{fmt(s.totalEarned)}</td>
@@ -4935,16 +4974,17 @@ function AdminWorkerReport({ user }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
+        <h2 className="text-xl font-black text-gray-900">{isSupervisorLedger ? "Supervisor Worker Ledger" : "Worker Reports"}</h2>
       </div>
-      <div className="flex gap-1 overflow-x-auto pb-1">
+      {!isSupervisorLedger && <div className="flex gap-1 overflow-x-auto pb-1">
         {[{ id: "production", label: "🏭 Production Worker Ledger" }, { id: "site", label: "👷 Site Worker Ledger" }].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
         ))}
-      </div>
+      </div>}
       <FilterBar />
       <div className="space-y-2">
-        {workers.filter(w => workerTypeOf(w)===(tab==="production"?"Production Worker":"Site Worker") && isActiveWorker(w) && (!search || w.name.toLowerCase().includes(search.toLowerCase()))).map(w => (
+        {visibleWorkers.length === 0 && <EmptyState icon="ðŸ‘·" text="No workers found" />}
+        {visibleWorkers.map(w => (
           <div key={w._id} onClick={() => loadReport(w.name)} className="bg-white rounded-2xl border p-4 cursor-pointer hover:border-amber-300">
             <div className="flex justify-between"><div className="font-black">{w.name}</div><span className="text-gray-300">›</span></div>
             <div className="text-xs text-gray-400">{w.role} · {w.paymentType || "day"}</div>
@@ -5369,6 +5409,7 @@ const NAV = {
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"dailyreport", label:"Daily Report", icon:"📋" },
     { id:"mysitereports", label:"My Site Reports", icon:"📊" },
+    { id:"workerreport2", label:"Worker Ledger", icon:"W" },
     { id:"workerreport", label:"Site Report", icon:"📝" },
     { id:"workers", label:"Workers", icon:"👷" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
@@ -5525,3 +5566,6 @@ export default function App() {
     </div>
   );
 }
+
+
+
