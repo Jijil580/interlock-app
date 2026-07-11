@@ -5,6 +5,12 @@ const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
+const directSitePaymentRows = (site, dailyReceived = 0) => {
+  const payments = (site?.payments || []).map(p => ({ ...p, date: p.date || site?.startDate, source: "Site Work" }));
+  if (payments.length) return payments;
+  const legacy = Math.max(0, (+(site?.totalReceived ?? site?.paidAmount ?? 0) || 0) - (+(dailyReceived) || 0));
+  return legacy > 0 ? [{ date: site?.startDate || today(), amount: legacy, mode: site?.paymentMode || "Cash", source: "Initial Site Work" }] : [];
+};
 const workerTypeOf = (w) => {
   const raw = String(w?.workerType || w?.workerCategory || "").toLowerCase();
   if (raw.includes("production")) return "Production Worker";
@@ -4240,9 +4246,10 @@ function AdminSiteReport() {
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
-    const siteWorkPayments = (selectedSite.payments||[]).map(p=>({...p,date:p.date||selectedSite.startDate,source:"Site Work"}));
     const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const supervisorSitePayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received").map(p=>({...p,source:"Supervisor Daily Report"}));
+    const dailySiteReceived = supervisorSitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const siteWorkPayments = directSitePaymentRows(selectedSite, dailySiteReceived);
     const paymentHistory = [...siteWorkPayments, ...supervisorSitePayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
     const allWorkerDetails = siteReportDocs.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date,siteName:r.siteName})));
     // Also get worker entry payments (salary paid via worker section)
@@ -4472,7 +4479,10 @@ function AdminWorkerReport({ user }) {
   const permittedSiteWorks = isSupervisorLedger
     ? siteWorks.filter(s => s.addedBy === user?.name)
     : siteWorks;
-  const permittedWorkerNames = new Set(permittedSiteWorks.flatMap(s => s.selectedWorkers || []));
+  const supervisorReportWorkerNames = isSupervisorLedger
+    ? dailyReports.filter(r => r.addedBy === user?.name).flatMap(r => (r.workerEntries || []).map(w => w.workerName).filter(Boolean))
+    : [];
+  const permittedWorkerNames = new Set([...permittedSiteWorks.flatMap(s => s.selectedWorkers || []), ...supervisorReportWorkerNames]);
   const visibleWorkers = workers.filter(w => {
     if (workerTypeOf(w) !== (tab === "production" ? "Production Worker" : "Site Worker")) return false;
     if (!isActiveWorker(w)) return false;
@@ -5062,7 +5072,9 @@ function SupervisorSiteReport({ user }) {
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
-    const clientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
+    const dailyClientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
+    const siteWorkPayments = directSitePaymentRows(selectedSite, dailyClientPayments.reduce((a,p)=>a+(+(p.amount)||0),0));
+    const clientPayments = [...siteWorkPayments, ...dailyClientPayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
     const workerPayments = sr.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,amount:+(w.paymentGiven||0),mode:w.paymentMode||"Cash",date:r.date,remarks:w.remarks||""})));
     const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
     const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
@@ -5185,13 +5197,14 @@ function SupervisorSiteReport({ user }) {
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-gray-400">Running</div></div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-gray-400">Completed</div></div>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0))}</div><div className="text-gray-400">Total Rcvd</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+directSitePaymentRows(s, getSiteReports(s).reduce((x,r)=>x+(+(r.totalReceived||0)),0)).reduce((x,p)=>x+(+(p.amount)||0),0),0)+dailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0))}</div><div className="text-gray-400">Total Rcvd</div></div>
       </div>
       <div className="space-y-3">
         {filteredSites.length===0&&<EmptyState icon="📊" text="No sites found" />}
         {filteredSites.map(s=>{
           const sr = getSiteReports(s);
-          const received = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+          const dailyReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+          const received = dailyReceived + directSitePaymentRows(s, dailyReceived).reduce((a,p)=>a+(+(p.amount)||0),0);
           const siteCost = +(s.totalCost||s.totalAmount||0);
           const pending = Math.max(0, siteCost - received);
           return (
