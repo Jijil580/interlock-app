@@ -3624,8 +3624,9 @@ function Stock({ stock, setStock, user }) {
 
   const groupedStock = Object.values((stock || []).reduce((acc, s) => {
     const prefix = s.category ? `${s.category} - ` : "";
-    const cleanName = prefix && String(s.name || "").startsWith(prefix) ? String(s.name || "").slice(prefix.length) : String(s.name || "");
-    const key = `${String(s.category || "").toLowerCase()}|${cleanName.toLowerCase()}|${String(s.unit || "").toLowerCase()}`;
+    const rawName = String(s.name || "").trim();
+    const cleanName = prefix && rawName.toLowerCase().startsWith(prefix.toLowerCase()) ? rawName.slice(prefix.length).trim() : rawName;
+    const key = `${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.unit || "").trim().toLowerCase()}`;
     if (!acc[key]) acc[key] = { ...s, name: cleanName || s.name, quantity: 0, _ids: [], duplicateCount: 0 };
     acc[key].quantity += +(s.quantity) || 0;
     acc[key]._ids.push(s._id);
@@ -5595,6 +5596,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
