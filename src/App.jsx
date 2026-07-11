@@ -5,6 +5,12 @@ const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
+const workerTypeOf = (w) => {
+  const raw = String(w?.workerType || w?.workerCategory || "").toLowerCase();
+  if (raw.includes("production")) return "Production Worker";
+  return "Site Worker";
+};
+const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "inactive";
 
 async function api(method, path, body) {
   try {
@@ -953,7 +959,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
 
         <SectionBox title="Select Workers" icon="👷" color="teal">
           <div className="flex flex-wrap gap-1">
-            {workers.map(w=>(
+            {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)).map(w=>(
               <button key={w._id} type="button" onClick={()=>{
                 const sel=f.selectedWorkers||[];
                 setF({...f,selectedWorkers:sel.includes(w.name)?sel.filter(x=>x!==w.name):[...sel,w.name]});
@@ -961,7 +967,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
                 {w.name}
               </button>
             ))}
-            {workers.length===0&&<div className="text-xs text-gray-400">No workers — add from Workers menu first</div>}
+            {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)).length===0&&<div className="text-xs text-gray-400">No active site workers — add from Workers menu first</div>}
           </div>
         </SectionBox>
 
@@ -1522,6 +1528,11 @@ function DailyReport({ user }) {
   const openAdd = (site) => {
     setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"});
     setSiteSearch(site.customerName);
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
     setAddModal(true);
   };
 
@@ -1704,7 +1715,10 @@ function DailyReport({ user }) {
               <input list="site-list" value={siteSearch} onChange={e=>{
                 setSiteSearch(e.target.value);
                 const found=mySites.find(s=>s.customerName===e.target.value);
-                if(found) setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,siteStatus:found.status||"running"}));
+                if(found) {
+                  setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,siteStatus:found.status||"running"}));
+                  setWorkerEntry(w=>({...w,workerName:""}));
+                }
                 else setForm(f=>({...f,siteName:e.target.value,siteId:""}));
               }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
               <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
@@ -1728,8 +1742,11 @@ function DailyReport({ user }) {
               <div className="space-y-2">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
-                  <input list="worker-list" value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} placeholder="Select or type worker name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50" />
-                  <datalist id="worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
+                  <select value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
+                    <option value="">Select assigned worker</option>
+                    {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(mySites.find(s=>s._id===form.siteId)?.selectedWorkers||[]).includes(w.name)).map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+                  </select>
+                  {form.siteId&&workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(mySites.find(s=>s._id===form.siteId)?.selectedWorkers||[]).includes(w.name)).length===0&&<div className="text-xs text-red-500 mt-1">No site workers assigned to this site.</div>}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Select label="Work Category" value={workerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setWorkerEntry({...workerEntry,workCategory:e.target.value})} />
@@ -2569,7 +2586,7 @@ function Workers({ user }) {
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
-  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site", workLocationType:"Outside Site", paymentType:"Per Day", customPaymentType:"", rateAmount:"" };
+  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site Worker", workerType:"Site Worker", status:"Active", workLocationType:"Outside Site", paymentType:"Per Day", customPaymentType:"", rateAmount:"" };
   const [workerForm, setWorkerForm] = useState(emptyForm);
   const canEdit = user.role==="admin"||user.role==="user";
 
@@ -2584,13 +2601,15 @@ function Workers({ user }) {
 
   const addWorker = async () => {
     if (!workerForm.name) return;
-    const w = await api("POST","/workers",{...workerForm,rateAmount:+workerForm.rateAmount||0,addedBy:user.name});
+    const type = workerForm.workerType || workerForm.workerCategory || "Site Worker";
+    const w = await api("POST","/workers",{...workerForm,workerType:type,workerCategory:type,rateAmount:+workerForm.rateAmount||0,addedBy:user.name});
     if (w._id) { setWorkers(p=>[...p,w]); setAddModal(false); setWorkerForm(emptyForm); }
   };
 
   const saveEdit = async () => {
-    await api("PUT",`/workers/${editModal._id}`,editModal);
-    setWorkers(p=>p.map(x=>x._id===editModal._id?{...x,...editModal}:x));
+    const type = editModal.workerType || editModal.workerCategory || "Site Worker";
+    const saved = await api("PUT",`/workers/${editModal._id}`,{...editModal,workerType:type,workerCategory:type});
+    setWorkers(p=>p.map(x=>x._id===editModal._id?saved:x));
     if (selectedWorker?._id===editModal._id) setSelectedWorker({...selectedWorker,...editModal});
     setEditModal(null);
   };
@@ -2623,6 +2642,7 @@ function Workers({ user }) {
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="font-black text-xl text-gray-900 mb-2">👷 {selectedWorker.name}</div>
+          <div className="flex gap-1 mb-2"><Badge color={workerTypeOf(selectedWorker)==="Production Worker"?"purple":"teal"}>{workerTypeOf(selectedWorker)}</Badge><Badge color={isActiveWorker(selectedWorker)?"green":"red"}>{selectedWorker.status||"Active"}</Badge></div>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{selectedWorker.role}</div></div>
             <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{selectedWorker.phone||"—"}</div></div>
@@ -2648,6 +2668,8 @@ function Workers({ user }) {
             <Input label="Phone" type="tel" value={editModal.phone||""} onChange={e=>setEditModal({...editModal,phone:e.target.value})} />
             <Input label="Address" value={editModal.address||""} onChange={e=>setEditModal({...editModal,address:e.target.value})} />
             <Select label="Role" value={editModal.role||"Labourer"} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setEditModal({...editModal,role:e.target.value})} />
+            <Select label="Worker Type" value={editModal.workerType||editModal.workerCategory||"Site Worker"} options={["Site Worker","Production Worker"]} onChange={e=>setEditModal({...editModal,workerType:e.target.value,workerCategory:e.target.value})} />
+            <Select label="Status" value={editModal.status||"Active"} options={["Active","Inactive"]} onChange={e=>setEditModal({...editModal,status:e.target.value})} />
             <Select label="Payment Type" value={editModal.paymentType||"Per Day"} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setEditModal({...editModal,paymentType:e.target.value})} />
             <Input label={`Rate (${CURRENCY})`} type="number" value={editModal.rateAmount||""} onChange={e=>setEditModal({...editModal,rateAmount:+e.target.value})} />
             <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-2.5 rounded-xl font-bold">Save Changes</button>
@@ -2673,7 +2695,7 @@ function Workers({ user }) {
         {workers.map(w=>(
           <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
             <div className="flex items-center justify-between">
-              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="text-xs text-amber-600 font-semibold">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
+              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="flex gap-1 mt-1"><Badge color={workerTypeOf(w)==="Production Worker"?"purple":"teal"}>{workerTypeOf(w)}</Badge><Badge color={isActiveWorker(w)?"green":"red"}>{w.status||"Active"}</Badge></div><div className="text-xs text-amber-600 font-semibold mt-1">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
               <span className="text-gray-300 text-xl">›</span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
@@ -2690,6 +2712,8 @@ function Workers({ user }) {
           <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
           <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
           <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
+          <Select label="Worker Type" value={workerForm.workerType} options={["Site Worker","Production Worker"]} onChange={e=>setWorkerForm({...workerForm,workerType:e.target.value,workerCategory:e.target.value})} />
+          <Select label="Status" value={workerForm.status} options={["Active","Inactive"]} onChange={e=>setWorkerForm({...workerForm,status:e.target.value})} />
           <Select label="Payment Type" value={workerForm.paymentType} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value})} />
           {workerForm.paymentType==="Other"&&<Input label="Custom Type" value={workerForm.customPaymentType} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load" />}
           <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} />
@@ -3100,6 +3124,7 @@ function ProductionSite({ user }) {
 
   const calcTotal = () => +(form.producedQty || 0) * +(form.productionRate || 0);
   const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
+  const productionWorkers = workers.filter(w => workerTypeOf(w)==="Production Worker" && isActiveWorker(w));
 
   const selectWorker = (id) => {
     const w = workers.find(x => x._id === id);
@@ -3328,8 +3353,9 @@ function ProductionSite({ user }) {
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name *</label>
                 <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.workerId} onChange={e => selectWorker(e.target.value)}>
                   <option value="">-- Select Worker --</option>
-                  {workers.map(w => <option key={w._id} value={w._id}>{w.name} ({w.role})</option>)}
+                  {productionWorkers.map(w => <option key={w._id} value={w._id}>{w.name} ({w.role})</option>)}
                 </select>
+                {productionWorkers.length===0&&<div className="text-xs text-red-500 mt-1">No active production workers found.</div>}
               </div>
             </SectionBox>
 
@@ -4703,11 +4729,11 @@ function AdminWorkerReport({ user }) {
           <>
             <div className="bg-white rounded-2xl border p-4">
               <div className="font-black text-xl">🏗️ {report.worker.name}</div>
-              <div className="text-xs text-gray-400 font-semibold uppercase tracking-wider text-amber-600 mt-1">Site Work Worker Report</div>
+              <div className="text-xs text-gray-400 font-semibold uppercase tracking-wider text-amber-600 mt-1">Site Worker Ledger</div>
             </div>
 
             <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-              {[{ id: "daily", label: "Daily View" }, { id: "total", label: "Total View" }, { id: "sitewise", label: "Site-wise View" }, { id: "datewise", label: "Date-wise View" }].map(sub => (
+              {[{ id: "daily", label: "Daily View" }, { id: "monthly", label: "Monthly View" }, { id: "sitewise", label: "Site-wise View" }, { id: "total", label: "Overall View" }].map(sub => (
                 <button key={sub.id} onClick={() => { setSiteSubTab(sub.id); setSelectedSite(null); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${siteSubTab === sub.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}>{sub.label}</button>
               ))}
             </div>
@@ -4769,6 +4795,33 @@ function AdminWorkerReport({ user }) {
                 </div>
               </div>
             )}
+
+            {siteSubTab === "monthly" && (() => {
+              const monthMap = filteredDailyHistory.reduce((acc,h)=>{
+                const m = (h.date||"").slice(0,7) || "Unknown";
+                if (!acc[m]) acc[m] = { days:new Set(), area:0, earned:0, paid:0 };
+                acc[m].days.add(h.date);
+                acc[m].area += +(h.workArea)||0;
+                acc[m].earned += +(h.amountEarned)||0;
+                acc[m].paid += +(h.paymentGiven)||0;
+                return acc;
+              },{});
+              return <div className="space-y-3">
+                {Object.entries(monthMap).length===0&&<EmptyState icon="📅" text="No monthly entries found" />}
+                {Object.entries(monthMap).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,m])=>(
+                  <div key={month} className="bg-white rounded-2xl border p-4 shadow-sm">
+                    <div className="font-black mb-2">{month}</div>
+                    <div className="grid grid-cols-5 gap-1 text-xs">
+                      <div className="bg-gray-50 rounded-lg p-1.5 text-center"><div className="font-black">{m.days.size}</div><div className="text-gray-400">Days</div></div>
+                      <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{fmt(m.area)}</div><div className="text-gray-400">Sqft</div></div>
+                      <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(m.earned)}</div><div className="text-gray-400">Earnings</div></div>
+                      <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(m.paid)}</div><div className="text-gray-400">Payments</div></div>
+                      <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(Math.max(0,m.earned-m.paid))}</div><div className="text-gray-400">Pending</div></div>
+                    </div>
+                  </div>
+                ))}
+              </div>;
+            })()}
 
             {siteSubTab === "total" && (
               <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-4">
@@ -4886,13 +4939,13 @@ function AdminWorkerReport({ user }) {
         <h2 className="text-xl font-black text-gray-900">👷 Worker Reports</h2>
       </div>
       <div className="flex gap-1 overflow-x-auto pb-1">
-        {[{ id: "production", label: "🏭 Production Workers Report" }].map(t => (
+        {[{ id: "production", label: "🏭 Production Worker Ledger" }, { id: "site", label: "👷 Site Worker Ledger" }].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
         ))}
       </div>
       <FilterBar />
       <div className="space-y-2">
-        {workers.filter(w => !search || w.name.toLowerCase().includes(search.toLowerCase())).map(w => (
+        {workers.filter(w => workerTypeOf(w)===(tab==="production"?"Production Worker":"Site Worker") && isActiveWorker(w) && (!search || w.name.toLowerCase().includes(search.toLowerCase()))).map(w => (
           <div key={w._id} onClick={() => loadReport(w.name)} className="bg-white rounded-2xl border p-4 cursor-pointer hover:border-amber-300">
             <div className="flex justify-between"><div className="font-black">{w.name}</div><span className="text-gray-300">›</span></div>
             <div className="text-xs text-gray-400">{w.role} · {w.paymentType || "day"}</div>
