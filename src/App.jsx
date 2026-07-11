@@ -3078,7 +3078,7 @@ function Purchases({ user }) {
 }
 
 // ─── PRODUCTION SITE ──────────────────────────────────────────────────────────
-function ProductionSite({ user }) {
+function ProductionSite({ user, setStock }) {
   const [entries, setEntries] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [interlockTypes, setInterlockTypes] = useState([]);
@@ -3167,6 +3167,7 @@ function ProductionSite({ user }) {
       setModal(false);
       setForm(emptyForm);
       api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
     } else setSaveError(item.message || "Failed to save");
   };
 
@@ -3620,6 +3621,18 @@ function Stock({ stock, setStock, user }) {
 
   const del = async (id) => { if(!window.confirm("Delete?")) return; await api("DELETE",`/stock/${id}`); setStock(p=>p.filter(x=>x._id!==id)); };
 
+
+  const groupedStock = Object.values((stock || []).reduce((acc, s) => {
+    const prefix = s.category ? `${s.category} - ` : "";
+    const cleanName = prefix && String(s.name || "").startsWith(prefix) ? String(s.name || "").slice(prefix.length) : String(s.name || "");
+    const key = `${String(s.category || "").toLowerCase()}|${cleanName.toLowerCase()}|${String(s.unit || "").toLowerCase()}`;
+    if (!acc[key]) acc[key] = { ...s, name: cleanName || s.name, quantity: 0, _ids: [], duplicateCount: 0 };
+    acc[key].quantity += +(s.quantity) || 0;
+    acc[key]._ids.push(s._id);
+    acc[key].duplicateCount += 1;
+    acc[key].price = acc[key].price || s.price;
+    return acc;
+  }, {}));
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -3627,11 +3640,11 @@ function Stock({ stock, setStock, user }) {
         {user.role==="admin"&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
       <div className="space-y-2">
-        {stock.length===0&&<EmptyState icon="📦" text="No stock items" />}
-        {stock.map(s=>(
+        {groupedStock.length===0&&<EmptyState icon="BOX" text="No stock items" />}
+        {groupedStock.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}</div>}<div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}</div>
-            {user.role==="admin"&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}</div>}<div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
+            {user.role==="admin"&&s.duplicateCount===1&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
           </div>
         ))}
       </div>
@@ -3773,7 +3786,7 @@ function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, cus
 }
 
 // ─── SALES ────────────────────────────────────────────────────────────────────
-function Sales({ sales, setSales, stock, user }) {
+function Sales({ sales, setSales, stock, setStock, user }) {
   const [modal, setModal] = useState(false);
   const [interlockTypes, setInterlockTypes] = useState([]);
   const [customerMaster, setCustomerMaster] = useState([]);
@@ -3883,6 +3896,7 @@ function Sales({ sales, setSales, stock, user }) {
       setCustomerPreview(null);
       setSelectedCustomerId("");
       api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
     } else {
       setSaveError(item.message || "Failed to save sale");
     }
@@ -5518,7 +5532,7 @@ export default function App() {
       case "masterdata": return <MasterData />;
       case "workers": return <Workers user={currentUser} />;
       case "suppliers": return <Suppliers user={currentUser} />;
-      case "productionsite": return <ProductionSite user={currentUser} />;
+      case "productionsite": return <ProductionSite user={currentUser} setStock={setStock} />;
       case "attendance": return <AttendanceReports user={currentUser} />;
       case "supervisorwork": return <SupervisorWorkView user={currentUser} />;
       case "supervisorsitereport": return <SupervisorSiteReport user={currentUser} />;
@@ -5533,7 +5547,7 @@ export default function App() {
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
-      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} user={currentUser} />;
+      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "users": return currentUser.role==="admin"?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
@@ -5581,6 +5595,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 
