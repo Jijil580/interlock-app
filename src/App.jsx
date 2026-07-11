@@ -1474,20 +1474,18 @@ function DailyReport({ user }) {
     const paid = parseFloat(workerEntry.paymentGiven) || 0;
     const pending = Math.max(0, totalAmount - paid);
 
-    const salaryVal = String(totalAmount);
-    const pendingVal = String(pending);
-
     setForm(f=>({
       ...f,
       workerEntries:[
         ...(f.workerEntries||[]),
         {
           ...workerEntry,
-          salary: salaryVal,
+          salary: totalAmount,
           amountEarned: totalAmount,
-          pending: pendingVal,
+          paymentGiven: paid,
+          pending,
           workArea: area,
-          rate: rate
+          rate
         }
       ]
     }));
@@ -4491,12 +4489,13 @@ function AdminWorkerReport({ user }) {
     if (!name) return;
     setSelectedWorker(name);
     setSelectedSite(null);
+    const accessParams = `&role=${encodeURIComponent(user?.role || "")}&userName=${encodeURIComponent(user?.name || "")}`;
     if (tab === "production") {
       const data = await api("GET", `/workers/reports/production?name=${encodeURIComponent(name)}${queryParams()}`);
       setReport(data);
       setOverall(null);
     } else if (tab === "site") {
-      const data = await api("GET", `/workers/reports/site?name=${encodeURIComponent(name)}${queryParams()}`);
+      const data = await api("GET", `/workers/reports/site?name=${encodeURIComponent(name)}${queryParams()}${accessParams}`);
       setReport(data);
       setOverall(null);
     } else {
