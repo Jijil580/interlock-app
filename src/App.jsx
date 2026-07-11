@@ -3086,6 +3086,7 @@ function ProductionSite({ user, setStock }) {
   const [tab, setTab] = useState("entry");
   const [modal, setModal] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [ledger, setLedger] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [reports, setReports] = useState(null);
@@ -3150,25 +3151,35 @@ function ProductionSite({ user, setStock }) {
   };
 
   const save = async () => {
+    if (saving) return;
     setSaveError("");
     if (!form.workerName) { setSaveError("Select a worker"); return; }
     if (!form.itemName) { setSaveError("Select an item"); return; }
     if (!+(form.producedQty)) { setSaveError("Enter produced quantity"); return; }
     if (!+(form.productionRate)) { setSaveError("Enter rate per unit manually"); return; }
-    const item = await api("POST", "/productionsite", {
-      ...form,
-      producedQty: +form.producedQty,
-      productionRate: +form.productionRate,
-      paymentGiven: +(form.paymentGiven || 0),
-      addedBy: user.name,
-    });
-    if (item._id) {
-      setEntries(p => [item, ...p]);
-      setModal(false);
-      setForm(emptyForm);
-      api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
-      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
-    } else setSaveError(item.message || "Failed to save");
+    setSaving(true);
+    try {
+      const item = await api("POST", "/productionsite", {
+        ...form,
+        producedQty: +form.producedQty,
+        productionRate: +form.productionRate,
+        paymentGiven: +(form.paymentGiven || 0),
+        addedBy: user.name,
+      });
+      if (item.duplicateIgnored) {
+        setSaveError(item.message || "Duplicate production entry ignored.");
+        api("GET", "/productionsite").then(e => setEntries(Array.isArray(e) ? e : []));
+        api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      } else if (item._id) {
+        setEntries(p => [item, ...p]);
+        setModal(false);
+        setForm(emptyForm);
+        api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+        api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      } else setSaveError(item.message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openLedger = async (name) => {
@@ -3413,7 +3424,7 @@ function ProductionSite({ user, setStock }) {
               ✅ On submit: Stock increases automatically · Worker earnings update · Payment reduces pending
             </div>
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Production</button>
+            <button onClick={save} disabled={saving} className={`w-full py-3 rounded-xl font-bold text-white ${saving ? "bg-amber-300 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-600"}`}>{saving ? "Saving..." : "Submit Production"}</button>
           </div>
         </Modal>
       )}
@@ -5596,6 +5607,8 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
 
