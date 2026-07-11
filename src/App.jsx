@@ -504,6 +504,7 @@ function MasterData() {
     if (t==="interlock") return <>
       <Input label="Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Paving Block" />
       <div className="grid grid-cols-2 gap-2">
+        <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} placeholder="e.g. Paver, Kerb, Tile" />
         <Input label="Shape" value={form.shape||""} onChange={e=>setForm({...form,shape:e.target.value})} placeholder="e.g. Rectangular" />
         <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} placeholder="e.g. Grey" />
         <Input label="Size (cm)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 20x10x6" />
@@ -3094,7 +3095,7 @@ function ProductionSite({ user }) {
 
   const emptyForm = {
     date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
-    shape: "", color: "", unitType: "sqft", producedQty: "", unit: "sqft",
+    category: "", shape: "", color: "", size: "", thickness: "", unitType: "sqft", producedQty: "", unit: "sqft",
     productionRate: "", paymentGiven: "", remarks: "",
   };
   const [form, setForm] = useState(emptyForm);
@@ -3143,7 +3144,7 @@ function ProductionSite({ user }) {
     if (unitType === "nos" || unitType === "load") unitType = "piece";
     if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "sqft";
     setForm(f => ({
-      ...f, itemId: id, itemName: it.name, shape: it.shape || "", color: it.color || "",
+      ...f, itemId: id, itemName: it.name, category: it.category || "", shape: it.shape || "", color: it.color || "", size: it.size || "", thickness: it.thickness || "",
       unitType, unit: unitType,
     }));
   };
@@ -3374,6 +3375,7 @@ function ProductionSite({ user }) {
               {form.itemName && (
                 <div className="bg-amber-50 rounded-xl p-2 text-xs space-y-0.5">
                   <div><b>Item:</b> {form.itemName}</div>
+                  <div><b>Category:</b> {form.category || "-"}</div>
                   <div><b>Color:</b> {form.color || "—"}</div>
                   <div><b>Unit:</b> {form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
                 </div>
@@ -3607,7 +3609,7 @@ function WorkPlanning({ siteWorks, user }) {
 function Stock({ stock, setStock, user }) {
   const [modal, setModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const emptyForm = { name:"", quantity:0, unit:"nos", minStock:0, price:0 };
+  const emptyForm = { name:"", category:"", quantity:0, unit:"nos", minStock:0, price:0 };
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
@@ -3628,7 +3630,7 @@ function Stock({ stock, setStock, user }) {
         {stock.length===0&&<EmptyState icon="📦" text="No stock items" />}
         {stock.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black">{s.name}</div><div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}</div>
+            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}</div>}<div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}</div>
             {user.role==="admin"&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
           </div>
         ))}
@@ -3637,6 +3639,7 @@ function Stock({ stock, setStock, user }) {
         <div className="space-y-3">
           <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
           <div className="grid grid-cols-2 gap-2">
+            <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} />
             <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
             <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
             <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
@@ -3786,7 +3789,7 @@ function Sales({ sales, setSales, stock, user }) {
   const [saveError, setSaveError] = useState("");
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
@@ -4116,21 +4119,22 @@ function Sales({ sales, setSales, stock, user }) {
             <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
-              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.product} onChange={e => {
-                const it = interlockTypes.find(x => x.name === e.target.value);
-                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" · ") : "";
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
+                const it = interlockTypes.find(x => x._id === e.target.value);
+                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" � ") : "";
                 const price = it?.pricePerSqft || 0;
-                setForm({ ...form, product: e.target.value, interlockDetails: details, price: String(price) });
+                setForm({ ...form, itemId: it?._id || "", product: it?.name || "", category: it?.category || "", shape: it?.shape || "", color: it?.color || "", size: it?.size || "", thickness: it?.thickness || "", interlockDetails: details, price: String(price) });
               }}>
                 <option value="">-- Select Interlock Type --</option>
                 {interlockTypes.map(i => (
-                  <option key={i._id} value={i.name}>{i.name}{i.color ? ` (${i.color})` : ""}</option>
+                  <option key={i._id} value={i._id}>{i.name}{i.color ? ` (${i.color})` : ""}</option>
                 ))}
               </select>
-              {form.product && interlockTypes.find(x => x.name === form.product) && (
+              {form.product && interlockTypes.find(x => x._id === form.itemId) && (
                 <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
-                  {form.interlockDetails && <div>📐 {form.interlockDetails}</div>}
-                  {interlockTypes.find(x => x.name === form.product)?.pricePerSqft && <div className="text-amber-700 font-bold">💰 {CURRENCY}{interlockTypes.find(x => x.name === form.product)?.pricePerSqft}/sqft</div>}
+                  {form.category && <div>Category: {form.category}</div>}
+                  {form.interlockDetails && <div>{form.interlockDetails}</div>}
+                  {interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft && <div className="text-amber-700 font-bold">{CURRENCY}{interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft}/sqft</div>}
                 </div>
               )}
               {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
