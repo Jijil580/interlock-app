@@ -17,6 +17,8 @@ const workerTypeOf = (w) => {
   return "Site Worker";
 };
 const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "inactive";
+const isAdminLike = (role) => role === "admin" || role === "user";
+const effectiveRoleOf = (role) => role === "user" ? "admin" : role;
 
 const mergeDailyReportsByDate = (reports = []) => {
   const map = new Map();
@@ -386,7 +388,7 @@ function Login({ onLogin }) {
       const data = await res.json();
       if (res.ok && data.role) {
         // Check device approval (skip for admin)
-        if (data.role !== "admin") {
+        if (!isAdminLike(data.role)) {
           const deviceInfo = getDeviceInfo();
           // Register device if not exists
           const devRes = await api("POST", "/devices/check", {
@@ -456,7 +458,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
         <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalIncome)}`} icon="💰" color="teal" />
         <StatCard label="Pending Payment" value={`${CURRENCY}${fmt(pendingPayment)}`} icon="⏳" color="red" />
       </div>
-      {user.role === "admin" && (
+      {isAdminLike(user.role) && (
         <div className="space-y-3">
           <div className="text-xs font-black text-gray-500 uppercase tracking-wider">📦 Stock Overview</div>
           <div className="grid grid-cols-2 gap-3">
@@ -802,7 +804,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏗️ Site Work</h2>
-        {(user.role==="admin"||user.role==="supervisor")&&(
+        {(isAdminLike(user.role)||user.role==="supervisor")&&(
           <button onClick={()=>setShowAdd(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
         )}
       </div>
@@ -849,9 +851,9 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
             )}
             <div className="mt-2 flex gap-1">
               <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
-              {(user.role==="admin"||user.role==="supervisor")&&<button onClick={()=>setEditItem({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
+              {(isAdminLike(user.role)||user.role==="supervisor")&&<button onClick={()=>setEditItem({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
               <button onClick={()=>generateInvoice(s)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 py-1.5 rounded-xl text-xs font-bold">🧾 Invoice</button>
-              {user.role==="admin"&&<button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
+              {isAdminLike(user.role)&&<button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
             </div>
           </div>
         ))}
@@ -1372,7 +1374,7 @@ function WorkerReport({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏗️ Site Report</h2>
-        {(user.role==="supervisor"||user.role==="admin")&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{reports.length}</div><div className="text-xs text-gray-400">Total</div></div>
@@ -1392,7 +1394,7 @@ function WorkerReport({ user }) {
                   <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}{r.materialType?` · 🧱 ${r.materialType}`:""}</div>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  {(user.role==="supervisor"||user.role==="admin")&&<button onClick={()=>setEditModal({...r})} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
+                  {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>setEditModal({...r})} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
                   <button onClick={()=>downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
                 </div>
               </div>
@@ -1443,7 +1445,7 @@ function WorkerReport({ user }) {
                   <div key={role} className={`rounded-xl border p-2 text-center ${viewModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
                     <div className="text-xl mb-1">{viewModal.signatures?.[role]?"✅":"⭕"}</div>
                     <div className="text-xs font-bold capitalize">{role}</div>
-                    {!viewModal.signatures?.[role]&&(user.role===role||user.role==="admin")&&<button onClick={()=>signReport(viewModal._id,role)} className="mt-1 bg-green-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold w-full">Sign</button>}
+                    {!viewModal.signatures?.[role]&&(user.role===role||isAdminLike(user.role))&&<button onClick={()=>signReport(viewModal._id,role)} className="mt-1 bg-green-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold w-full">Sign</button>}
                     {viewModal.signatures?.[role]&&<div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
                   </div>
                 ))}
@@ -1498,7 +1500,7 @@ function DailyReport({ user }) {
     });
   },[]);
 
-  const mySites = siteWorks.filter(s=>user.role==="admin"||s.addedBy===user.name);
+  const mySites = siteWorks.filter(s=>isAdminLike(user.role)||s.addedBy===user.name);
   const planned = mySites.filter(s=>s.status==="pending");
   const running = mySites.filter(s=>s.status==="running");
   const completed = mySites.filter(s=>s.status==="completed");
@@ -2656,7 +2658,7 @@ function Workers({ user }) {
   const [selectedWorker, setSelectedWorker] = useState(null);
   const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site Worker", workerType:"Site Worker", status:"Active", workLocationType:"Outside Site", paymentType:"Per Day", customPaymentType:"", rateAmount:"" };
   const [workerForm, setWorkerForm] = useState(emptyForm);
-  const canEdit = user.role==="admin"||user.role==="user";
+  const canEdit = isAdminLike(user.role);
 
   useEffect(()=>{
     Promise.all([api("GET","/workers"),api("GET","/workerpayments"),api("GET","/workerreport")]).then(([w,p,sr])=>{
@@ -2801,7 +2803,7 @@ function Suppliers({ user }) {
   const MATERIAL_OPTIONS = ["Cement","Stone","Sand","Blocks","Chips","Steel","Tiles"];
   const emptyForm = { name:"", location:"", phone:"", materials:[], customMaterial:"", note:"" };
   const [form, setForm] = useState(emptyForm);
-  const canEdit = user.role==="admin"||user.role==="user";
+  const canEdit = isAdminLike(user.role);
 
   useEffect(()=>{ api("GET","/suppliers").then(d=>{ setSuppliers(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
 
@@ -2944,7 +2946,7 @@ function Purchases({ user }) {
   };
 
   const filtered = filterPurchases();
-  const canAdd = user.role === "admin" || user.role === "user";
+  const canAdd = isAdminLike(user.role);
 
   if (loading) return <Loader />;
   return (
@@ -3164,7 +3166,7 @@ function ProductionSite({ user, setStock }) {
   };
   const [form, setForm] = useState(emptyForm);
 
-  const canEdit = user.role === "admin" || user.role === "supervisor" || user.role === "user";
+  const canEdit = isAdminLike(user.role) || user.role === "supervisor";
 
   useEffect(() => {
     Promise.all([
@@ -3645,7 +3647,7 @@ function WorkPlanning({ siteWorks, user }) {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
         <div className="flex gap-2">
-          {user.role==="admin"&&<button onClick={()=>setShowArchive(!showArchive)} className="bg-gray-100 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold">{showArchive?"Current Plans":"Archive"}</button>}
+          {isAdminLike(user.role)&&<button onClick={()=>setShowArchive(!showArchive)} className="bg-gray-100 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold">{showArchive?"Current Plans":"Archive"}</button>}
           <button onClick={()=>{setEditItem(null);setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
         </div>
       </div>
@@ -3712,14 +3714,14 @@ function Stock({ stock, setStock, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📦 Stock</h2>
-        {user.role==="admin"&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {isAdminLike(user.role)&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
       <div className="space-y-2">
         {groupedStock.length===0&&<EmptyState icon="BOX" text="No stock items" />}
         {groupedStock.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
             <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}</div>}<div className="text-sm text-gray-600">{s.quantity} {s.unit}</div>{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/unit</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
-            {user.role==="admin"&&s.duplicateCount===1&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
+            {isAdminLike(user.role)&&s.duplicateCount===1&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
           </div>
         ))}
       </div>
@@ -3759,14 +3761,14 @@ function RawMaterial({ raw, setRaw, user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🧱 Raw Material</h2>
-        {user.role==="admin"&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {isAdminLike(user.role)&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
       <div className="space-y-2">
         {raw.length===0&&<EmptyState icon="🧱" text="No raw materials" />}
         {raw.map(r=>(
           <div key={r._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
             <div><div className="font-black">{r.name||r.material}</div><div className="text-sm text-gray-600">{r.quantity||r.qty} {r.unit}</div>{r.supplier&&<div className="text-xs text-gray-400">Supplier: {r.supplier}</div>}</div>
-            {user.role==="admin"&&<div className="flex gap-1"><button onClick={()=>{setForm({...r});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+            {isAdminLike(user.role)&&<div className="flex gap-1"><button onClick={()=>{setForm({...r});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
           </div>
         ))}
       </div>
@@ -3793,7 +3795,7 @@ function Production({ production, setProduction, stock, user }) {
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
-    const item=await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:user.role==="admin"?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
+    const item=await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:isAdminLike(user.role)?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
     if(item._id){setProduction(p=>[item,...p]);setModal(false);setForm(emptyForm);}
   };
 
@@ -5340,7 +5342,7 @@ function DailyCashFlow({ user, allUsers }) {
   const [dateMode, setDateMode] = useState("all");
   const [fromDate, setFromDate] = useState(today());
   const [toDate, setToDate] = useState(today());
-  const [personFilter, setPersonFilter] = useState(user.role === "admin" ? "role:supervisor" : "");
+  const [personFilter, setPersonFilter] = useState(isAdminLike(user.role) ? "role:supervisor" : "");
   const [data, setData] = useState({ history: [], total: {} });
   const [loading, setLoading] = useState(true);
 
@@ -5361,8 +5363,8 @@ function DailyCashFlow({ user, allUsers }) {
   useEffect(() => {
     let active = true;
     const range = getRange();
-    const params = new URLSearchParams({ role: user.role, name: user.name, fromDate: range.from, toDate: range.to });
-    if (user.role === "admin") {
+    const params = new URLSearchParams({ role: effectiveRoleOf(user.role), name: user.name, fromDate: range.from, toDate: range.to });
+    if (isAdminLike(user.role)) {
       const [kind, role, ...nameParts] = personFilter.split(":");
       if (kind === "role") params.set("personRole", role);
       if (kind === "person") {
@@ -5379,7 +5381,7 @@ function DailyCashFlow({ user, allUsers }) {
     return () => { active = false; };
   }, [user.role, user.name, view, selectedDate, dateMode, fromDate, toDate, personFilter]);
 
-  const isSupervisor = user.role === "supervisor" || (user.role === "admin" && personFilter.includes(":supervisor"));
+  const isSupervisor = user.role === "supervisor" || (isAdminLike(user.role) && personFilter.includes(":supervisor"));
   const total = data.total || {};
   const money = value => `${CURRENCY}${fmt(value)}`;
   const dateLabel = value => {
@@ -5409,7 +5411,7 @@ function DailyCashFlow({ user, allUsers }) {
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {user.role==="admin"&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
+        {isAdminLike(user.role)&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
         {view==="daily" ? (
           <Input label="Select Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
         ) : (
@@ -5456,7 +5458,7 @@ function DailyCashFlow({ user, allUsers }) {
               {data.history.map((row,i)=>(
                 <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
                   <div className="flex justify-between gap-2">
-                    <div><div className="font-black">{dateLabel(row.date)}{user.role==="admin"?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
+                    <div><div className="font-black">{dateLabel(row.date)}{isAdminLike(user.role)?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
                     <div className={`font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</div>
                   </div>
                   {isSupervisor ? (
@@ -5600,7 +5602,7 @@ export default function App() {
     />;
   }
 
-  const nav = NAV[currentUser.role]||[];
+  const nav = NAV[effectiveRoleOf(currentUser.role)]||[];
   const roleColors = { admin:"from-violet-500 to-purple-600", supervisor:"from-emerald-500 to-green-600", user:"from-blue-500 to-blue-600" };
 
   const renderPage = () => {
@@ -5628,7 +5630,7 @@ export default function App() {
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
-      case "users": return currentUser.role==="admin"?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
+      case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
       default: return null;
@@ -5674,7 +5676,6 @@ export default function App() {
     </div>
   );
 }
-
 
 
 
