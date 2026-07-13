@@ -18,6 +18,35 @@ const workerTypeOf = (w) => {
 };
 const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "inactive";
 
+const mergeDailyReportsByDate = (reports = []) => {
+  const map = new Map();
+  reports.forEach((r) => {
+    const key = r.date || "";
+    const current = map.get(key) || {
+      ...r,
+      _ids: [], reportCount: 0, workerEntries: [], payments: [], completedToday: 0,
+      totalCompleted: r.totalCompleted || "", totalPayments: 0, totalReceived: 0,
+      materials: [], extraWorks: [], complaintsList: [], notesList: [], sourceReports: [],
+    };
+    current._ids.push(r._id);
+    current.reportCount += 1;
+    current.sourceReports.push(r);
+    current.workerEntries = [...(current.workerEntries || []), ...(r.workerEntries || [])];
+    current.payments = [...(current.payments || []), ...(r.payments || [])];
+    current.completedToday = (+(current.completedToday) || 0) + (+(r.completedToday) || 0);
+    current.totalPayments = (+(current.totalPayments) || 0) + (+(r.totalPayments) || 0);
+    current.totalReceived = (+(current.totalReceived) || 0) + (+(r.totalReceived) || 0);
+    if (r.totalCompleted) current.totalCompleted = r.totalCompleted;
+    if (r.materialsUnloaded) current.materials.push(r);
+    if (r.extraWorkDesc) current.extraWorks.push(r);
+    if (r.complaints) current.complaintsList.push(r);
+    if (r.dayNotes) current.notesList.push(r);
+    current.workersCount = current.workerEntries.length;
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+};
+
 async function api(method, path, body) {
   try {
     const res = await fetch(`${API}${path}`, {
@@ -75,6 +104,45 @@ function Select({ label, options, ...props }) {
         {options.map((o) => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
       </select>
     </div>
+  );
+}
+
+function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
+  if (!site) return null;
+  const baseCost = (+(site.workSize || 0)) * (+(site.ratePerUnit || 0));
+  const siteCost = +(site.totalCost || site.totalAmount || 0);
+  const directPayments = directSitePaymentRows(site, dailyReceived);
+  const received = dailyReceived + directPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+  const pending = Math.max(0, siteCost - received);
+  return (
+    <SectionBox title="Site Work Details" icon="Site" color="amber">
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div><div className="text-xs text-gray-400">Customer</div><div className="font-bold">{site.customerName||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{site.phone||"-"}</div></div>
+        <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{site.siteLocation||site.location||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Interlock Type</div><div className="font-bold">{site.interlockType||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Color / Spec</div><div className="font-bold">{site.interlockColor||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Work Size</div><div className="font-bold">{site.workSize||0} {site.workUnit||"sqft"}</div></div>
+        <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{fmt(site.ratePerUnit||0)}/{site.workUnit||"sqft"}</div></div>
+        <div><div className="text-xs text-gray-400">Start Date</div><div className="font-bold">{site.startDate||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">End Date</div><div className="font-bold">{site.endDate||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Status</div><div className="font-bold">{site.status||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{site.addedBy||"-"}</div></div>
+      </div>
+      {(site.selectedWorkers||[]).length>0&&<div className="mt-2"><div className="text-xs text-gray-400 mb-1">Assigned Workers</div><div className="flex flex-wrap gap-1">{(site.selectedWorkers||[]).map(w=><Badge key={w} color="teal">{w}</Badge>)}</div></div>}
+      <div className="mt-3 space-y-1 text-sm">
+        <div className="flex justify-between"><span>Base Cost</span><span className="font-bold">{CURRENCY}{fmt(baseCost)}</span></div>
+        {(site.extraWork||[]).map((e,i)=><div key={`ew-${i}`} className="flex justify-between text-xs pl-2"><span>Extra Work: {e.name} ({e.qty||1} x {CURRENCY}{fmt(e.rate||0)})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total||0)}</span></div>)}
+        {(site.extraMaterials||[]).map((e,i)=><div key={`em-${i}`} className="flex justify-between text-xs pl-2"><span>Extra Material: {e.name} ({e.qty||0} {e.unit||""} x {CURRENCY}{fmt(e.rate||0)})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total||0)}</span></div>)}
+        {+(site.materialCost||0)>0&&<div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(site.materialCost)}</span></div>}
+        {+(site.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(site.laborCost)}</span></div>}
+        <div className="flex justify-between border-t pt-1"><span className="font-black">Total Site Cost</span><span className="font-black text-green-700">{CURRENCY}{fmt(siteCost)}</span></div>
+        <div className="flex justify-between"><span>Total Received</span><span className="font-bold text-blue-700">{CURRENCY}{fmt(received)}</span></div>
+        <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(pending)}</span></div>
+      </div>
+      {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={i} className="flex justify-between border-t py-1"><span>{p.date||"-"} ? {p.mode||p.paymentMode||"-"}</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}</div>}
+      {site.note&&<div className="mt-2 text-sm"><div className="text-xs text-gray-400">Note</div><div>{site.note}</div></div>}
+    </SectionBox>
   );
 }
 
@@ -1349,7 +1417,7 @@ function WorkerReport({ user }) {
       {viewModal&&(
         <Modal title="Site Report Details" onClose={()=>setViewModal(null)}>
           <div className="space-y-3">
-            <div className="flex justify-between items-center"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>downloadReport(viewModal)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">⬇️ Download</button></div>
+            <div className="flex justify-between items-center"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>downloadReport(viewModal)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">Download</button></div>
             <div className="grid grid-cols-2 gap-2">
               {[["Site Name",viewModal.siteName],["Phone No",viewModal.phoneNo],["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
                 <div key={l} className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-sm">{v||"—"}</div></div>
@@ -1459,22 +1527,6 @@ function DailyReport({ user }) {
       }
       return;
     }
-    const duplicateSaved = reports.find(r =>
-      r.date === form.date &&
-      (normalize(r.siteName) === normalize(form.siteName) || (form.siteId && r.siteId === form.siteId)) &&
-      (r.workerEntries || []).some(w =>
-        normalize(w.workerName) === normalize(workerEntry.workerName) &&
-        normalize(w.workCategory) === normalize(workerEntry.workCategory)
-      )
-    );
-    if (duplicateSaved) {
-      const viewExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
-      if (viewExisting) {
-        setViewModal(duplicateSaved);
-        setAddModal(false);
-      }
-      return;
-    }
     const area = parseFloat(workerEntry.workArea) || 0;
     const rate = parseFloat(workerEntry.rate) || 0;
     const totalAmount = area * rate;
@@ -1545,7 +1597,8 @@ function DailyReport({ user }) {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
-    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
+    const groupedReports = mergeDailyReportsByDate(sr);
+    const dateReport = selectedDate?groupedReports.find(r=>r.date===selectedDate):null;
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
     const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
@@ -1580,8 +1633,8 @@ function DailyReport({ user }) {
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates ({sr.length} reports)</option>
-            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalPayments||0)} paid</option>)}
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalPayments||0)} paid</option>)}
           </select>
         </div>
 
@@ -1593,6 +1646,16 @@ function DailyReport({ user }) {
               <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
               <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
             </div>
+            {(dateReport.sourceReports||[]).length>0&&(
+              <SectionBox title="Reports Submitted This Date" icon="Report" color="blue">
+                {(dateReport.sourceReports||[]).map((r,i)=>(
+                  <div key={r._id||i} className="flex items-center justify-between text-xs py-1 border-b border-blue-100">
+                    <span>Report {i+1} ? {r.workerEntries?.length||0} workers ? {CURRENCY}{fmt(r.totalPayments||0)} paid</span>
+                    <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
             {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
             {(dateReport.workerEntries||[]).length>0&&(
               <SectionBox title="Worker Details" icon="👷" color="teal">
@@ -1672,10 +1735,10 @@ function DailyReport({ user }) {
             )}
             {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
             {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 All Daily Reports</div>
-            {sr.length===0&&<EmptyState icon="📋" text="No reports yet" />}
-            {sr.map(r=>(
-              <div key={r._id} onClick={()=>setViewModal(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
+            <div className="text-xs font-black text-gray-500 uppercase">All Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports yet" />}
+            {groupedReports.map(r=>(
+              <div key={r.date} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
                   <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
                   <div className="text-right"><div className="font-black text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recv</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
@@ -1702,7 +1765,7 @@ function DailyReport({ user }) {
       <div className="space-y-3">
         {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
           const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"?"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0 ml-2">+ Entry</button></div></div>);
+          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"-"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0 ml-2">+ Entry</button></div></div>);
         }))}
         {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
           <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
@@ -1895,14 +1958,14 @@ function DailyReport({ user }) {
               <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
             </SectionBox>
 
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Daily Report</button>
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{form._id?"Resubmit Daily Report":"Submit Daily Report"}</button>
           </div>
         </Modal>
       )}
       {viewModal&&(
         <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
           <div className="space-y-3">
-            <div className="text-xs text-gray-400">By: {viewModal.addedBy}</div>
+            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>editDailyReport(viewModal)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button></div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
               <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(viewModal.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
@@ -2196,7 +2259,7 @@ function SupervisorReports({ allUsers }) {
                 <div className="flex items-start justify-between"><div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
                 <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button></div>
                 <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"?"} sqft</div><div className="text-gray-400">Progress</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"-"} sqft</div><div className="text-gray-400">Progress</div></div>
                   <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
                   <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
                 </div>
@@ -2289,7 +2352,7 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
     const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
     const totalPaidOut = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
     const byMonth = sr.reduce((acc,r)=>{
-      const m=r.date?.slice(0,7)||"?";
+      const m=r.date?.slice(0,7)||"-";
       if (!acc[m]) acc[m]={recv:0,paid:0,comp:0,count:0};
       acc[m].recv+=+(r.totalReceived||0); acc[m].paid+=+(r.totalPayments||0);
       acc[m].comp+=+(r.completedToday||0); acc[m].count++;
@@ -2368,7 +2431,7 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
     const totalPaid = allEntries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
     const totalPending = allEntries.reduce((a,e)=>a+(+(e.pending||0)),0);
     const byMonth = allEntries.reduce((acc,e)=>{
-      const m=e.date?.slice(0,7)||"?";
+      const m=e.date?.slice(0,7)||"-";
       if (!acc[m]) acc[m]={days:0,paid:0,pending:0,work:[]};
       if (e.attendance==="present") acc[m].days++;
       acc[m].paid+=+(e.paymentGiven||0);
@@ -4147,7 +4210,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
               <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
                 const it = interlockTypes.find(x => x._id === e.target.value);
-                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" � ") : "";
+                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" � ") : "";
                 const price = it?.pricePerSqft || 0;
                 setForm({ ...form, itemId: it?._id || "", product: it?.name || "", category: it?.category || "", shape: it?.shape || "", color: it?.color || "", size: it?.size || "", thickness: it?.thickness || "", interlockDetails: details, price: String(price) });
               }}>
@@ -4275,6 +4338,7 @@ function AdminSiteReport() {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
+    const groupedReports = mergeDailyReportsByDate(sr);
     const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
     const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const supervisorSitePayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received").map(p=>({...p,source:"Supervisor Daily Report"}));
@@ -4307,7 +4371,7 @@ function AdminSiteReport() {
     const allMats = sr.filter(r=>r.materialsUnloaded);
     const allExtra = sr.filter(r=>r.extraWorkDesc);
     const allComplaints = sr.filter(r=>r.complaints);
-    const dateReport = selectedDate ? sr.find(r=>r.date===selectedDate) : null;
+    const dateReport = selectedDate ? groupedReports.find(r=>r.date===selectedDate) : null;
 
     return (
       <div className="space-y-4">
@@ -4330,6 +4394,7 @@ function AdminSiteReport() {
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
           {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
         </div>
+        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailySiteReceived} />
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Amount Received</div></div>
@@ -4369,8 +4434,8 @@ function AdminSiteReport() {
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates ({sr.length} reports)</option>
-            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
         </div>
 
@@ -4437,9 +4502,9 @@ function AdminSiteReport() {
             {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
             {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
             {allComplaints.length>0&&<SectionBox title="Complaints" icon="⚠️" color="red">{allComplaints.map((r,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{r.date} · {r.complaints}</div>{r.actionTaken&&<div className="text-gray-400">Action: {r.actionTaken}</div>}</div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports ({sr.length})</div>
-            {sr.length===0&&<EmptyState icon="📋" text="No reports submitted" />}
-            {sr.map(r=><div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus||"running"}</Badge></div></div></div>)}
+            <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted" />}
+            {groupedReports.map(r=><div key={r.date} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color="amber">{r.siteStatus||"running"}</Badge></div></div></div>)}
           </div>
         )}
       </div>
@@ -5101,6 +5166,7 @@ function SupervisorSiteReport({ user }) {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
+    const groupedReports = mergeDailyReportsByDate(sr);
     const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
     const dailyClientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
     const siteWorkPayments = directSitePaymentRows(selectedSite, dailyClientPayments.reduce((a,p)=>a+(+(p.amount)||0),0));
@@ -5118,7 +5184,7 @@ function SupervisorSiteReport({ user }) {
     const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
     const allMats = sr.filter(r=>r.materialsUnloaded);
     const allExtra = sr.filter(r=>r.extraWorkDesc);
-    const dateReport = selectedDate?sr.find(r=>r.date===selectedDate):null;
+    const dateReport = selectedDate?groupedReports.find(r=>r.date===selectedDate):null;
 
     return (
       <div className="space-y-4">
@@ -5141,6 +5207,7 @@ function SupervisorSiteReport({ user }) {
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
           {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
         </div>
+        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailyClientPayments.reduce((a,p)=>a+(+(p.amount)||0),0)} />
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Cost</div></div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Received</div></div>
@@ -5155,8 +5222,8 @@ function SupervisorSiteReport({ user }) {
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
           <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
-            <option value="">All Dates ({sr.length} reports)</option>
-            {sr.map(r=><option key={r._id} value={r.date}>{r.date} — {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
         </div>
         {dateReport?(
@@ -5200,10 +5267,10 @@ function SupervisorSiteReport({ user }) {
             {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.materialName||p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
             {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
             {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
-            <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Reports ({sr.length})</div>
-            {sr.length===0&&<EmptyState icon="📋" text="No reports submitted yet" />}
-            {sr.map(r=>(
-              <div key={r._id} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
+            <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted yet" />}
+            {groupedReports.map(r=>(
+              <div key={r.date} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
                   <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
                   <div className="text-right">
