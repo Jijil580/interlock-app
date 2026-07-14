@@ -5,6 +5,19 @@ const COMPANY = { name: "PK Interlock", logo: "🏭" };
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
+const findMasterItem = (row, masters = []) => masters.find(m => (
+  (row?.itemId && m._id === row.itemId) ||
+  ((m.name || "").toLowerCase() === String(row?.itemName || row?.product || row?.name || row?.item || "").toLowerCase() &&
+   (!row?.color || !m.color || String(m.color).toLowerCase() === String(row.color).toLowerCase()))
+));
+const itemSqftPerPiece = (row, masters = []) => +(row?.sqftPerPiece || findMasterItem(row, masters)?.sqftPerPiece || 0);
+const itemCount = (row) => +(row?.producedQty ?? row?.quantity ?? row?.qty ?? 0) || 0;
+const itemSqft = (row, masters = []) => +(row?.sqftQty ?? row?.sqftQuantity ?? 0) || (itemCount(row) * itemSqftPerPiece(row, masters));
+const qtyWithSqft = (row, masters = [], unitFallback = "piece") => {
+  const unit = row?.unit || row?.unitType || unitFallback;
+  const sqft = itemSqft(row, masters);
+  return `${fmt(itemCount(row))} ${unit}${sqft ? ` / ${fmt(sqft)} sqft` : ""}`;
+};
 const directSitePaymentRows = (site, dailyReceived = 0) => {
   const payments = (site?.payments || []).map(p => ({ ...p, date: p.date || site?.startDate, source: "Site Work" }));
   if (payments.length) return payments;
@@ -504,7 +517,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
             <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
             <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
             <StatCard label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
-            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`Value ${money(total.productionValue)}`} />
+            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft)} sqft | Value ${money(total.productionValue)}`} />
             <StatCard label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
             <StatCard label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
           </div>
@@ -516,7 +529,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
                   {summary.productionItemSummary.map((item,i)=>(
                     <div key={i} className="flex justify-between gap-3 text-xs border-b border-teal-100 pb-1">
                       <span><b>{item.item}</b>{item.color?` / ${item.color}`:""}</span>
-                      <span className="font-black text-teal-700">{fmt(item.quantity)} {item.unit}</span>
+                      <span className="font-black text-teal-700">{qtyWithSqft(item)}</span>
                     </div>
                   ))}
                 </div>
@@ -545,7 +558,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
             </SectionBox>
             <SectionBox title="Recent Production" icon="PR" color="purple">
               {(summary.recentProduction||[]).length===0 ? <div className="text-xs text-gray-400">No production</div> : summary.recentProduction.map(p=>(
-                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-purple-100 py-1"><span><b>{p.workerName||"-"}</b><br />{p.itemName||p.category||"-"}</span><span className="text-right font-black">{fmt(p.producedQty)} {p.unit||p.unitType||""}<br /><span className="text-gray-400">{p.date}</span></span></div>
+                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-purple-100 py-1"><span><b>{p.workerName||"-"}</b><br />{p.itemName||p.category||"-"}</span><span className="text-right font-black">{qtyWithSqft(p)}<br /><span className="text-gray-400">{p.date}</span></span></div>
               ))}
             </SectionBox>
           </div>
@@ -3230,7 +3243,7 @@ function ProductionSite({ user, setStock }) {
 
   const emptyForm = {
     date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
-    category: "", shape: "", color: "", size: "", thickness: "", unitType: "sqft", producedQty: "", unit: "sqft",
+    category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", unitType: "piece", producedQty: "", unit: "piece",
     productionRate: "", paymentGiven: "", remarks: "",
   };
   const [form, setForm] = useState(emptyForm);
@@ -3263,6 +3276,7 @@ function ProductionSite({ user, setStock }) {
   };
 
   const calcTotal = () => +(form.producedQty || 0) * +(form.productionRate || 0);
+  const calcProductionSqft = () => +(form.sqftQty || 0) || ((+(form.producedQty || 0)) * (+(form.sqftPerPiece || 0)));
   const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
   const productionWorkers = workers.filter(w => workerTypeOf(w)==="Production Worker" && isActiveWorker(w));
 
@@ -3275,12 +3289,14 @@ function ProductionSite({ user, setStock }) {
   const selectItem = (id) => {
     const it = interlockTypes.find(x => x._id === id);
     if (!it) return;
-    let unitType = (it.unit || "sqft").toLowerCase();
+    let unitType = (it.unit || "piece").toLowerCase();
     if (unitType === "nos" || unitType === "load") unitType = "piece";
-    if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "sqft";
+    if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "piece";
+    const sqftPerPiece = +(it.sqftPerPiece || 0);
+    const producedQty = +(form.producedQty || 0);
     setForm(f => ({
       ...f, itemId: id, itemName: it.name, category: it.category || "", shape: it.shape || "", color: it.color || "", size: it.size || "", thickness: it.thickness || "",
-      unitType, unit: unitType,
+      sqftPerPiece: sqftPerPiece ? String(sqftPerPiece) : "", sqftQty: sqftPerPiece && producedQty ? String(sqftPerPiece * producedQty) : "", unitType, unit: unitType,
     }));
   };
 
@@ -3296,6 +3312,8 @@ function ProductionSite({ user, setStock }) {
       const item = await api("POST", "/productionsite", {
         ...form,
         producedQty: +form.producedQty,
+        sqftPerPiece: +(form.sqftPerPiece || 0),
+        sqftQty: calcProductionSqft(),
         productionRate: +form.productionRate,
         paymentGiven: +(form.paymentGiven || 0),
         addedBy: user.name,
@@ -3368,7 +3386,7 @@ function ProductionSite({ user, setStock }) {
       {tab === "entry" && (
         <>
           <div className="grid grid-cols-3 gap-2">
-            <StatCard label="Today's Production" value={fmt(todayEntries.reduce((a, e) => a + (+(e.producedQty) || 0), 0))} icon="📦" color="blue" />
+            <StatCard label="Today's Production" value={fmt(todayEntries.reduce((a, e) => a + (+(e.producedQty) || 0), 0))} icon="📦" color="blue" sub={`${fmt(todayEntries.reduce((a,e)=>a+itemSqft(e, interlockTypes),0))} sqft`} />
             <StatCard label="Today's Earnings" value={`${CURRENCY}${fmt(todayEarned)}`} icon="💰" color="green" />
             <StatCard label="Today's Paid" value={`${CURRENCY}${fmt(todayPaid)}`} icon="✅" color="teal" />
           </div>
@@ -3380,7 +3398,7 @@ function ProductionSite({ user, setStock }) {
                   <div>
                     <div className="font-black">{e.workerName} · {e.itemName}</div>
                     <div className="text-xs text-gray-400">📅 {e.date}{e.shift ? ` · ${e.shift}` : ""}{e.color ? ` · ${e.color}` : ""}</div>
-                    <div className="text-sm text-gray-600">{e.producedQty} {e.unit} × {CURRENCY}{e.productionRate}</div>
+                    <div className="text-sm text-gray-600">{qtyWithSqft(e, interlockTypes)} x {CURRENCY}{e.productionRate}</div>
                   </div>
                   <div className="text-right">
                     <div className="font-black text-green-700">{CURRENCY}{fmt(+(e.totalAmount) || 0)}</div>
@@ -3419,15 +3437,15 @@ function ProductionSite({ user, setStock }) {
               <div className="bg-gradient-to-r from-violet-500 to-purple-600 px-4 py-3 text-white font-black">🏭 {ledger.worker.name} <span className="text-xs font-normal opacity-80">· Production Only</span></div>
               <div className="p-4 space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <StatCard label="Total Production Qty" value={fmt(ledger.worker.totalQuantity)} icon="📦" color="blue" />
+                  <StatCard label="Total Production Qty" value={fmt(ledger.worker.totalQuantity)} icon="📦" color="blue" sub={`${fmt(ledger.worker.totalSqft || (ledger.history || []).reduce((a,h)=>a+itemSqft(h, interlockTypes),0))} sqft`} />
                   <StatCard label="Production Earnings" value={`${CURRENCY}${fmt(ledger.worker.totalEarnings)}`} icon="💰" color="green" />
                   <StatCard label="Payments Given" value={`${CURRENCY}${fmt(ledger.worker.totalPaid)}`} icon="✅" color="teal" />
                   <StatCard label="Pending" value={`${CURRENCY}${fmt(ledger.worker.totalPending)}`} icon="⏳" color="red" />
                 </div>
                 {(ledger.itemSummary || []).length > 0 && (
                   <SectionBox title="Production Summary" icon="📦" color="blue">
-                    <table className="w-full text-xs"><thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty</th></tr></thead>
-                      <tbody>{ledger.itemSummary.map((it, i) => <tr key={i} className="border-t"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{fmt(it.quantity)} {it.unit}</td></tr>)}</tbody>
+                    <table className="w-full text-xs"><thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty / Sqft</th></tr></thead>
+                      <tbody>{ledger.itemSummary.map((it, i) => <tr key={i} className="border-t"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{qtyWithSqft(it, interlockTypes)}</td></tr>)}</tbody>
                     </table>
                   </SectionBox>
                 )}
@@ -3437,7 +3455,7 @@ function ProductionSite({ user, setStock }) {
                     <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
                     <tbody>
                       {(ledger.history || []).map((h, i) => (
-                        <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{h.qty}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
+                        <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h, interlockTypes)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -3471,18 +3489,18 @@ function ProductionSite({ user, setStock }) {
           {reports && (
             <>
               <div className="grid grid-cols-3 gap-2">
-                <StatCard label="Total Qty" value={fmt(reports.totalQuantity || 0)} icon="📦" color="blue" />
+                <StatCard label="Total Qty" value={fmt(reports.totalQuantity || 0)} icon="📦" color="blue" sub={`${fmt(reports.totalSqft || 0)} sqft`} />
                 <StatCard label="Total Amount" value={`${CURRENCY}${fmt(reports.totalAmount || 0)}`} icon="💰" color="green" />
                 <StatCard label="Entries" value={reports.totalEntries || 0} icon="📋" color="purple" />
               </div>
               {reportType === "worker" && (reports.workerWise || []).map((w, i) => (
-                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{w.worker}</span><span>{fmt(w.quantity)} qty · {CURRENCY}{fmt(w.earnings)} · Paid {CURRENCY}{fmt(w.paid)}</span></div>
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{w.worker}</span><span>{qtyWithSqft(w, interlockTypes)} · {CURRENCY}{fmt(w.earnings)} · Paid {CURRENCY}{fmt(w.paid)}</span></div>
               ))}
               {reportType === "item" && (reports.itemWise || []).map((it, i) => (
-                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{it.item}</span><span>{fmt(it.quantity)} {it.unit} · {CURRENCY}{fmt(it.amount)}</span></div>
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{it.item}</span><span>{qtyWithSqft(it, interlockTypes)} · {CURRENCY}{fmt(it.amount)}</span></div>
               ))}
               {reportType === "color" && (reports.colorWise || []).map((c, i) => (
-                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{c.color}</span><span>{fmt(c.quantity)} · {CURRENCY}{fmt(c.amount)}</span></div>
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{c.color}</span><span>{qtyWithSqft(c, interlockTypes)} · {CURRENCY}{fmt(c.amount)}</span></div>
               ))}
               {reportType === "pending" && (reports.pendingWorkers || []).map((w, i) => (
                 <div key={i} className="bg-white rounded-xl border p-3"><div className="font-bold">{w.name}</div><div className="text-xs text-red-600 mt-1">Pending: {CURRENCY}{fmt(w.totalPending)} · Earned: {CURRENCY}{fmt(w.totalEarnings)} · Paid: {CURRENCY}{fmt(w.totalPaid)}</div></div>
@@ -3523,6 +3541,7 @@ function ProductionSite({ user, setStock }) {
                   <div><b>Item:</b> {form.itemName}</div>
                   <div><b>Category:</b> {form.category || "-"}</div>
                   <div><b>Color:</b> {form.color || "—"}</div>
+                  <div><b>1 Piece Sqft:</b> {form.sqftPerPiece || "0"}</div>
                   <div><b>Unit:</b> {form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
                 </div>
               )}
@@ -3531,14 +3550,24 @@ function ProductionSite({ user, setStock }) {
 
             <SectionBox title="Production Details" icon="📦" color="green">
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Produced Quantity *" type="number" step="any" value={form.producedQty} onChange={e => setForm({ ...form, producedQty: e.target.value })} placeholder="e.g. 500" />
+                <Input label="Produced Quantity *" type="number" step="any" value={form.producedQty} onChange={e => {
+                  const producedQty = +(e.target.value || 0);
+                  const sqftPerPiece = +(form.sqftPerPiece || 0);
+                  setForm({ ...form, producedQty: e.target.value, sqftQty: sqftPerPiece ? String(producedQty * sqftPerPiece) : form.sqftQty });
+                }} placeholder="e.g. 500" />
                 <Select label="Unit" value={form.unit} options={["sqft", "piece", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />
+                <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                  const sqftPerPiece = +(e.target.value || 0);
+                  const producedQty = +(form.producedQty || 0);
+                  setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && producedQty ? String(producedQty * sqftPerPiece) : "" });
+                }} placeholder="0" />
+                <Input label="Total Sqft" type="number" value={calcProductionSqft()} readOnly />
                 <Input label={`Rate per Unit (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder="Enter rate manually e.g. 7.50" />
                 <Input label={`Payment Given (${CURRENCY})`} type="number" step="any" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
               </div>
               {+(form.producedQty) > 0 && +(form.productionRate) > 0 && (
                 <div className="bg-gray-50 rounded-xl p-2 text-xs text-gray-600 text-center">
-                  {form.producedQty} {form.unit} × {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
+                  {form.producedQty} {form.unit} / {fmt(calcProductionSqft())} sqft x {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -4251,10 +4280,10 @@ function Sales({ sales, setSales, stock, setStock, user }) {
             {(ledger.itemSummary || []).length > 0 && (
               <SectionBox title="Purchased Items Summary" icon="📦" color="blue">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty</th></tr></thead>
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty / Sqft</th></tr></thead>
                   <tbody>
                     {ledger.itemSummary.map((it, i) => (
-                      <tr key={i} className="border-t border-gray-100"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{fmt(it.quantity)} {it.unit}</td></tr>
+                      <tr key={i} className="border-t border-gray-100"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{qtyWithSqft(it)}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -5121,23 +5150,23 @@ function AdminWorkerReport({ user }) {
           <>
             <div className="bg-white rounded-2xl border p-4"><div className="font-black text-xl">🏭 {report.worker.name}</div><div className="text-xs text-gray-400">Production Workers Report</div></div>
             <div className="grid grid-cols-2 gap-2">
-              <StatCard label="Total Production Qty" value={fmt(report.worker.totalQuantity)} icon="📦" color="blue" />
+              <StatCard label="Total Production Qty" value={fmt(report.worker.totalQuantity)} icon="📦" color="blue" sub={`${fmt(report.worker.totalSqft || (report.history || []).reduce((a,h)=>a+itemSqft(h),0))} sqft`} />
               <StatCard label="Production Earnings" value={`${CURRENCY}${fmt(report.worker.totalEarnings)}`} icon="💰" color="green" />
               <StatCard label="Payments Given" value={`${CURRENCY}${fmt(report.worker.totalPaid)}`} icon="✅" color="teal" />
               <StatCard label="Pending" value={`${CURRENCY}${fmt(report.worker.totalPending)}`} icon="⏳" color="red" />
             </div>
             {(report.itemSummary || []).length > 0 && (
               <SectionBox title="Production Summary" icon="📦" color="blue">
-                {report.itemSummary.map((it, i) => <div key={i} className="flex justify-between text-sm py-1 border-b"><span className="font-bold">{it.item}</span><span>{fmt(it.quantity)} {it.unit}</span></div>)}
+                {report.itemSummary.map((it, i) => <div key={i} className="flex justify-between text-sm py-1 border-b"><span className="font-bold">{it.item}</span><span>{qtyWithSqft(it)}</span></div>)}
               </SectionBox>
             )}
             <div className="overflow-x-auto">
               <div className="text-xs font-bold mb-1">Production History</div>
               <table className="w-full text-xs">
-                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
+                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty / Sqft</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
                 <tbody>
                   {(report.history || []).map((h, i) => (
-                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{h.qty}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
+                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
                   ))}
                 </tbody>
               </table>
@@ -5671,7 +5700,7 @@ function OfficeDailyReport({ user }) {
             <StatCard label="Cash Received" value={money(total.cashReceived)} icon="R" color="green" sub={`Pending ${money(total.salesPending)}`} />
             <StatCard label="Purchase Paid" value={money(total.purchasePaid)} icon="P" color="amber" sub={`Total ${money(total.purchaseAmount)}`} />
             <StatCard label="Production Paid" value={money(total.productionPayments)} icon="W" color="purple" sub={`Pending ${money(total.productionPending)}`} />
-            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${total.productionCount||0} entries`} />
+            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft || 0)} sqft | ${total.productionCount||0} entries`} />
             <StatCard label="Production Value" value={money(total.productionEarnings)} icon="V" color="green" />
             <StatCard label="Total Cash Paid" value={money(total.cashPaid)} icon="-" color="red" />
             <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
@@ -5681,12 +5710,12 @@ function OfficeDailyReport({ user }) {
             {(report.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production for this day</div> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Item</th><th>Category / Color</th><th className="text-right">Qty</th><th>Unit</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Item</th><th>Category / Color</th><th className="text-right">Qty / Sqft</th><th>Unit</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
                   <tbody>{report.productionItemSummary.map((p,i)=>(
                     <tr key={i} className="border-b border-gray-100">
                       <td className="py-2 font-bold">{p.item}</td>
                       <td>{[p.category,p.color].filter(Boolean).join(" / ") || "-"}</td>
-                      <td className="text-right font-bold">{fmt(p.quantity)}</td>
+                      <td className="text-right font-bold">{qtyWithSqft(p)}</td>
                       <td>{p.unit}</td>
                       <td className="text-right">{money(p.amount)}</td>
                       <td className="text-right text-green-700 font-bold">{money(p.paid)}</td>
@@ -5744,12 +5773,12 @@ function OfficeDailyReport({ user }) {
             {(report.productionPayments||[]).length===0 ? <div className="text-xs text-gray-400">No production worker payments for this day</div> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th className="text-right">Produced</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Remarks</th></tr></thead>
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th className="text-right">Produced / Sqft</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Remarks</th></tr></thead>
                   <tbody>{report.productionPayments.map((p,i)=>(
                     <tr key={i} className="border-b border-gray-100">
                       <td className="py-2 font-bold">{p.workerName||"-"}</td>
                       <td>{p.itemName||p.category||"-"}</td>
-                      <td className="text-right">{fmt(p.producedQty)} {p.unit||""}</td>
+                      <td className="text-right">{qtyWithSqft(p)}</td>
                       <td className="text-right">{money(p.earned)}</td>
                       <td className="text-right text-green-700 font-bold">{money(p.amount)}</td>
                       <td className="text-right text-red-600 font-bold">{money(p.pending)}</td>
@@ -5765,13 +5794,13 @@ function OfficeDailyReport({ user }) {
             {(report.productionEntries||[]).length===0 ? <div className="text-xs text-gray-400">No production entries for this day</div> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th>Color</th><th className="text-right">Qty</th><th className="text-right">Rate</th><th className="text-right">Amount</th><th className="text-right">Paid</th></tr></thead>
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th>Color</th><th className="text-right">Qty / Sqft</th><th className="text-right">Rate</th><th className="text-right">Amount</th><th className="text-right">Paid</th></tr></thead>
                   <tbody>{report.productionEntries.map(e=>(
                     <tr key={e._id} className="border-b border-gray-100">
                       <td className="py-2 font-bold">{e.workerName||"-"}</td>
                       <td>{e.itemName||e.category||"-"}</td>
                       <td>{e.color||"-"}</td>
-                      <td className="text-right">{fmt(e.producedQty)} {e.unit||e.unitType||""}</td>
+                      <td className="text-right">{qtyWithSqft(e)}</td>
                       <td className="text-right">{money(e.productionRate)}</td>
                       <td className="text-right">{money(e.totalAmount)}</td>
                       <td className="text-right text-green-700 font-bold">{money(e.paymentGiven)}</td>
