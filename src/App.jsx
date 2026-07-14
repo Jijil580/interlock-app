@@ -5822,7 +5822,7 @@ function DailyCashFlow({ user, allUsers }) {
   const [dateMode, setDateMode] = useState("all");
   const [fromDate, setFromDate] = useState(today());
   const [toDate, setToDate] = useState(today());
-  const [personFilter, setPersonFilter] = useState(isAdminLike(user.role) ? "role:supervisor" : "");
+  const [personFilter, setPersonFilter] = useState(isAdminLike(user.role) ? "role:all" : "");
   const [data, setData] = useState({ history: [], total: {} });
   const [loading, setLoading] = useState(true);
 
@@ -5846,7 +5846,7 @@ function DailyCashFlow({ user, allUsers }) {
     const params = new URLSearchParams({ role: effectiveRoleOf(user.role), name: user.name, fromDate: range.from, toDate: range.to });
     if (isAdminLike(user.role)) {
       const [kind, role, ...nameParts] = personFilter.split(":");
-      if (kind === "role") params.set("personRole", role);
+      if (kind === "role" && role !== "all") params.set("personRole", role);
       if (kind === "person") {
         params.set("personRole", role);
         params.set("person", nameParts.join(":"));
@@ -5862,6 +5862,7 @@ function DailyCashFlow({ user, allUsers }) {
   }, [user.role, user.name, view, selectedDate, dateMode, fromDate, toDate, personFilter]);
 
   const isSupervisor = user.role === "supervisor" || (isAdminLike(user.role) && personFilter.includes(":supervisor"));
+  const isMixedCashFlow = isAdminLike(user.role) && personFilter === "role:all";
   const total = data.total || {};
   const money = value => `${CURRENCY}${fmt(value)}`;
   const dateLabel = value => {
@@ -5870,9 +5871,10 @@ function DailyCashFlow({ user, allUsers }) {
     return `${d}-${m}-${y}`;
   };
   const personOptions = [
+    { value:"role:all", label:"All Persons" },
     { value:"role:supervisor", label:"All Supervisors" },
-    { value:"role:user", label:"All Users" },
-    ...(allUsers || []).filter(u=>u.role==="supervisor"||u.role==="user").map(u=>({
+    { value:"role:user", label:"Admin & Users" },
+    ...(allUsers || []).filter(u=>u.role==="admin"||u.role==="supervisor"||u.role==="user").map(u=>({
       value:`person:${u.role}:${u.name}`, label:`${u.name} (${u.role})`
     }))
   ];
@@ -5910,7 +5912,17 @@ function DailyCashFlow({ user, allUsers }) {
         <>
           {view==="daily"&&<div className="text-sm font-black text-gray-700">Date: {dateLabel(selectedDate)}</div>}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {isSupervisor ? (
+            {isMixedCashFlow ? (
+              <>
+                <StatCard label="Cash Received" value={money(total.received)} icon="₹" color="green" />
+                <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+                <StatCard label="Purchase Payments" value={money(total.purchasePayments)} icon="P" color="teal" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            ) : isSupervisor ? (
               <>
                 <StatCard label="Cash Received" value={money(total.received)} icon="₹" color="green" />
                 <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
