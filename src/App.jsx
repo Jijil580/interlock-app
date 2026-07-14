@@ -3949,7 +3949,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   const [printOptions, setPrintOptions] = useState({ billType: "without_gst", gstNumber: "", cgstPercent: "", sgstPercent: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
@@ -4086,45 +4086,90 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const withGst = printOptions.billType === "with_gst";
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
     const details = [printSale.shape, printSale.color, printSale.size, printSale.thickness ? `${printSale.thickness}cm` : ""].filter(Boolean).join(" / ");
+    const itemAmount = tax.taxable;
+    const cgstRate = withGst ? tax.cgstPercent : 0;
+    const sgstRate = withGst ? tax.sgstPercent : 0;
+    const igstRate = 0;
     const rows = `
       <tr>
-        <td>1</td>
+        <td class="center">1</td>
         <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
+        <td class="center">${printSale.hsnSac || "-"}</td>
         <td class="right">${fmt(printSale.quantity)}</td>
-        <td>${printSale.unit || ""}</td>
+        <td class="center">${printSale.unit || ""}</td>
         <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
-        <td class="right">${CURRENCY}${fmt(tax.taxable)}</td>
+        <td class="right">${CURRENCY}${fmt(itemAmount)}</td>
+        <td class="right">${cgstRate || ""}</td>
+        <td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td>
+        <td class="right">${sgstRate || ""}</td>
+        <td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td>
+        <td class="right">${igstRate || ""}</td>
+        <td class="right"></td>
+        <td class="right">${CURRENCY}${fmt(tax.total)}</td>
       </tr>`;
-    const taxRows = withGst ? `
-      <tr><td colspan="5" class="right">Taxable Amount</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td></tr>
-      <tr><td colspan="5" class="right">CGST ${tax.cgstPercent}%</td><td class="right">${CURRENCY}${fmt(tax.cgstAmount)}</td></tr>
-      <tr><td colspan="5" class="right">SGST ${tax.sgstPercent}%</td><td class="right">${CURRENCY}${fmt(tax.sgstAmount)}</td></tr>` : "";
     const html = `<!doctype html><html><head><title>Invoice ${invoiceNo}</title>
       <style>
-        body{font-family:Arial,sans-serif;color:#111;margin:24px} .top{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #111;padding-bottom:14px}
-        h1{margin:0;font-size:24px}.muted{color:#555;font-size:12px}.box{border:1px solid #ddd;padding:12px;margin-top:14px}
-        table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #ddd;padding:8px;font-size:12px;vertical-align:top}th{background:#f5f5f5}.right{text-align:right}.total{font-size:16px;font-weight:800}
-        .footer{margin-top:34px;display:flex;justify-content:space-between}.sign{border-top:1px solid #111;padding-top:8px;width:180px;text-align:center}
-        @media print{button{display:none}body{margin:12mm}}
+        body{font-family:"Times New Roman",serif;color:#16224d;margin:18px;background:#fff}.invoice{border:2px solid #16224d;max-width:1120px;margin:auto}
+        .printbtn{position:fixed;right:18px;top:12px;padding:8px 14px}.title{display:grid;grid-template-columns:1fr 2fr 1fr;border-bottom:2px solid #16224d;min-height:112px}
+        .title>div{padding:8px}.brand{text-align:center}.brand h1{font-size:30px;margin:8px 0 2px;letter-spacing:.5px}.brand .addr{font-size:13px;font-weight:bold;line-height:1.35}.side{font-size:13px;line-height:1.7}.side.right{text-align:right}
+        .grid2{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid #16224d}.cell{padding:8px;border-right:2px solid #16224d;min-height:116px}.cell:last-child{border-right:0}
+        .line{display:grid;grid-template-columns:140px 1fr;font-size:13px;line-height:1.75}.label{font-weight:bold}.section-title{text-align:center;font-weight:bold;border-bottom:1px solid #16224d;padding:4px;font-size:13px}
+        table{width:100%;border-collapse:collapse}th,td{border:1px solid #16224d;padding:5px;font-size:12px;vertical-align:top}th{font-weight:bold;text-align:center}.right{text-align:right}.center{text-align:center}.total-row td{font-weight:bold}
+        .bottom{display:grid;grid-template-columns:1.2fr 1fr;border-top:2px solid #16224d}.bank,.amounts{min-height:170px}.bank{border-right:2px solid #16224d}.bank .body{padding:10px;font-size:13px;line-height:1.8}
+        .amounts table td{height:20px}.words{border-top:2px solid #16224d;padding:8px;font-size:13px}.footer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #16224d;min-height:92px}.seal{border-right:2px solid #16224d;text-align:center;padding-top:34px;font-size:13px}.sign{text-align:right;padding:10px;font-size:13px}.sign b{display:block;margin-top:38px}
+        @media print{.printbtn{display:none}body{margin:8mm}.invoice{max-width:none}}
       </style></head><body>
-      <button onclick="window.print()" style="float:right;padding:8px 14px">Print</button>
-      <div class="top">
-        <div><h1>${COMPANY.name}</h1><div class="muted">Interlock Management System</div></div>
-        <div class="right"><h1>${withGst ? "TAX INVOICE" : "BILL"}</h1><div>Invoice: <b>${invoiceNo}</b></div><div>Date: <b>${printSale.date || ""}</b></div></div>
+      <button class="printbtn" onclick="window.print()">Print</button>
+      <div class="invoice">
+        <div class="title">
+          <div class="side"><b><i>INVOICE</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br>State : ${printSale.state || "Kerala"}<br><span style="border:1px solid #16224d;padding:2px 8px">State Code: ${printSale.stateCode || "32"}</span></div>
+          <div class="brand"><h1>P. K. INTERLOCKS & HOLLOW BRICKS</h1><div class="addr">HAJ ROAD, VILAKKODE, IRITTY<br>GSTIN: 32AESHA2414P1ZP</div></div>
+          <div class="side right"><b>PH:</b> 7034116685<br>9946956685<br><br>Date: <b>${printSale.date || ""}</b></div>
+        </div>
+        <div class="grid2">
+          <div class="cell">
+            <div class="section-title">Details of Receiver / Billed to</div>
+            <div class="line"><span class="label">Name</span><span>: ${printSale.customer || "-"}</span></div>
+            <div class="line"><span class="label">GSTIN</span><span>: ${withGst ? (printOptions.gstNumber || printSale.gstNumber || "-") : "-"}</span></div>
+            <div class="line"><span class="label">Address</span><span>: ${printSale.address || "-"}</span></div>
+            <div class="line"><span class="label">State</span><span>: ${printSale.state || "Kerala"}</span></div>
+            <div class="line"><span class="label">State Code</span><span>: ${printSale.stateCode || "32"}</span></div>
+          </div>
+          <div class="cell">
+            <div class="section-title">Details of Consignee / Shipped to</div>
+            <div class="line"><span class="label">Transportation Mode</span><span>: ${printSale.transportMode || "-"}</span></div>
+            <div class="line"><span class="label">Vehicle Number</span><span>: ${printSale.vehicleNumber || "-"}</span></div>
+            <div class="line"><span class="label">Date of Supply</span><span>: ${printSale.dateOfSupply || printSale.date || "-"}</span></div>
+            <div class="line"><span class="label">Place of Supply</span><span>: ${printSale.placeOfSupply || "-"}</span></div>
+            <div class="line"><span class="label">State Code</span><span>: ${printSale.stateCode || "32"}</span></div>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
+          <tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
+          <tbody>${rows}<tr class="total-row"><td colspan="6" class="right">Total</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td><td></td><td></td><td class="right">${CURRENCY}${fmt(tax.total)}</td></tr></tbody>
+        </table>
+        <div class="words"><b>Total Invoice Amount in Words:</b> ${CURRENCY}${fmt(tax.total)} only</div>
+        <div class="bottom">
+          <div class="bank">
+            <div class="section-title">BANK DETAILS</div>
+            <div class="body">Name of Bank : ${printSale.bankName || "-"}<br>Bank A/C No. : ${printSale.bankAccount || "-"}<br>Bank Branch IFSC : ${printSale.bankIfsc || "-"}<br><br><b>Terms & Conditions:</b><br>${printSale.terms || "Certified that the particulars given above are true and correct."}</div>
+          </div>
+          <div class="amounts">
+            <table><tbody>
+              <tr><td>Total Amount Before Tax</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td></tr>
+              <tr><td>Add : CGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td></tr>
+              <tr><td>Add : SGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td></tr>
+              <tr><td>Add : IGST</td><td class="right"></td></tr>
+              <tr><td>Tax Amount : GST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount + tax.sgstAmount) : ""}</td></tr>
+              <tr><td>Total Amount After Tax</td><td class="right"><b>${CURRENCY}${fmt(tax.total)}</b></td></tr>
+              <tr><td>Paid</td><td class="right">${CURRENCY}${fmt(printSale.amountPaid)}</td></tr>
+              <tr><td>Pending</td><td class="right">${CURRENCY}${fmt(Math.max(0, tax.total - (+(printSale.amountPaid)||0)))}</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="footer"><div class="seal">(Common Seal)</div><div class="sign">For P.K. Interlocks & Hollowbricks<b>Authorised Signatory</b></div></div>
       </div>
-      <div class="box">
-        <b>Bill To</b><br>${printSale.customer || "-"}<br>${printSale.mobileNumber || ""}<br>${printSale.address || ""}
-        ${withGst ? `<br>GSTIN: <b>${printOptions.gstNumber || "-"}</b>` : ""}
-      </div>
-      <table><thead><tr><th>#</th><th>Description</th><th class="right">Qty</th><th>Unit</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead><tbody>${rows}
-        ${printSale.discount ? `<tr><td colspan="5" class="right">Discount</td><td class="right">-${CURRENCY}${fmt(printSale.discount)}</td></tr>` : ""}
-        ${taxRows}
-        <tr><td colspan="5" class="right total">Grand Total</td><td class="right total">${CURRENCY}${fmt(tax.total)}</td></tr>
-        <tr><td colspan="5" class="right">Paid</td><td class="right">${CURRENCY}${fmt(printSale.amountPaid)}</td></tr>
-        <tr><td colspan="5" class="right">Pending</td><td class="right">${CURRENCY}${fmt(Math.max(0, tax.total - (+(printSale.amountPaid)||0)))}</td></tr>
-      </tbody></table>
-      <div class="muted" style="margin-top:10px">Payment Mode: ${printSale.paymentMode || "-"}</div>
-      <div class="footer"><div>Thank you for your business.</div><div class="sign">Authorized Signature</div></div>
       <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
     const w = window.open("", "_blank", "width=900,height=700");
     if (!w) return;
@@ -4365,6 +4410,20 @@ function Sales({ sales, setSales, stock, setStock, user }) {
             </div>
 
             <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-gray-600">Invoice & Transport Details</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Invoice Number" value={form.invoiceNumber || ""} onChange={e => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Auto if blank" />
+                <Select label="Reverse Charge" value={form.reverseCharge || "No"} options={["No", "Yes"]} onChange={e => setForm({ ...form, reverseCharge: e.target.value })} />
+                <Input label="State" value={form.state || ""} onChange={e => setForm({ ...form, state: e.target.value })} placeholder="Kerala" />
+                <Input label="State Code" value={form.stateCode || ""} onChange={e => setForm({ ...form, stateCode: e.target.value })} placeholder="32" />
+                <Input label="Transport Mode" value={form.transportMode || ""} onChange={e => setForm({ ...form, transportMode: e.target.value })} placeholder="Road / Own Vehicle" />
+                <Input label="Vehicle Number" value={form.vehicleNumber || ""} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} placeholder="KL-00-0000" />
+                <Input label="Date of Supply" type="date" value={form.dateOfSupply || ""} onChange={e => setForm({ ...form, dateOfSupply: e.target.value })} />
+                <Input label="Place of Supply" value={form.placeOfSupply || ""} onChange={e => setForm({ ...form, placeOfSupply: e.target.value })} placeholder="Place" />
+                <Input label="HSN / SAC" value={form.hsnSac || ""} onChange={e => setForm({ ...form, hsnSac: e.target.value })} placeholder="HSN/SAC" />
+              </div>
+            </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
               <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
@@ -4425,6 +4484,15 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               const mode = e.target.value;
               setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
             }} />
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-gray-600">Bank Details & Terms</div>
+              <Input label="Bank Name" value={form.bankName || ""} onChange={e => setForm({ ...form, bankName: e.target.value })} placeholder="Bank name" />
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Bank A/C No." value={form.bankAccount || ""} onChange={e => setForm({ ...form, bankAccount: e.target.value })} placeholder="Account number" />
+                <Input label="Bank IFSC" value={form.bankIfsc || ""} onChange={e => setForm({ ...form, bankIfsc: e.target.value })} placeholder="IFSC" />
+              </div>
+              <Textarea label="Terms & Conditions" value={form.terms || ""} onChange={e => setForm({ ...form, terms: e.target.value })} placeholder="Terms & conditions" />
+            </div>
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
           </div>
