@@ -5336,6 +5336,162 @@ function SupervisorSiteReport({ user }) {
 // ─── SUPERVISOR SITE REPORT VIEW ─────────────────────────────────────────────
 
 
+function OfficeDailyReport({ user }) {
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [report, setReport] = useState({ totals: {}, sales: [], purchases: [], productionEntries: [], productionItemSummary: [], productionPayments: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    const params = new URLSearchParams({ date: selectedDate, role: effectiveRoleOf(user.role), name: user.name });
+    api("GET", `/office-daily-report?${params.toString()}`).then(data => {
+      if (!active) return;
+      setReport(data?.totals ? data : { totals: {}, sales: [], purchases: [], productionEntries: [], productionItemSummary: [], productionPayments: [] });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedDate, user.role, user.name]);
+
+  const total = report.totals || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const detailText = entry => [entry.category, entry.shape, entry.color, entry.size, entry.thickness].filter(Boolean).join(", ");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Office Daily Report</h2>
+          <div className="text-xs text-gray-400">Daily sales, purchases, production, and production worker payments</div>
+        </div>
+        <div className="bg-white border rounded-2xl shadow-sm p-3">
+          <Input label="Report Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
+        </div>
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} bills`} />
+            <StatCard label="Cash Received" value={money(total.cashReceived)} icon="R" color="green" sub={`Pending ${money(total.salesPending)}`} />
+            <StatCard label="Purchase Paid" value={money(total.purchasePaid)} icon="P" color="amber" sub={`Total ${money(total.purchaseAmount)}`} />
+            <StatCard label="Production Paid" value={money(total.productionPayments)} icon="W" color="purple" sub={`Pending ${money(total.productionPending)}`} />
+            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${total.productionCount||0} entries`} />
+            <StatCard label="Production Value" value={money(total.productionEarnings)} icon="V" color="green" />
+            <StatCard label="Total Cash Paid" value={money(total.cashPaid)} icon="-" color="red" />
+            <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
+          </div>
+
+          <SectionBox title="Production Item-wise Total" icon="P" color="teal">
+            {(report.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Item</th><th>Category / Color</th><th className="text-right">Qty</th><th>Unit</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+                  <tbody>{report.productionItemSummary.map((p,i)=>(
+                    <tr key={i} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.item}</td>
+                      <td>{[p.category,p.color].filter(Boolean).join(" / ") || "-"}</td>
+                      <td className="text-right font-bold">{fmt(p.quantity)}</td>
+                      <td>{p.unit}</td>
+                      <td className="text-right">{money(p.amount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.paid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.pending)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Sales Details" icon="S" color="green">
+            {(report.sales||[]).length===0 ? <div className="text-xs text-gray-400">No sales for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Invoice</th><th>Customer</th><th>Product</th><th className="text-right">Qty</th><th className="text-right">Total</th><th className="text-right">Received</th><th className="text-right">Pending</th></tr></thead>
+                  <tbody>{report.sales.map(s=>(
+                    <tr key={s._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{s.invoiceNumber||"-"}</td>
+                      <td>{s.customer||"-"}</td>
+                      <td><div className="font-semibold">{s.product||s.interlockDetails||"-"}</div><div className="text-gray-400">{detailText(s)}</div></td>
+                      <td className="text-right">{fmt(s.quantity)} {s.unit||""}</td>
+                      <td className="text-right">{money(s.total)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(s.amountPaid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(s.amountPending)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Purchase Details" icon="P" color="amber">
+            {(report.purchases||[]).length===0 ? <div className="text-xs text-gray-400">No purchases for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Supplier</th><th>Material</th><th className="text-right">Qty</th><th className="text-right">Total</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Vehicle</th></tr></thead>
+                  <tbody>{report.purchases.map(p=>(
+                    <tr key={p._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.supplierName||"-"}</td>
+                      <td>{p.itemName||p.itemType||"-"}</td>
+                      <td className="text-right">{fmt(p.quantity)} {p.unit||""}</td>
+                      <td className="text-right">{money(p.totalAmount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.amountPaid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.amountPending)}</td>
+                      <td>{[p.vehicleNumber,p.driverName].filter(Boolean).join(" / ") || "-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Production Worker Payments" icon="W" color="purple">
+            {(report.productionPayments||[]).length===0 ? <div className="text-xs text-gray-400">No production worker payments for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th className="text-right">Produced</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Remarks</th></tr></thead>
+                  <tbody>{report.productionPayments.map((p,i)=>(
+                    <tr key={i} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.workerName||"-"}</td>
+                      <td>{p.itemName||p.category||"-"}</td>
+                      <td className="text-right">{fmt(p.producedQty)} {p.unit||""}</td>
+                      <td className="text-right">{money(p.earned)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.amount)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.pending)}</td>
+                      <td>{p.remarks||"-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Production Entry Details" icon="D" color="blue">
+            {(report.productionEntries||[]).length===0 ? <div className="text-xs text-gray-400">No production entries for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th>Color</th><th className="text-right">Qty</th><th className="text-right">Rate</th><th className="text-right">Amount</th><th className="text-right">Paid</th></tr></thead>
+                  <tbody>{report.productionEntries.map(e=>(
+                    <tr key={e._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{e.workerName||"-"}</td>
+                      <td>{e.itemName||e.category||"-"}</td>
+                      <td>{e.color||"-"}</td>
+                      <td className="text-right">{fmt(e.producedQty)} {e.unit||e.unitType||""}</td>
+                      <td className="text-right">{money(e.productionRate)}</td>
+                      <td className="text-right">{money(e.totalAmount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(e.paymentGiven)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DailyCashFlow({ user, allUsers }) {
   const [view, setView] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(today());
@@ -5495,6 +5651,7 @@ function DailyCashFlow({ user, allUsers }) {
 const NAV = {
   admin: [
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
+    { id:"officedaily", label:"Office Daily Report", icon:"DR" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
@@ -5630,6 +5787,7 @@ export default function App() {
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
+      case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
       case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
@@ -5676,7 +5834,6 @@ export default function App() {
     </div>
   );
 }
-
 
 
 
