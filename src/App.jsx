@@ -5822,7 +5822,7 @@ function DailyCashFlow({ user, allUsers }) {
   const [dateMode, setDateMode] = useState("all");
   const [fromDate, setFromDate] = useState(today());
   const [toDate, setToDate] = useState(today());
-  const [personFilter, setPersonFilter] = useState(isAdminLike(user.role) ? "role:all" : "");
+  const [personFilter, setPersonFilter] = useState(user.role === "admin" ? "role:all" : "");
   const [data, setData] = useState({ history: [], total: {} });
   const [loading, setLoading] = useState(true);
 
@@ -5843,8 +5843,8 @@ function DailyCashFlow({ user, allUsers }) {
   useEffect(() => {
     let active = true;
     const range = getRange();
-    const params = new URLSearchParams({ role: effectiveRoleOf(user.role), name: user.name, fromDate: range.from, toDate: range.to });
-    if (isAdminLike(user.role)) {
+    const params = new URLSearchParams({ role: user.role, name: user.name, fromDate: range.from, toDate: range.to });
+    if (user.role === "admin") {
       const [kind, role, ...nameParts] = personFilter.split(":");
       if (kind === "role" && role !== "all") params.set("personRole", role);
       if (kind === "person") {
@@ -5861,8 +5861,8 @@ function DailyCashFlow({ user, allUsers }) {
     return () => { active = false; };
   }, [user.role, user.name, view, selectedDate, dateMode, fromDate, toDate, personFilter]);
 
-  const isSupervisor = user.role === "supervisor" || (isAdminLike(user.role) && personFilter.includes(":supervisor"));
-  const isMixedCashFlow = isAdminLike(user.role) && personFilter === "role:all";
+  const isSupervisor = user.role === "supervisor" || (user.role === "admin" && personFilter.includes(":supervisor"));
+  const isMixedCashFlow = user.role === "admin" && personFilter === "role:all";
   const total = data.total || {};
   const money = value => `${CURRENCY}${fmt(value)}`;
   const dateLabel = value => {
@@ -5893,7 +5893,7 @@ function DailyCashFlow({ user, allUsers }) {
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {isAdminLike(user.role)&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
+        {user.role==="admin"&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
         {view==="daily" ? (
           <Input label="Select Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
         ) : (
@@ -5938,6 +5938,7 @@ function DailyCashFlow({ user, allUsers }) {
                 <StatCard label="Total Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" />
                 <StatCard label="Customer Payments Received" value={money(total.customerPayments)} icon="₹" color="green" />
                 <StatCard label="Purchase Payments" value={money(total.purchasePayments)} icon="P" color="amber" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="teal" />
                 <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
                 <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
                 <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
@@ -5950,7 +5951,7 @@ function DailyCashFlow({ user, allUsers }) {
               {data.history.map((row,i)=>(
                 <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
                   <div className="flex justify-between gap-2">
-                    <div><div className="font-black">{dateLabel(row.date)}{isAdminLike(user.role)?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
+                    <div><div className="font-black">{dateLabel(row.date)}{user.role==="admin"?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
                     <div className={`font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</div>
                   </div>
                   {isSupervisor ? (
