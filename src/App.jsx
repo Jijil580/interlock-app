@@ -3945,9 +3945,11 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   const [customerPreview, setCustomerPreview] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [printSale, setPrintSale] = useState(null);
+  const [printOptions, setPrintOptions] = useState({ billType: "without_gst", gstNumber: "", cgstPercent: "", sgstPercent: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", unit: "sqft", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
@@ -3958,8 +3960,27 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   }, []);
 
   const calcSubtotal = () => +(form.quantity || 0) * +(form.price || 0);
-  const calcTotal = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
+  const calcTaxable = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
+  const calcCgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.cgstPercent || 0)) / 100 : 0;
+  const calcSgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.sgstPercent || 0)) / 100 : 0;
+  const calcTotal = () => Math.max(0, calcTaxable() + calcCgst() + calcSgst());
   const calcPending = () => Math.max(0, calcTotal() - +(form.amountPaid || 0));
+  const billBaseAmount = (sale, opts = {}) => {
+    if (sale?.taxableAmount != null) return +(sale.taxableAmount) || 0;
+    if ((opts.billType || sale?.billType) === "with_gst" && (+(sale?.cgstAmount) || +(sale?.sgstAmount))) {
+      return Math.max(0, (+(sale?.total) || 0) - (+(sale?.cgstAmount) || 0) - (+(sale?.sgstAmount) || 0));
+    }
+    return +(sale?.total) || 0;
+  };
+  const printTax = (sale, opts) => {
+    const taxable = billBaseAmount(sale, opts);
+    const withGst = opts.billType === "with_gst";
+    const cgstPercent = withGst ? +(opts.cgstPercent || sale?.cgstPercent || 0) : 0;
+    const sgstPercent = withGst ? +(opts.sgstPercent || sale?.sgstPercent || 0) : 0;
+    const cgstAmount = taxable * cgstPercent / 100;
+    const sgstAmount = taxable * sgstPercent / 100;
+    return { taxable, cgstPercent, sgstPercent, cgstAmount, sgstAmount, total: taxable + cgstAmount + sgstAmount };
+  };
 
   const lookupCustomer = async (mobile) => {
     const m = mobile.replace(/\D/g, "").slice(-10);
@@ -4030,6 +4051,8 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const amountPaid = +(form.amountPaid || 0);
     const item = await api("POST", "/sales", {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
+      taxableAmount: calcTaxable(), cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
+      cgstAmount: calcCgst(), sgstAmount: calcSgst(),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
       saveToCustomerMaster: customerMode === "new" ? saveToMaster : true,
@@ -4045,6 +4068,69 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     } else {
       setSaveError(item.message || "Failed to save sale");
     }
+  };
+
+  const openPrintBill = (sale) => {
+    setPrintSale(sale);
+    setPrintOptions({
+      billType: sale.billType === "with_gst" ? "with_gst" : "without_gst",
+      gstNumber: sale.gstNumber || "",
+      cgstPercent: sale.cgstPercent ? String(sale.cgstPercent) : "",
+      sgstPercent: sale.sgstPercent ? String(sale.sgstPercent) : "",
+    });
+  };
+
+  const printBill = () => {
+    if (!printSale) return;
+    const tax = printTax(printSale, printOptions);
+    const withGst = printOptions.billType === "with_gst";
+    const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
+    const details = [printSale.shape, printSale.color, printSale.size, printSale.thickness ? `${printSale.thickness}cm` : ""].filter(Boolean).join(" / ");
+    const rows = `
+      <tr>
+        <td>1</td>
+        <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
+        <td class="right">${fmt(printSale.quantity)}</td>
+        <td>${printSale.unit || ""}</td>
+        <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
+        <td class="right">${CURRENCY}${fmt(tax.taxable)}</td>
+      </tr>`;
+    const taxRows = withGst ? `
+      <tr><td colspan="5" class="right">Taxable Amount</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td></tr>
+      <tr><td colspan="5" class="right">CGST ${tax.cgstPercent}%</td><td class="right">${CURRENCY}${fmt(tax.cgstAmount)}</td></tr>
+      <tr><td colspan="5" class="right">SGST ${tax.sgstPercent}%</td><td class="right">${CURRENCY}${fmt(tax.sgstAmount)}</td></tr>` : "";
+    const html = `<!doctype html><html><head><title>Invoice ${invoiceNo}</title>
+      <style>
+        body{font-family:Arial,sans-serif;color:#111;margin:24px} .top{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #111;padding-bottom:14px}
+        h1{margin:0;font-size:24px}.muted{color:#555;font-size:12px}.box{border:1px solid #ddd;padding:12px;margin-top:14px}
+        table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #ddd;padding:8px;font-size:12px;vertical-align:top}th{background:#f5f5f5}.right{text-align:right}.total{font-size:16px;font-weight:800}
+        .footer{margin-top:34px;display:flex;justify-content:space-between}.sign{border-top:1px solid #111;padding-top:8px;width:180px;text-align:center}
+        @media print{button{display:none}body{margin:12mm}}
+      </style></head><body>
+      <button onclick="window.print()" style="float:right;padding:8px 14px">Print</button>
+      <div class="top">
+        <div><h1>${COMPANY.name}</h1><div class="muted">Interlock Management System</div></div>
+        <div class="right"><h1>${withGst ? "TAX INVOICE" : "BILL"}</h1><div>Invoice: <b>${invoiceNo}</b></div><div>Date: <b>${printSale.date || ""}</b></div></div>
+      </div>
+      <div class="box">
+        <b>Bill To</b><br>${printSale.customer || "-"}<br>${printSale.mobileNumber || ""}<br>${printSale.address || ""}
+        ${withGst ? `<br>GSTIN: <b>${printOptions.gstNumber || "-"}</b>` : ""}
+      </div>
+      <table><thead><tr><th>#</th><th>Description</th><th class="right">Qty</th><th>Unit</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead><tbody>${rows}
+        ${printSale.discount ? `<tr><td colspan="5" class="right">Discount</td><td class="right">-${CURRENCY}${fmt(printSale.discount)}</td></tr>` : ""}
+        ${taxRows}
+        <tr><td colspan="5" class="right total">Grand Total</td><td class="right total">${CURRENCY}${fmt(tax.total)}</td></tr>
+        <tr><td colspan="5" class="right">Paid</td><td class="right">${CURRENCY}${fmt(printSale.amountPaid)}</td></tr>
+        <tr><td colspan="5" class="right">Pending</td><td class="right">${CURRENCY}${fmt(Math.max(0, tax.total - (+(printSale.amountPaid)||0)))}</td></tr>
+      </tbody></table>
+      <div class="muted" style="margin-top:10px">Payment Mode: ${printSale.paymentMode || "-"}</div>
+      <div class="footer"><div>Thank you for your business.</div><div class="sign">Authorized Signature</div></div>
+      <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   };
 
   const filtered = filterSalesList(sales, { quickSearch, ...filters });
@@ -4220,9 +4306,12 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                 <Badge color={s.paymentMode === "Cash" ? "green" : s.paymentMode === "Credit" ? "red" : "blue"}>{s.paymentMode}</Badge>
               </div>
             </div>
-            {s.mobileNumber && (
-              <button onClick={() => openLedger(s.mobileNumber)} className="mt-2 text-xs text-amber-600 font-bold hover:underline">View Customer Ledger →</button>
-            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {s.mobileNumber && (
+                <button onClick={() => openLedger(s.mobileNumber)} className="text-xs text-amber-600 font-bold hover:underline">View Customer Ledger</button>
+              )}
+              <button onClick={() => openPrintBill(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Print Bill</button>
+            </div>
           </div>
         ))}
       </div>
@@ -4304,6 +4393,23 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
             </div>
             <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+              <Select label="Bill Type" value={form.billType} options={[{ value: "without_gst", label: "Without GST" }, { value: "with_gst", label: "With GST" }]} onChange={e => setForm({ ...form, billType: e.target.value })} />
+              {form.billType === "with_gst" && (
+                <>
+                  <Input label="Customer GST Number" value={form.gstNumber} onChange={e => setForm({ ...form, gstNumber: e.target.value })} placeholder="GSTIN" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input label="CGST %" type="number" step="any" value={form.cgstPercent} onChange={e => setForm({ ...form, cgstPercent: e.target.value })} placeholder="9" />
+                    <Input label="SGST %" type="number" step="any" value={form.sgstPercent} onChange={e => setForm({ ...form, sgstPercent: e.target.value })} placeholder="9" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcTaxable())}</div><div className="text-gray-400">Taxable</div></div>
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcCgst())}</div><div className="text-gray-400">CGST</div></div>
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcSgst())}</div><div className="text-gray-400">SGST</div></div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
               <div className="text-xs text-gray-400">Total Amount</div>
               <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
@@ -4321,6 +4427,39 @@ function Sales({ sales, setSales, stock, setStock, user }) {
             }} />
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
+          </div>
+        </Modal>
+      )}
+      {printSale && (
+        <Modal title="Print Bill" onClose={() => setPrintSale(null)}>
+          <div className="space-y-3">
+            <div className="bg-gray-50 border rounded-xl p-3 text-sm">
+              <div className="font-black">{printSale.customer || "-"}</div>
+              <div className="text-xs text-gray-500">{printSale.product || "-"} · {printSale.date}</div>
+              <div className="text-xs text-gray-500">Invoice: {printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase()}</div>
+            </div>
+            <Select label="Bill Format" value={printOptions.billType} options={[{ value: "without_gst", label: "Without GST" }, { value: "with_gst", label: "With GST" }]} onChange={e => setPrintOptions({ ...printOptions, billType: e.target.value })} />
+            {printOptions.billType === "with_gst" && (
+              <>
+                <Input label="Customer GST Number" value={printOptions.gstNumber} onChange={e => setPrintOptions({ ...printOptions, gstNumber: e.target.value })} placeholder="GSTIN" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="CGST %" type="number" step="any" value={printOptions.cgstPercent} onChange={e => setPrintOptions({ ...printOptions, cgstPercent: e.target.value })} placeholder="9" />
+                  <Input label="SGST %" type="number" step="any" value={printOptions.sgstPercent} onChange={e => setPrintOptions({ ...printOptions, sgstPercent: e.target.value })} placeholder="9" />
+                </div>
+              </>
+            )}
+            {(() => {
+              const tax = printTax(printSale, printOptions);
+              return (
+                <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                  <div className="bg-blue-50 rounded-xl p-2"><div className="font-black text-blue-700">{CURRENCY}{fmt(tax.taxable)}</div><div className="text-gray-400">Taxable</div></div>
+                  <div className="bg-green-50 rounded-xl p-2"><div className="font-black text-green-700">{CURRENCY}{fmt(tax.total)}</div><div className="text-gray-400">Bill Total</div></div>
+                  {printOptions.billType === "with_gst" && <div className="bg-amber-50 rounded-xl p-2"><div className="font-black text-amber-700">{CURRENCY}{fmt(tax.cgstAmount)}</div><div className="text-gray-400">CGST</div></div>}
+                  {printOptions.billType === "with_gst" && <div className="bg-purple-50 rounded-xl p-2"><div className="font-black text-purple-700">{CURRENCY}{fmt(tax.sgstAmount)}</div><div className="text-gray-400">SGST</div></div>}
+                </div>
+              );
+            })()}
+            <button onClick={printBill} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700">Print Bill</button>
           </div>
         </Modal>
       )}
@@ -5902,9 +6041,3 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
-
