@@ -440,52 +440,120 @@ function Login({ onLogin }) {
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
-  const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
-  const pendingWork = siteWorks.filter(s=>s.status==="running"||s.status==="pending").length;
-  const completedWork = siteWorks.filter(s=>s.status==="completed").length;
-  const totalIncome = siteWorks.reduce((a,s)=>a+(+(s.totalAmount)||0),0);
-  const pendingPayment = siteWorks.filter(s=>s.paymentStatus!=="paid").reduce((a,s)=>a+(+(s.pendingAmount)||0),0);
+  const isAdmin = user.role === "admin";
+  const fixedToday = today();
+  const [view, setView] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(fixedToday);
+  const [selectedMonth, setSelectedMonth] = useState(fixedToday.slice(0, 7));
+  const [fromDate, setFromDate] = useState(fixedToday);
+  const [toDate, setToDate] = useState(fixedToday);
+  const [summary, setSummary] = useState({ totals: {}, productionItemSummary: [], recentSales: [], recentPurchases: [], recentProduction: [], recentSites: [] });
+  const [loading, setLoading] = useState(true);
+
+  const range = () => {
+    if (!isAdmin) return { from: fixedToday, to: fixedToday, label: "Today" };
+    if (view === "all") return { from: "", to: "", label: "All Time" };
+    if (view === "monthly") {
+      const [year, month] = selectedMonth.split("-");
+      const last = new Date(+year, +month, 0).getDate();
+      return { from: `${selectedMonth}-01`, to: `${selectedMonth}-${String(last).padStart(2, "0")}`, label: selectedMonth };
+    }
+    if (view === "range") return { from: fromDate, to: toDate, label: `${fromDate} to ${toDate}` };
+    return { from: selectedDate, to: selectedDate, label: selectedDate };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const r = range();
+    const params = new URLSearchParams({ role: effectiveRoleOf(user.role), fromDate: r.from, toDate: r.to });
+    setLoading(true);
+    api("GET", `/dashboard-summary?${params.toString()}`).then(data => {
+      if (!active) return;
+      setSummary(data?.totals ? data : { totals: {}, productionItemSummary: [], recentSales: [], recentPurchases: [], recentProduction: [], recentSites: [] });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, view, selectedDate, selectedMonth, fromDate, toDate]);
+
+  const total = summary.totals || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const currentRange = range();
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-xl font-black text-gray-900">Good day, {user.name.split(" ")[0]} 👋</h2>
-        <p className="text-xs text-gray-400 mt-0.5">{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</p>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Running Sites" value={pendingWork} icon="🏗️" color="amber" />
-        <StatCard label="Completed" value={completedWork} icon="✅" color="green" />
-        <StatCard label="Total Income" value={`${CURRENCY}${fmt(totalIncome)}`} icon="💰" color="teal" />
-        <StatCard label="Pending Payment" value={`${CURRENCY}${fmt(pendingPayment)}`} icon="⏳" color="red" />
-      </div>
-      {isAdminLike(user.role) && (
-        <div className="space-y-3">
-          <div className="text-xs font-black text-gray-500 uppercase tracking-wider">📦 Stock Overview</div>
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Stock Items" value={stock.length} icon="📦" color="blue" />
-            <StatCard label="Sales Today" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="purple" />
-          </div>
-        </div>
-      )}
-      {siteWorks.length > 0 && (
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">🏗️ Recent Sites</div>
-          {siteWorks.slice(0,3).map(s=>(
-            <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 flex items-center justify-between">
-              <div>
-                <div className="font-black text-sm text-gray-900">{s.customerName||s.siteName||"—"}</div>
-                <div className="text-xs text-gray-400">{s.location||s.siteLocation||"—"}</div>
-              </div>
-              <Badge color={s.status==="completed"?"green":s.status==="running"?"amber":"gray"}>{s.status||"pending"}</Badge>
-            </div>
-          ))}
+          <h2 className="text-xl font-black text-gray-900">Good day, {user.name.split(" ")[0]}</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{isAdmin ? `Dashboard period: ${currentRange.label}` : "Today's office dashboard"}</p>
         </div>
+        {isAdmin && (
+          <div className="bg-white border rounded-2xl shadow-sm p-3 grid grid-cols-2 sm:flex gap-2 items-end">
+            <Select label="View" value={view} options={[{value:"daily",label:"Daily"},{value:"monthly",label:"Monthly"},{value:"range",label:"Date Range"},{value:"all",label:"All Time"}]} onChange={e=>setView(e.target.value)} />
+            {view==="daily"&&<Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
+            {view==="monthly"&&<Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
+            {view==="range"&&<><Input label="From" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} /><Input label="To" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} /></>}
+          </div>
+        )}
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Cash In" value={money(total.cashIn)} icon="IN" color="green" sub={`Sales ${money(total.salesReceived)} | Site ${money(total.siteReceived)}`} />
+            <StatCard label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchasePaid)} | Worker ${money(total.productionPaid)}`} />
+            <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
+            <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
+            <StatCard label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
+            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`Value ${money(total.productionValue)}`} />
+            <StatCard label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
+            <StatCard label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <SectionBox title="Production Item-wise" icon="P" color="teal">
+              {(summary.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production in this period</div> : (
+                <div className="space-y-2">
+                  {summary.productionItemSummary.map((item,i)=>(
+                    <div key={i} className="flex justify-between gap-3 text-xs border-b border-teal-100 pb-1">
+                      <span><b>{item.item}</b>{item.color?` / ${item.color}`:""}</span>
+                      <span className="font-black text-teal-700">{fmt(item.quantity)} {item.unit}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionBox>
+
+            <SectionBox title="Stock Position" icon="ST" color="blue">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-blue-50 rounded-xl p-2"><div className="font-black text-blue-700">{total.stockItems||stock.length}</div><div className="text-xs text-gray-400">Items</div></div>
+                <div className="bg-green-50 rounded-xl p-2"><div className="font-black text-green-700">{fmt(total.stockQuantity)}</div><div className="text-xs text-gray-400">Qty</div></div>
+                <div className="bg-red-50 rounded-xl p-2"><div className="font-black text-red-600">{total.lowStockItems||0}</div><div className="text-xs text-gray-400">Low</div></div>
+              </div>
+            </SectionBox>
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-4">
+            <SectionBox title="Recent Sales" icon="S" color="green">
+              {(summary.recentSales||[]).length===0 ? <div className="text-xs text-gray-400">No sales</div> : summary.recentSales.map(s=>(
+                <div key={s._id} className="flex justify-between gap-2 text-xs border-b border-green-100 py-1"><span><b>{s.customer||"-"}</b><br />{s.product||s.interlockDetails||"-"}</span><span className="text-right font-black">{money(s.amountPaid)}<br /><span className="text-gray-400">{s.date}</span></span></div>
+              ))}
+            </SectionBox>
+            <SectionBox title="Recent Purchases" icon="P" color="amber">
+              {(summary.recentPurchases||[]).length===0 ? <div className="text-xs text-gray-400">No purchases</div> : summary.recentPurchases.map(p=>(
+                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-amber-100 py-1"><span><b>{p.supplierName||"-"}</b><br />{p.itemName||p.itemType||"-"}</span><span className="text-right font-black">{money(p.amountPaid)}<br /><span className="text-gray-400">{p.date}</span></span></div>
+              ))}
+            </SectionBox>
+            <SectionBox title="Recent Production" icon="PR" color="purple">
+              {(summary.recentProduction||[]).length===0 ? <div className="text-xs text-gray-400">No production</div> : summary.recentProduction.map(p=>(
+                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-purple-100 py-1"><span><b>{p.workerName||"-"}</b><br />{p.itemName||p.category||"-"}</span><span className="text-right font-black">{fmt(p.producedQty)} {p.unit||p.unitType||""}<br /><span className="text-gray-400">{p.date}</span></span></div>
+              ))}
+            </SectionBox>
+          </div>
+        </>
       )}
     </div>
   );
 }
-
-// ─── MASTER DATA (Admin) ──────────────────────────────────────────────────────
 function MasterData() {
   const [tab, setTab] = useState("interlock");
   const [data, setData] = useState({ interlock:[], materials:[], labor:[], extrawork:[], customers:[], suppliers:[] });
