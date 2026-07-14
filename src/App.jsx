@@ -648,7 +648,7 @@ function MasterData() {
         <Input label="Size (cm)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 20x10x6" />
         <Input label="Thickness (cm)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 6" />
         <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value})} placeholder="e.g. 0.22" />
-        <Input label={`Price/sqft (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
+        <Input label={`Default Rate (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
         <Input label={`Price/sqm (${CURRENCY})`} type="number" value={form.pricePerSqm||""} onChange={e=>setForm({...form,pricePerSqm:+e.target.value})} />
       </div>
       <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
@@ -725,7 +725,7 @@ function MasterData() {
               <div className="flex-1">
                 <div className="font-black text-gray-900">{item.name}</div>
                 {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size,item.thickness&&`${item.thickness}cm`].filter(Boolean).join(" · ")}</div>}
-                {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`${fmt(item.sqftPerPiece)} sqft/piece`} {item.pricePerSqft&&`· ${CURRENCY}${fmt(item.pricePerSqft)}/sqft`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
+                {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
                 {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
                 {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
@@ -3791,7 +3791,7 @@ function Stock({ stock, setStock, user }) {
         {groupedStock.length===0&&<EmptyState icon="BOX" text="No stock items" />}
         {groupedStock.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}{s.color?` · ${s.color}`:""}</div>}<div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` · ${fmt(s.sqftQuantity)} sqft`:""}</div>{s.sqftPerPiece>0&&<div className="text-xs text-gray-400">1 piece = {fmt(s.sqftPerPiece)} sqft</div>}{s.price>0&&<div className="text-xs text-amber-600">{CURRENCY}{fmt(s.price)}/sqft</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
+            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}{s.color?` · ${s.color}`:""}</div>}<div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` · ${fmt(s.sqftQuantity)} sqft`:""}</div>{s.sqftPerPiece>0&&<div className="text-xs text-gray-400">1 piece = {fmt(s.sqftPerPiece)} sqft</div>}{s.price>0&&<div className="text-xs text-amber-600">Rate: {CURRENCY}{fmt(s.price)}</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
             {isAdminLike(user.role)&&s.duplicateCount===1&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
           </div>
         ))}
@@ -4102,8 +4102,8 @@ function Sales({ sales, setSales, stock, setStock, user }) {
         <td class="center">1</td>
         <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
         <td class="center">${printSale.hsnSac || "-"}</td>
-        <td class="right">${fmt(printSale.quantity)} pcs<br><span>${fmt(saleSqft)} sqft</span></td>
-        <td class="center">piece</td>
+        <td class="right">${fmt(printSale.quantity)}</td>
+        <td class="right">${fmt(saleSqft)}</td>
         <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
         <td class="right">${CURRENCY}${fmt(itemAmount)}</td>
         <td class="right">${cgstRate || ""}</td>
@@ -4152,7 +4152,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
           </div>
         </div>
         <table>
-          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
+          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Pieces</th><th>Sqft</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
           <tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
           <tbody>${rows}<tr class="total-row"><td colspan="6" class="right">Total</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td><td></td><td></td><td class="right">${CURRENCY}${fmt(tax.total)}</td></tr></tbody>
         </table>
@@ -4350,7 +4350,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                 {s.interlockDetails && <div className="text-xs text-amber-600">{s.interlockDetails}</div>}
                 <div className="text-xs text-gray-400 mt-0.5">📅 {s.date}{s.customer ? ` · 👤 ${s.customer}` : ""}</div>
                 {s.mobileNumber && <div className="text-xs text-gray-500">📱 {s.mobileNumber}</div>}
-                <div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""} / {fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft x {CURRENCY}{s.price}/sqft</div>
+                <div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""} / {fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft x {CURRENCY}{s.price}</div>
               </div>
               <div className="text-right shrink-0">
                 <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total) || 0)}</div>
@@ -4452,12 +4452,12 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                   {form.category && <div>Category: {form.category}</div>}
                   {form.interlockDetails && <div>{form.interlockDetails}</div>}
                   {interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece && <div>1 piece = {fmt(interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece)} sqft</div>}
-                  {interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft && <div className="text-amber-700 font-bold">{CURRENCY}{interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft}/sqft</div>}
+                  {interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft && <div className="text-amber-700 font-bold">Rate: {CURRENCY}{interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft}</div>}
                 </div>
               )}
               {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <Input label="Pieces" type="number" value={form.quantity} onChange={e => {
                 const pieces = +(e.target.value || 0);
                 const sqftPerPiece = +(form.sqftPerPiece || 0);
@@ -4468,12 +4468,8 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                 const pieces = +(form.quantity || 0);
                 setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && pieces ? String(pieces * sqftPerPiece) : "" });
               }} placeholder="0" />
-              <Input label={`Rate / sqft (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
-            </div>
-            <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 text-center">
-              <div className="text-xs text-gray-400">Calculated Area</div>
-              <div className="text-xl font-black text-teal-700">{fmt(calcSqftQty())} sqft</div>
-              <div className="text-xs text-gray-500">{form.quantity || 0} piece x {form.sqftPerPiece || 0} sqft</div>
+              <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
             </div>
             <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
