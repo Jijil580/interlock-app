@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = { name: "PK Interlock", logo: "🏭" };
-const POWERED_BY = "Powered by LUMIER SOFTWARE TECHNOLOGIES";
-const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER SOFTWARE TECHNOLOGIES. All rights reserved.`;
+const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
+const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
