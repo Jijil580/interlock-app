@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = { name: "PK Interlock", logo: "🏭" };
+const POWERED_BY = "Powered by LUMIER SOFTWARE TECHNOLOGIES";
+const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER SOFTWARE TECHNOLOGIES. All rights reserved.`;
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
@@ -445,6 +447,10 @@ function Login({ onLogin }) {
           <button onClick={login} disabled={loading} className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3 rounded-xl font-black text-base hover:opacity-90 shadow-lg disabled:opacity-60">
             {loading ? "Signing in..." : "Sign In"}
           </button>
+        </div>
+        <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+          <div className="text-[11px] font-bold text-gray-500">{POWERED_BY}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">{COPYRIGHT_TEXT}</div>
         </div>
       </div>
     </div>
@@ -6151,6 +6157,10 @@ export default function App() {
           ))}
         </nav>
         <div className="px-3 py-4 border-t border-stone-700">
+          <div className="px-2 pb-3 text-center">
+            <div className="text-[10px] font-bold text-stone-400">{POWERED_BY}</div>
+            <div className="text-[9px] text-stone-500 mt-0.5">{COPYRIGHT_TEXT}</div>
+          </div>
           <div className="flex items-center gap-3 bg-stone-800 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{currentUser.role}</div></div>
