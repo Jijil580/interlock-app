@@ -83,9 +83,9 @@ function Badge({ children, color = "gray" }) {
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-3">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[92vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 backdrop-blur-sm p-3">
+      <div className={`bg-white rounded-xl shadow-xl border border-slate-200 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[92vh] overflow-y-auto`}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
           <h3 className="font-black text-gray-900 text-base">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
         </div>
@@ -98,8 +98,8 @@ function Modal({ title, onClose, children, wide }) {
 function Input({ label, ...props }) {
   return (
     <div>
-      {label && <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>}
-      <input className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" {...props} />
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
+      <input className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props} />
     </div>
   );
 }
@@ -107,8 +107,8 @@ function Input({ label, ...props }) {
 function Textarea({ label, ...props }) {
   return (
     <div>
-      {label && <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>}
-      <textarea className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50 resize-none" rows={3} {...props} />
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
+      <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm resize-none" rows={3} {...props} />
     </div>
   );
 }
@@ -116,8 +116,8 @@ function Textarea({ label, ...props }) {
 function Select({ label, options, ...props }) {
   return (
     <div>
-      {label && <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>}
-      <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" {...props}>
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
+      <select className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props}>
         {options.map((o) => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
       </select>
     </div>
@@ -164,32 +164,40 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
 }
 
 function StatCard({ label, value, sub, icon, color }) {
-  const c = { amber:"from-amber-400 to-orange-500", blue:"from-blue-500 to-blue-600", green:"from-emerald-500 to-green-600", red:"from-red-500 to-rose-600", purple:"from-violet-500 to-purple-600", teal:"from-teal-500 to-cyan-600", gray:"from-gray-400 to-gray-500" };
+  const c = {
+    amber:"bg-amber-50 text-amber-700 border-amber-200",
+    blue:"bg-blue-50 text-blue-700 border-blue-200",
+    green:"bg-emerald-50 text-emerald-700 border-emerald-200",
+    red:"bg-red-50 text-red-700 border-red-200",
+    purple:"bg-violet-50 text-violet-700 border-violet-200",
+    teal:"bg-teal-50 text-teal-700 border-teal-200",
+    gray:"bg-slate-50 text-slate-600 border-slate-200"
+  };
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-start gap-3">
-      <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${c[color]||c.amber} flex items-center justify-center text-xl shrink-0 shadow`}>{icon}</div>
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-start gap-3">
+      <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
       <div className="min-w-0">
-        <div className="text-xl font-black text-gray-900 truncate">{value}</div>
-        <div className="text-xs font-semibold text-gray-600">{label}</div>
-        {sub && <div className="text-xs text-gray-400">{sub}</div>}
+        <div className="text-xl font-black text-slate-950 truncate">{value}</div>
+        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</div>
+        {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
       </div>
     </div>
   );
 }
 
 function Loader() {
-  return <div className="flex items-center justify-center py-16"><div className="w-10 h-10 border-4 border-amber-400 border-t-transparent rounded-full animate-spin" /></div>;
+  return <div className="flex items-center justify-center py-16"><div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>;
 }
 
 function EmptyState({ icon, text }) {
-  return <div className="bg-white rounded-2xl border p-10 text-center"><div className="text-4xl mb-2">{icon}</div><div className="text-gray-400 font-semibold">{text}</div></div>;
+  return <div className="bg-white rounded-xl border border-slate-200 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-400 font-semibold">{text}</div></div>;
 }
 
 function SectionBox({ title, icon, color = "gray", children }) {
-  const c = { gray:"bg-gray-50 border-gray-200 text-gray-700", blue:"bg-blue-50 border-blue-200 text-blue-700", green:"bg-green-50 border-green-200 text-green-700", amber:"bg-amber-50 border-amber-200 text-amber-700", red:"bg-red-50 border-red-200 text-red-700", purple:"bg-purple-50 border-purple-200 text-purple-700", teal:"bg-teal-50 border-teal-200 text-teal-700", orange:"bg-orange-50 border-orange-200 text-orange-700" };
+  const c = { gray:"border-slate-300 text-slate-700", blue:"border-blue-400 text-blue-700", green:"border-emerald-400 text-emerald-700", amber:"border-amber-400 text-amber-700", red:"border-red-400 text-red-700", purple:"border-violet-400 text-violet-700", teal:"border-teal-400 text-teal-700", orange:"border-orange-400 text-orange-700" };
   return (
-    <div className={`${c[color]} border rounded-2xl p-4 space-y-3`}>
-      <div className={`text-xs font-black uppercase tracking-wider ${c[color].split(" ")[2]}`}>{icon} {title}</div>
+    <div className={`bg-white border border-slate-200 border-l-4 ${c[color]} rounded-xl p-4 space-y-3 shadow-sm`}>
+      <div className={`text-xs font-black uppercase tracking-wider ${c[color].split(" ")[1]}`}>{icon} {title}</div>
       {children}
     </div>
   );
@@ -251,8 +259,8 @@ function DevicePendingScreen({ username, deviceInfo, onRetry }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-amber-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8 text-center">
         {status === "approved" ? (
           <>
             <div className="text-6xl mb-4">✅</div>
@@ -284,7 +292,7 @@ function DevicePendingScreen({ username, deviceInfo, onRetry }) {
             </div>
           </>
         )}
-        <button onClick={checkStatus} disabled={checking} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:opacity-60 mt-2">
+        <button onClick={checkStatus} disabled={checking} className="w-full bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 disabled:opacity-60 mt-2">
           {checking ? "Checking..." : "🔄 Check Approval Status"}
         </button>
       </div>
@@ -433,18 +441,18 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-900 via-stone-800 to-amber-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8">
         <div className="text-center mb-8">
-          <div className="text-6xl mb-3">{COMPANY.logo}</div>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-3xl">{COMPANY.logo}</div>
           <h1 className="text-2xl font-black text-gray-900">{COMPANY.name}</h1>
-          <p className="text-gray-400 text-sm mt-1">Management System</p>
+          <p className="text-slate-500 text-sm mt-1">Management System</p>
         </div>
         <div className="space-y-4">
           <Input label="Username" value={username} onChange={e=>setUsername(e.target.value)} placeholder="Enter username" onKeyDown={e=>e.key==="Enter"&&login()} />
           <Input label="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password" onKeyDown={e=>e.key==="Enter"&&login()} />
           {error && <div className="text-red-600 text-xs font-semibold bg-red-50 rounded-xl p-3">{error}</div>}
-          <button onClick={login} disabled={loading} className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-white py-3 rounded-xl font-black text-base hover:opacity-90 shadow-lg disabled:opacity-60">
+          <button onClick={login} disabled={loading} className="w-full bg-amber-500 text-white py-3 rounded-lg font-black text-base hover:bg-amber-600 shadow-sm disabled:opacity-60">
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </div>
@@ -6103,7 +6111,7 @@ export default function App() {
   }
 
   const nav = NAV[effectiveRoleOf(currentUser.role)]||[];
-  const roleColors = { admin:"from-violet-500 to-purple-600", supervisor:"from-emerald-500 to-green-600", user:"from-blue-500 to-blue-600" };
+  const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700" };
 
   const renderPage = () => {
     if (loading) return <Loader />;
@@ -6139,29 +6147,29 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-slate-50 flex">
       {sidebarOpen&&<div className="fixed inset-0 bg-black/30 z-20 lg:hidden" onClick={()=>setSidebarOpen(false)} />}
-      <aside className={`fixed top-0 left-0 h-full w-64 bg-stone-900 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
-        <div className="px-5 py-5 border-b border-stone-700">
+      <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
+        <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="text-3xl">{COMPANY.logo}</div>
-            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.name}</div><div className="text-stone-400 text-xs">Management System</div></div>
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{COMPANY.logo}</div>
+            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.name}</div><div className="text-slate-400 text-xs">Management System</div></div>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {nav.map(item=>(
             <button key={item.id} onClick={()=>{setPage(item.id);setSidebarOpen(false);}}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${page===item.id?"bg-amber-500 text-white shadow-lg":"text-stone-400 hover:bg-stone-800 hover:text-white"}`}>
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${page===item.id?"bg-amber-500 text-white shadow-sm":"text-slate-400 hover:bg-slate-900 hover:text-white"}`}>
               <span className="text-base">{item.icon}</span>{item.label}
             </button>
           ))}
         </nav>
-        <div className="px-3 py-4 border-t border-stone-700">
+        <div className="px-3 py-4 border-t border-slate-800">
           <div className="px-2 pb-3 text-center">
-            <div className="text-[10px] font-bold text-stone-400">{POWERED_BY}</div>
-            <div className="text-[9px] text-stone-500 mt-0.5">{COPYRIGHT_TEXT}</div>
+            <div className="text-[10px] font-bold text-slate-400">{POWERED_BY}</div>
+            <div className="text-[9px] text-slate-500 mt-0.5">{COPYRIGHT_TEXT}</div>
           </div>
-          <div className="flex items-center gap-3 bg-stone-800 rounded-xl px-3 py-3">
+          <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{currentUser.role}</div></div>
             <button onClick={()=>setCurrentUser(null)} className="text-stone-500 hover:text-red-400 text-xs font-bold" title="Logout">⏻</button>
@@ -6169,14 +6177,14 @@ export default function App() {
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+        <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          <h1 className="font-black text-gray-900 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
+          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
         </header>
-        <main className="flex-1 p-4 overflow-y-auto max-w-3xl w-full mx-auto">{renderPage()}</main>
+        <main className="flex-1 p-4 lg:p-6 overflow-y-auto max-w-6xl w-full mx-auto">{renderPage()}</main>
       </div>
     </div>
   );
