@@ -1,7 +1,7 @@
 {
-  "name": "PK Interlock Management System",
-  "short_name": "PK Interlock",
-  "description": "Site, stock, worker, production, sales, and cashflow management for PK Interlock.",
+  "name": "Interlock Management System",
+  "short_name": "Interlock App",
+  "description": "Site, stock, worker, production, sales, and cashflow management.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

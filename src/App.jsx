@@ -2,22 +2,31 @@ import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = {
-  companyName: "P. K. INTERLOCKS & HOLLOW BRICKS",
-  shortName: "PK Interlock",
+  companyName: "Interlock Management System",
+  shortName: "Interlock App",
   logo: "🏭",
-  address: "HAJ ROAD, VILAKKODE, IRITTY",
+  address: "",
   state: "Kerala",
   stateCode: "32",
-  gstin: "32AESHA2414P1ZP",
-  phone1: "7034116685",
-  phone2: "9946956685",
+  gstin: "",
+  phone1: "",
+  phone2: "",
   invoiceTitle: "TAX INVOICE",
   invoicePrefix: "INV",
-  signatureName: "P.K. Interlocks & Hollowbricks",
+  signatureName: "Interlock App",
   bankName: "",
   bankAccount: "",
   bankIfsc: "",
   terms: "Certified that the particulars given above are true and correct.",
+};
+const BRANDING_CACHE_KEY = "pk_branding_settings";
+const cachedBranding = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BRANDING_CACHE_KEY) || "null");
+    return saved?.companyName ? { ...COMPANY, ...saved } : COMPANY;
+  } catch {
+    return COMPANY;
+  }
 };
 const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
 const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
@@ -916,7 +925,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       `Start    : ${s.startDate||"—"} | End: ${s.endDate||"—"}`,
       s.note?`Note     : ${s.note}`:"",
       "════════════════════════════════",
-      "Thank you for choosing PK Interlock",
+      "Thank you for choosing us",
     ].filter(l=>l!=="");
     const blob = new Blob([lines.join("\n")],{type:"text/plain"});
     const url = URL.createObjectURL(blob);
@@ -6237,12 +6246,17 @@ export default function App() {
   const [sales, setSales] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
-  const [branding, setBranding] = useState(COMPANY);
+  const [branding, setBranding] = useState(cachedBranding);
   const [loading, setLoading] = useState(false);
 
   useEffect(()=>{
     api("GET","/settings/branding").then(b=>{ if (b?.companyName) setBranding({ ...COMPANY, ...b }); });
   },[]);
+
+  useEffect(()=>{
+    try { localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(branding)); } catch {}
+    document.title = branding.shortName || branding.companyName || COMPANY.shortName;
+  },[branding]);
 
   useEffect(()=>{
     if (!currentUser) return;
