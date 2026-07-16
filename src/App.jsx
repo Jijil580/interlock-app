@@ -4173,10 +4173,20 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const cgstRate = withGst ? tax.cgstPercent : 0;
     const sgstRate = withGst ? tax.sgstPercent : 0;
     const igstRate = 0;
+    const fullDetails = [
+      printSale.interlockDetails || details,
+      printSale.category ? `Category: ${printSale.category}` : "",
+      printSale.shape ? `Shape: ${printSale.shape}` : "",
+      printSale.color ? `Color: ${printSale.color}` : "",
+      printSale.size ? `Size/No.: ${isOther(printSale) ? printSale.size : `${printSale.size} inch`}` : "",
+      printSale.thickness && !isOther(printSale) ? `Thickness: ${printSale.thickness} inch` : "",
+      printSale.sqftPerPiece && !countOnly ? `1 piece = ${fmt(printSale.sqftPerPiece)} sqft` : "",
+      printSale.unit ? `Unit: ${printSale.unit}` : ""
+    ].filter(Boolean).join("<br>");
     const rows = `
       <tr>
         <td class="center">1</td>
-        <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
+        <td><b>${printSale.product || "-"}</b><br><span>${fullDetails || ""}</span></td>
         <td class="center">${printSale.hsnSac || "-"}</td>
         <td class="right">${fmt(printSale.quantity)}</td>
         <td class="right">${countOnly ? (printSale.unit || "piece") : fmt(saleSqft)}</td>
@@ -4192,39 +4202,44 @@ function Sales({ sales, setSales, stock, setStock, user }) {
       </tr>`;
     const html = `<!doctype html><html><head><title>Invoice ${invoiceNo}</title>
       <style>
-        body{font-family:"Times New Roman",serif;color:#16224d;margin:18px;background:#fff}.invoice{border:2px solid #16224d;max-width:1120px;margin:auto}
-        .printbtn{position:fixed;right:18px;top:12px;padding:8px 14px}.title{display:grid;grid-template-columns:1fr 2fr 1fr;border-bottom:2px solid #16224d;min-height:112px}
-        .title>div{padding:8px}.brand{text-align:center}.brand h1{font-size:30px;margin:8px 0 2px;letter-spacing:.5px}.brand .addr{font-size:13px;font-weight:bold;line-height:1.35}.side{font-size:13px;line-height:1.7}.side.right{text-align:right}
-        .grid2{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid #16224d}.cell{padding:8px;border-right:2px solid #16224d;min-height:116px}.cell:last-child{border-right:0}
-        .line{display:grid;grid-template-columns:140px 1fr;font-size:13px;line-height:1.75}.label{font-weight:bold}.section-title{text-align:center;font-weight:bold;border-bottom:1px solid #16224d;padding:4px;font-size:13px}
-        table{width:100%;border-collapse:collapse}th,td{border:1px solid #16224d;padding:5px;font-size:12px;vertical-align:top}th{font-weight:bold;text-align:center}.right{text-align:right}.center{text-align:center}.total-row td{font-weight:bold}
-        .bottom{display:grid;grid-template-columns:1.2fr 1fr;border-top:2px solid #16224d}.bank,.amounts{min-height:170px}.bank{border-right:2px solid #16224d}.bank .body{padding:10px;font-size:13px;line-height:1.8}
-        .amounts table td{height:20px}.words{border-top:2px solid #16224d;padding:8px;font-size:13px}.footer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #16224d;min-height:92px}.seal{border-right:2px solid #16224d;text-align:center;padding-top:34px;font-size:13px}.sign{text-align:right;padding:10px;font-size:13px}.sign b{display:block;margin-top:38px}
-        @media print{.printbtn{display:none}body{margin:8mm}.invoice{max-width:none}}
+        *{box-sizing:border-box}body{font-family:Arial,"Times New Roman",serif;color:#172554;margin:18px;background:#f8fafc}.invoice{background:#fff;border:2px solid #172554;max-width:1120px;margin:auto;box-shadow:0 18px 50px rgba(15,23,42,.12)}
+        .printbtn{position:fixed;right:18px;top:12px;padding:9px 16px;border:0;border-radius:8px;background:#172554;color:white;font-weight:700}.title{display:grid;grid-template-columns:1.05fr 2fr 1.05fr;border-bottom:2px solid #172554;min-height:118px}
+        .title>div{padding:10px}.brand{text-align:center}.brand h1{font-size:29px;margin:6px 0 4px;letter-spacing:.4px;color:#111827}.brand .addr{font-size:13px;font-weight:700;line-height:1.45;color:#1f2937}.brand .gst{display:inline-block;margin-top:5px;border:1px solid #172554;padding:3px 10px;font-size:12px;font-weight:700}
+        .side{font-size:13px;line-height:1.75}.side.right{text-align:right}.pill{display:inline-block;border:1px solid #172554;border-radius:3px;padding:2px 8px;margin-top:3px}.grid2{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid #172554}.cell{padding:0;border-right:2px solid #172554;min-height:154px}.cell:last-child{border-right:0}.cell-body{padding:8px 10px}
+        .line{display:grid;grid-template-columns:145px 1fr;font-size:13px;line-height:1.65;gap:6px}.label{font-weight:700;color:#111827}.section-title{text-align:center;font-weight:800;border-bottom:1px solid #172554;padding:6px 4px;font-size:12px;background:#eff6ff;letter-spacing:.3px}
+        table{width:100%;border-collapse:collapse}th,td{border:1px solid #172554;padding:6px;font-size:12px;vertical-align:top}th{font-weight:800;text-align:center;background:#f8fafc}.right{text-align:right}.center{text-align:center}.total-row td{font-weight:800;background:#f8fafc}
+        .words{border-top:2px solid #172554;padding:9px 10px;font-size:13px}.bottom{display:grid;grid-template-columns:1.15fr 1fr;border-top:2px solid #172554}.bank,.amounts{min-height:190px}.bank{border-right:2px solid #172554}.bank .body{padding:10px 12px;font-size:13px;line-height:1.75}.amounts table td{height:23px}.amounts table tr:last-child td{font-size:13px;background:#eff6ff}
+        .footer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #172554;min-height:96px}.seal{border-right:2px solid #172554;text-align:center;padding-top:36px;font-size:13px;color:#64748b}.sign{text-align:right;padding:10px 14px;font-size:13px}.sign b{display:block;margin-top:40px}
+        @media print{.printbtn{display:none}body{margin:7mm;background:#fff}.invoice{max-width:none;box-shadow:none}th{background:#fff}.section-title,.amounts table tr:last-child td{background:#fff}}
       </style></head><body>
       <button class="printbtn" onclick="window.print()">Print</button>
       <div class="invoice">
         <div class="title">
-          <div class="side"><b><i>INVOICE</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br>State : ${printSale.state || "Kerala"}<br><span style="border:1px solid #16224d;padding:2px 8px">State Code: ${printSale.stateCode || "32"}</span></div>
-          <div class="brand"><h1>P. K. INTERLOCKS & HOLLOW BRICKS</h1><div class="addr">HAJ ROAD, VILAKKODE, IRITTY<br>GSTIN: 32AESHA2414P1ZP</div></div>
+          <div class="side"><b><i>TAX INVOICE</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Invoice Date : <b>${printSale.date || ""}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br><span class="pill">State Code: ${printSale.stateCode || "32"}</span></div>
+          <div class="brand"><h1>P. K. INTERLOCKS & HOLLOW BRICKS</h1><div class="addr">HAJ ROAD, VILAKKODE, IRITTY<br>State: Kerala</div><div class="gst">GSTIN: 32AESHA2414P1ZP</div></div>
           <div class="side right"><b>PH:</b> 7034116685<br>9946956685<br><br>Date: <b>${printSale.date || ""}</b></div>
         </div>
         <div class="grid2">
           <div class="cell">
             <div class="section-title">Details of Receiver / Billed to</div>
+            <div class="cell-body">
             <div class="line"><span class="label">Name</span><span>: ${printSale.customer || "-"}</span></div>
+            <div class="line"><span class="label">Mobile</span><span>: ${printSale.mobileNumber || "-"}</span></div>
             <div class="line"><span class="label">GSTIN</span><span>: ${withGst ? (printOptions.gstNumber || printSale.gstNumber || "-") : "-"}</span></div>
             <div class="line"><span class="label">Address</span><span>: ${printSale.address || "-"}</span></div>
             <div class="line"><span class="label">State</span><span>: ${printSale.state || "Kerala"}</span></div>
             <div class="line"><span class="label">State Code</span><span>: ${printSale.stateCode || "32"}</span></div>
+            </div>
           </div>
           <div class="cell">
             <div class="section-title">Details of Consignee / Shipped to</div>
+            <div class="cell-body">
             <div class="line"><span class="label">Transportation Mode</span><span>: ${printSale.transportMode || "-"}</span></div>
             <div class="line"><span class="label">Vehicle Number</span><span>: ${printSale.vehicleNumber || "-"}</span></div>
             <div class="line"><span class="label">Date of Supply</span><span>: ${printSale.dateOfSupply || printSale.date || "-"}</span></div>
             <div class="line"><span class="label">Place of Supply</span><span>: ${printSale.placeOfSupply || "-"}</span></div>
-            <div class="line"><span class="label">State Code</span><span>: ${printSale.stateCode || "32"}</span></div>
+            <div class="line"><span class="label">Payment Mode</span><span>: ${printSale.paymentMode || "-"}</span></div>
+            </div>
           </div>
         </div>
         <table>
@@ -4232,7 +4247,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
           <tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
           <tbody>${rows}<tr class="total-row"><td colspan="6" class="right">Total</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td><td></td><td></td><td class="right">${CURRENCY}${fmt(tax.total)}</td></tr></tbody>
         </table>
-        <div class="words"><b>Total Invoice Amount in Words:</b> ${CURRENCY}${fmt(tax.total)} only</div>
+        <div class="words"><b>Total Invoice Amount:</b> ${CURRENCY}${fmt(tax.total)} only</div>
         <div class="bottom">
           <div class="bank">
             <div class="section-title">BANK DETAILS</div>
@@ -4241,11 +4256,13 @@ function Sales({ sales, setSales, stock, setStock, user }) {
           <div class="amounts">
             <table><tbody>
               <tr><td>Total Amount Before Tax</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td></tr>
+              <tr><td>Discount</td><td class="right">${CURRENCY}${fmt(printSale.discount || 0)}</td></tr>
               <tr><td>Add : CGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td></tr>
               <tr><td>Add : SGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td></tr>
               <tr><td>Add : IGST</td><td class="right"></td></tr>
               <tr><td>Tax Amount : GST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount + tax.sgstAmount) : ""}</td></tr>
               <tr><td>Total Amount After Tax</td><td class="right"><b>${CURRENCY}${fmt(tax.total)}</b></td></tr>
+              <tr><td>Payment Mode</td><td class="right">${printSale.paymentMode || "-"}</td></tr>
               <tr><td>Paid</td><td class="right">${CURRENCY}${fmt(printSale.amountPaid)}</td></tr>
               <tr><td>Pending</td><td class="right">${CURRENCY}${fmt(Math.max(0, tax.total - (+(printSale.amountPaid)||0)))}</td></tr>
             </tbody></table>
