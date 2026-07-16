@@ -583,7 +583,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 }
 function MasterData() {
   const [tab, setTab] = useState("interlock");
-  const [data, setData] = useState({ interlock:[], materials:[], labor:[], extrawork:[], customers:[], suppliers:[] });
+  const [data, setData] = useState({ interlock:[], hollowbricks:[], materials:[], labor:[], extrawork:[], customers:[], suppliers:[] });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
@@ -591,14 +591,15 @@ function MasterData() {
 
   const loadAll = () => Promise.all([
     api("GET","/masterdata/interlock"),
+    api("GET","/masterdata/hollowbricks"),
     api("GET","/masterdata/materials"),
     api("GET","/masterdata/labor"),
     api("GET","/masterdata/extrawork"),
     api("GET","/customers"),
     api("GET","/suppliers"),
-  ]).then(([i,m,l,e,c,s])=>{
+  ]).then(([i,h,m,l,e,c,s])=>{
     setData({
-      interlock:Array.isArray(i)?i:[], materials:Array.isArray(m)?m:[],
+      interlock:Array.isArray(i)?i:[], hollowbricks:Array.isArray(h)?h:[], materials:Array.isArray(m)?m:[],
       labor:Array.isArray(l)?l:[], extrawork:Array.isArray(e)?e:[],
       customers:Array.isArray(c)?c:[], suppliers:Array.isArray(s)?s:[],
     });
@@ -663,6 +664,7 @@ function MasterData() {
     { id:"customers", label:"Customer Master", icon:"👤" },
     { id:"suppliers", label:"Supplier Master", icon:"🏪" },
   ];
+  tabs.splice(1, 0, { id:"hollowbricks", label:"Hollow Bricks", icon:"HB" });
 
   const renderForm = () => {
     const t = modal?.type;
@@ -677,6 +679,16 @@ function MasterData() {
         <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value})} placeholder="e.g. 0.22" />
         <Input label={`Default Rate (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
         <Input label={`Price/sqm (${CURRENCY})`} type="number" value={form.pricePerSqm||""} onChange={e=>setForm({...form,pricePerSqm:+e.target.value})} />
+      </div>
+      <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
+    </>;
+    if (t==="hollowbricks") return <>
+      <Input label="Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Hollow Brick" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="Category" value={form.category||"Hollow Brick"} onChange={e=>setForm({...form,category:e.target.value})} placeholder="Hollow Brick" />
+        <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 4 inch / 6 inch / 8 inch" />
+        <Input label={`Price / Piece (${CURRENCY})`} type="number" value={form.price||""} onChange={e=>setForm({...form,price:+e.target.value})} />
+        <Input label="Stock Qty" type="number" value={form.stock||""} onChange={e=>setForm({...form,stock:+e.target.value})} />
       </div>
       <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
     </>;
@@ -754,6 +766,8 @@ function MasterData() {
                 {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size,item.thickness&&`${item.thickness}cm`].filter(Boolean).join(" · ")}</div>}
                 {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,item.size&&`${item.size} inch`].filter(Boolean).join(" / ")}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
                 {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
                 {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
                 {tab==="customers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile} · {item.address||"—"}</div>}
@@ -3798,7 +3812,7 @@ function WorkPlanning({ siteWorks, user }) {
 function Stock({ stock, setStock, user }) {
   const [modal, setModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const emptyForm = { name:"", category:"", color:"", quantity:0, unit:"piece", sqftPerPiece:0, minStock:0, price:0 };
+  const emptyForm = { name:"", category:"", productType:"", color:"", size:"", quantity:0, unit:"piece", sqftPerPiece:0, minStock:0, price:0 };
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
@@ -3814,11 +3828,12 @@ function Stock({ stock, setStock, user }) {
     const prefix = s.category ? `${s.category} - ` : "";
     const rawName = String(s.name || "").trim();
     const cleanName = prefix && rawName.toLowerCase().startsWith(prefix.toLowerCase()) ? rawName.slice(prefix.length).trim() : rawName;
-    const key = `${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${String(s.unit || "").trim().toLowerCase()}`;
-    if (!acc[key]) acc[key] = { ...s, name: cleanName || s.name, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
+    const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${String(s.size || "").trim().toLowerCase()}|${String(s.unit || "").trim().toLowerCase()}`;
+    const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${s.size} inch` : (cleanName || s.name);
+    if (!acc[key]) acc[key] = { ...s, name: displayName, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
     acc[key].quantity += +(s.quantity) || 0;
-    acc[key].sqftPerPiece = acc[key].sqftPerPiece || +(s.sqftPerPiece || 0);
-    acc[key].sqftQuantity += +(s.sqftQuantity || 0) || ((+(s.quantity)||0) * (+(s.sqftPerPiece)||0));
+    acc[key].sqftPerPiece = s.productType === "hollowbrick" ? 0 : (acc[key].sqftPerPiece || +(s.sqftPerPiece || 0));
+    acc[key].sqftQuantity += s.productType === "hollowbrick" ? 0 : (+(s.sqftQuantity || 0) || ((+(s.quantity)||0) * (+(s.sqftPerPiece)||0)));
     acc[key]._ids.push(s._id);
     acc[key].duplicateCount += 1;
     acc[key].price = acc[key].price || s.price;
@@ -3844,9 +3859,11 @@ function Stock({ stock, setStock, user }) {
           <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
           <div className="grid grid-cols-2 gap-2">
             <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} />
+            <Select label="Product Type" value={form.productType||""} options={[{value:"",label:"General"},{value:"interlock",label:"Interlock"},{value:"hollowbrick",label:"Hollow Brick"}]} onChange={e=>setForm({...form,productType:e.target.value})} />
             <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} />
+            <Input label="Size" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder={form.productType==="hollowbrick"?"e.g. 6 inch":"e.g. 20x10x6"} />
             <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,sqftQuantity:(+e.target.value||0)*(+(form.sqftPerPiece)||0)})} />
-            <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value,sqftQuantity:(+(form.quantity)||0)*(+e.target.value||0)})} />
+            {form.productType!=="hollowbrick"&&<Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value,sqftQuantity:(+(form.quantity)||0)*(+e.target.value||0)})} />}
             <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
             <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
             <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
@@ -3997,18 +4014,21 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   const [printOptions, setPrintOptions] = useState({ billType: "without_gst", gstNumber: "", cgstPercent: "", sgstPercent: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/customers")]).then(([d, c]) => {
-      setInterlockTypes(Array.isArray(d) ? d : []);
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([d, h, c]) => {
+      const interlocks = Array.isArray(d) ? d.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
+      setInterlockTypes([...interlocks, ...hollow]);
       setCustomerMaster(Array.isArray(c) ? c : []);
     });
   }, []);
 
-  const calcSqftQty = () => +(form.sqftQty || 0) || ((+(form.quantity || 0)) * (+(form.sqftPerPiece || 0)));
-  const calcSubtotal = () => calcSqftQty() * +(form.price || 0);
+  const isHollow = (sale = form) => sale?.productType === "hollowbrick";
+  const calcSqftQty = () => isHollow() ? 0 : (+(form.sqftQty || 0) || ((+(form.quantity || 0)) * (+(form.sqftPerPiece || 0))));
+  const calcSubtotal = () => (isHollow() ? +(form.quantity || 0) : calcSqftQty()) * +(form.price || 0);
   const calcTaxable = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
   const calcCgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.cgstPercent || 0)) / 100 : 0;
   const calcSgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.sgstPercent || 0)) / 100 : 0;
@@ -4030,6 +4050,10 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const sgstAmount = taxable * sgstPercent / 100;
     return { taxable, cgstPercent, sgstPercent, cgstAmount, sgstAmount, total: taxable + cgstAmount + sgstAmount };
   };
+  const saleSqftOf = (sale) => isHollow(sale) ? 0 : (+(sale?.sqftQty || 0) || ((+(sale?.quantity || 0)) * (+(sale?.sqftPerPiece || 0))));
+  const saleQtyText = (sale) => isHollow(sale)
+    ? `${fmt(sale?.quantity || 0)} numbers`
+    : `${fmt(sale?.quantity || 0)} pcs / ${fmt(saleSqftOf(sale))} sqft`;
 
   const lookupCustomer = async (mobile) => {
     const m = mobile.replace(/\D/g, "").slice(-10);
@@ -4095,12 +4119,12 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const mobile = (form.mobileNumber || "").replace(/\D/g, "").slice(-10);
     if (!mobile || mobile.length < 10) { setSaveError("Mobile number is required (10 digits)"); return; }
     if (!form.customer) { setSaveError("Customer name is required"); return; }
-    if (!form.product) { setSaveError("Select an interlock type"); return; }
+    if (!form.product) { setSaveError("Select a product"); return; }
     const total = calcTotal();
     const amountPaid = +(form.amountPaid || 0);
     const item = await api("POST", "/sales", {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
-      taxableAmount: calcTaxable(), sqftPerPiece: +(form.sqftPerPiece || 0), sqftQty: calcSqftQty(), cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
+      taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: calcSqftQty(), cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
       cgstAmount: calcCgst(), sgstAmount: calcSgst(),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
@@ -4135,7 +4159,8 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const withGst = printOptions.billType === "with_gst";
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
     const details = [printSale.shape, printSale.color, printSale.size, printSale.thickness ? `${printSale.thickness}cm` : ""].filter(Boolean).join(" / ");
-    const saleSqft = +(printSale.sqftQty || 0) || ((+(printSale.quantity || 0)) * (+(printSale.sqftPerPiece || 0)));
+    const countOnly = isHollow(printSale);
+    const saleSqft = countOnly ? 0 : (+(printSale.sqftQty || 0) || ((+(printSale.quantity || 0)) * (+(printSale.sqftPerPiece || 0))));
     const itemAmount = tax.taxable;
     const cgstRate = withGst ? tax.cgstPercent : 0;
     const sgstRate = withGst ? tax.sgstPercent : 0;
@@ -4146,7 +4171,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
         <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
         <td class="center">${printSale.hsnSac || "-"}</td>
         <td class="right">${fmt(printSale.quantity)}</td>
-        <td class="right">${fmt(saleSqft)}</td>
+        <td class="right">${countOnly ? "piece" : fmt(saleSqft)}</td>
         <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
         <td class="right">${CURRENCY}${fmt(itemAmount)}</td>
         <td class="right">${cgstRate || ""}</td>
@@ -4195,7 +4220,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
           </div>
         </div>
         <table>
-          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Pieces</th><th>Sqft</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
+          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Qty</th><th>${countOnly ? "Unit" : "Sqft"}</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
           <tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
           <tbody>${rows}<tr class="total-row"><td colspan="6" class="right">Total</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td><td></td><td></td><td class="right">${CURRENCY}${fmt(tax.total)}</td></tr></tbody>
         </table>
@@ -4233,7 +4258,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   const filteredPaid = filtered.reduce((a, s) => a + (+(s.amountPaid) || 0), 0);
   const filteredPending = filtered.reduce((a, s) => a + (+(s.amountPending) || 0), 0);
   const filteredQty = filtered.reduce((a, s) => a + (+(s.quantity) || 0), 0);
-  const filteredSqft = filtered.reduce((a, s) => a + (+(s.sqftQty || 0) || ((+(s.quantity || 0)) * (+(s.sqftPerPiece || 0)))), 0);
+  const filteredSqft = filtered.reduce((a, s) => a + saleSqftOf(s), 0);
 
   return (
     <div className="space-y-4">
@@ -4322,7 +4347,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                     <tr key={p._id} className="border-t border-gray-100">
                       <td className="p-2">{p.date}</td>
                       <td className="p-2 font-semibold">{p.product}</td>
-                      <td className="p-2 text-right">{p.quantity} pcs<br />{fmt(+(p.sqftQty||0) || (+(p.quantity||0) * +(p.sqftPerPiece||0)))} sqft</td>
+                      <td className="p-2 text-right">{saleQtyText(p)}</td>
                       <td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(+(p.total) || 0)}</td>
                       <td className="p-2 text-right text-amber-600">{CURRENCY}{fmt(+(p.discount) || 0)}</td>
                       <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
@@ -4377,7 +4402,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
       {/* Summary Stats */}
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Total Sales" value={`${CURRENCY}${fmt(filteredTotal)}`} icon="💰" color="green" sub={`${filtered.length} record(s)`} />
-        <StatCard label="Total Pieces" value={fmt(filteredQty)} icon="📦" color="blue" sub={`${fmt(filteredSqft)} sqft`} />
+        <StatCard label="Total Qty" value={fmt(filteredQty)} icon="📦" color="blue" sub={filteredSqft ? `${fmt(filteredSqft)} sqft` : "Numbers only"} />
         <StatCard label="Total Paid" value={`${CURRENCY}${fmt(filteredPaid)}`} icon="✅" color="teal" />
         <StatCard label="Total Pending" value={`${CURRENCY}${fmt(filteredPending)}`} icon="⏳" color="red" />
       </div>
@@ -4393,7 +4418,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                 {s.interlockDetails && <div className="text-xs text-amber-600">{s.interlockDetails}</div>}
                 <div className="text-xs text-gray-400 mt-0.5">📅 {s.date}{s.customer ? ` · 👤 ${s.customer}` : ""}</div>
                 {s.mobileNumber && <div className="text-xs text-gray-500">📱 {s.mobileNumber}</div>}
-                <div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""} / {fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft x {CURRENCY}{s.price}</div>
+                <div className="text-sm text-gray-600">{saleQtyText(s)} x {CURRENCY}{s.price}{isHollow(s) ? "" : ""}</div>
               </div>
               <div className="text-right shrink-0">
                 <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total) || 0)}</div>
@@ -4476,42 +4501,45 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type *</label>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Product *</label>
               <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
                 const it = interlockTypes.find(x => x._id === e.target.value);
-                const details = it ? [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" / ") : "";
-                const price = it?.pricePerSqft || 0;
-                const sqftPerPiece = +(it?.sqftPerPiece || 0);
+                const isHb = it?.productType === "hollowbrick";
+                const details = it ? (isHb ? [it.category, it.size ? `${it.size} inch` : ""].filter(Boolean).join(" / ") : [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" / ")) : "";
+                const price = isHb ? (it?.price || 0) : (it?.pricePerSqft || 0);
+                const sqftPerPiece = isHb ? 0 : +(it?.sqftPerPiece || 0);
                 const pieces = +(form.quantity || 0);
-                setForm({ ...form, itemId: it?._id || "", product: it?.name || "", category: it?.category || "", shape: it?.shape || "", color: it?.color || "", size: it?.size || "", thickness: it?.thickness || "", sqftPerPiece: String(sqftPerPiece || ""), sqftQty: pieces && sqftPerPiece ? String(pieces * sqftPerPiece) : "", unit: "piece", interlockDetails: details, price: String(price) });
+                setForm({ ...form, itemId: it?._id || "", productType: it?.productType || "interlock", product: it?.name || "", category: it?.category || "", shape: it?.shape || "", color: it?.color || "", size: it?.size || "", thickness: it?.thickness || "", sqftPerPiece: String(sqftPerPiece || ""), sqftQty: pieces && sqftPerPiece ? String(pieces * sqftPerPiece) : "", unit: "piece", interlockDetails: details, price: String(price) });
               }}>
-                <option value="">-- Select Interlock Type --</option>
+                <option value="">-- Select Product --</option>
                 {interlockTypes.map(i => (
-                  <option key={i._id} value={i._id}>{i.name}{i.color ? ` (${i.color})` : ""}</option>
+                  <option key={`${i.productType}-${i._id}`} value={i._id}>{i.productType === "hollowbrick" ? "Hollow Brick - " : ""}{i.name}{i.color ? ` (${i.color})` : ""}{i.size ? ` - ${i.size}${i.productType==="hollowbrick" ? " inch" : ""}` : ""}</option>
                 ))}
               </select>
               {form.product && interlockTypes.find(x => x._id === form.itemId) && (
                 <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
                   {form.category && <div>Category: {form.category}</div>}
                   {form.interlockDetails && <div>{form.interlockDetails}</div>}
-                  {interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece && <div>1 piece = {fmt(interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece)} sqft</div>}
-                  {interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft && <div className="text-amber-700 font-bold">Rate: {CURRENCY}{interlockTypes.find(x => x._id === form.itemId)?.pricePerSqft}</div>}
+                  {!isHollow() && interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece && <div>1 piece = {fmt(interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece)} sqft</div>}
+                  <div className="text-amber-700 font-bold">Rate: {CURRENCY}{form.price || 0}{isHollow() ? " / piece" : ""}</div>
                 </div>
               )}
               {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <Input label="Pieces" type="number" value={form.quantity} onChange={e => {
+            <div className={`grid grid-cols-2 ${isHollow() ? "md:grid-cols-2" : "md:grid-cols-4"} gap-2`}>
+              <Input label={isHollow() ? "Numbers" : "Pieces"} type="number" value={form.quantity} onChange={e => {
                 const pieces = +(e.target.value || 0);
                 const sqftPerPiece = +(form.sqftPerPiece || 0);
-                setForm({ ...form, quantity: e.target.value, sqftQty: sqftPerPiece ? String(pieces * sqftPerPiece) : form.sqftQty });
+                setForm({ ...form, quantity: e.target.value, sqftQty: !isHollow() && sqftPerPiece ? String(pieces * sqftPerPiece) : "" });
               }} placeholder="0" />
-              <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
-                const sqftPerPiece = +(e.target.value || 0);
-                const pieces = +(form.quantity || 0);
-                setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && pieces ? String(pieces * sqftPerPiece) : "" });
-              }} placeholder="0" />
-              <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
+              {!isHollow() && <>
+                <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                  const sqftPerPiece = +(e.target.value || 0);
+                  const pieces = +(form.quantity || 0);
+                  setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && pieces ? String(pieces * sqftPerPiece) : "" });
+                }} placeholder="0" />
+                <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
+              </>}
               <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
             </div>
             <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
@@ -5751,7 +5779,7 @@ function OfficeDailyReport({ user }) {
                       <td className="py-2 font-bold">{s.invoiceNumber||"-"}</td>
                       <td>{s.customer||"-"}</td>
                       <td><div className="font-semibold">{s.product||s.interlockDetails||"-"}</div><div className="text-gray-400">{detailText(s)}</div></td>
-                      <td className="text-right">{fmt(s.quantity)} pcs<br />{fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft</td>
+                      <td className="text-right">{s.productType==="hollowbrick" ? `${fmt(s.quantity)} numbers` : <>{fmt(s.quantity)} pcs<br />{fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft</>}</td>
                       <td className="text-right">{money(s.total)}</td>
                       <td className="text-right text-green-700 font-bold">{money(s.amountPaid)}</td>
                       <td className="text-right text-red-600 font-bold">{money(s.amountPending)}</td>
