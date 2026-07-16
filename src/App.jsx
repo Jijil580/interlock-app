@@ -4029,8 +4029,10 @@ function Sales({ sales, setSales, stock, setStock, user }) {
   }, []);
 
   const isHollow = (sale = form) => sale?.productType === "hollowbrick";
+  const isOther = (sale = form) => sale?.productType === "other";
+  const hasSqftSale = (sale = form) => !isHollow(sale) && (+(sale?.sqftPerPiece || 0) > 0 || +(sale?.sqftQty || 0) > 0);
   const calcSqftQty = () => isHollow() ? 0 : (+(form.sqftQty || 0) || ((+(form.quantity || 0)) * (+(form.sqftPerPiece || 0))));
-  const calcSubtotal = () => (isHollow() ? +(form.quantity || 0) : calcSqftQty()) * +(form.price || 0);
+  const calcSubtotal = () => (isHollow() || (isOther() && !hasSqftSale()) ? +(form.quantity || 0) : calcSqftQty()) * +(form.price || 0);
   const calcTaxable = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
   const calcCgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.cgstPercent || 0)) / 100 : 0;
   const calcSgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.sgstPercent || 0)) / 100 : 0;
@@ -4052,10 +4054,12 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const sgstAmount = taxable * sgstPercent / 100;
     return { taxable, cgstPercent, sgstPercent, cgstAmount, sgstAmount, total: taxable + cgstAmount + sgstAmount };
   };
-  const saleSqftOf = (sale) => isHollow(sale) ? 0 : (+(sale?.sqftQty || 0) || ((+(sale?.quantity || 0)) * (+(sale?.sqftPerPiece || 0))));
+  const saleSqftOf = (sale) => hasSqftSale(sale) ? (+(sale?.sqftQty || 0) || ((+(sale?.quantity || 0)) * (+(sale?.sqftPerPiece || 0)))) : 0;
   const saleQtyText = (sale) => isHollow(sale)
     ? `${fmt(sale?.quantity || 0)} numbers`
-    : `${fmt(sale?.quantity || 0)} pcs / ${fmt(saleSqftOf(sale))} sqft`;
+    : hasSqftSale(sale)
+      ? `${fmt(sale?.quantity || 0)} ${sale?.unit || "pcs"} / ${fmt(saleSqftOf(sale))} sqft`
+      : `${fmt(sale?.quantity || 0)} ${sale?.unit || "pcs"}`;
 
   const lookupCustomer = async (mobile) => {
     const m = mobile.replace(/\D/g, "").slice(-10);
@@ -4126,7 +4130,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const amountPaid = +(form.amountPaid || 0);
     const item = await api("POST", "/sales", {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
-      taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: calcSqftQty(), cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
+      taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: hasSqftSale() ? calcSqftQty() : 0, cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
       cgstAmount: calcCgst(), sgstAmount: calcSgst(),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
@@ -4160,9 +4164,11 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const tax = printTax(printSale, printOptions);
     const withGst = printOptions.billType === "with_gst";
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
-    const details = [printSale.shape, printSale.color, printSale.size ? `${printSale.size} inch` : "", printSale.thickness ? `${printSale.thickness} inch thick` : ""].filter(Boolean).join(" / ");
-    const countOnly = isHollow(printSale);
-    const saleSqft = countOnly ? 0 : (+(printSale.sqftQty || 0) || ((+(printSale.quantity || 0)) * (+(printSale.sqftPerPiece || 0))));
+    const details = isOther(printSale)
+      ? [printSale.category, printSale.color, printSale.size].filter(Boolean).join(" / ")
+      : [printSale.shape, printSale.color, printSale.size ? `${printSale.size} inch` : "", printSale.thickness ? `${printSale.thickness} inch thick` : ""].filter(Boolean).join(" / ");
+    const countOnly = isHollow(printSale) || (isOther(printSale) && !hasSqftSale(printSale));
+    const saleSqft = countOnly ? 0 : saleSqftOf(printSale);
     const itemAmount = tax.taxable;
     const cgstRate = withGst ? tax.cgstPercent : 0;
     const sgstRate = withGst ? tax.sgstPercent : 0;
@@ -4173,7 +4179,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
         <td><b>${printSale.product || "-"}</b><br><span>${printSale.interlockDetails || details || ""}</span></td>
         <td class="center">${printSale.hsnSac || "-"}</td>
         <td class="right">${fmt(printSale.quantity)}</td>
-        <td class="right">${countOnly ? "piece" : fmt(saleSqft)}</td>
+        <td class="right">${countOnly ? (printSale.unit || "piece") : fmt(saleSqft)}</td>
         <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
         <td class="right">${CURRENCY}${fmt(itemAmount)}</td>
         <td class="right">${cgstRate || ""}</td>
@@ -4504,7 +4510,11 @@ function Sales({ sales, setSales, stock, setStock, user }) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Product *</label>
-              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={isOther() ? "__other" : form.itemId} onChange={e => {
+                if (e.target.value === "__other") {
+                  setForm({ ...form, itemId: "", productType: "other", product: "", category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", interlockDetails: "", unit: "piece", price: "" });
+                  return;
+                }
                 const it = interlockTypes.find(x => x._id === e.target.value);
                 const isHb = it?.productType === "hollowbrick";
                 const details = it ? (isHb ? [it.category, it.size ? `${it.size} inch` : ""].filter(Boolean).join(" / ") : [it.shape, it.color, it.size ? `${it.size} inch` : "", it.thickness ? `${it.thickness} inch thick` : ""].filter(Boolean).join(" / ")) : "";
@@ -4517,7 +4527,20 @@ function Sales({ sales, setSales, stock, setStock, user }) {
                 {interlockTypes.map(i => (
                   <option key={`${i.productType}-${i._id}`} value={i._id}>{i.productType === "hollowbrick" ? "Hollow Brick - " : ""}{i.name}{i.color ? ` (${i.color})` : ""}{i.size ? ` - ${i.size}${i.productType==="hollowbrick" ? " inch" : ""}` : ""}</option>
                 ))}
+                <option value="__other">Other - Manual Product</option>
               </select>
+              {isOther() && (
+                <div className="mt-2 bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input label="Product Name" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })} placeholder="Type product name" />
+                    <Input label="Category" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Category" />
+                    <Input label="Color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} placeholder="Color" />
+                    <Input label="Size / No." value={form.size} onChange={e => setForm({ ...form, size: e.target.value })} placeholder="Size, No., model" />
+                    <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value || "piece" })} placeholder="piece / load / number" />
+                    <Input label="Extra Details" value={form.interlockDetails} onChange={e => setForm({ ...form, interlockDetails: e.target.value })} placeholder="Any bill description" />
+                  </div>
+                </div>
+              )}
               {form.product && interlockTypes.find(x => x._id === form.itemId) && (
                 <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
                   {form.category && <div>Category: {form.category}</div>}
@@ -4529,13 +4552,13 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
             </div>
             <div className={`grid grid-cols-2 ${isHollow() ? "md:grid-cols-2" : "md:grid-cols-4"} gap-2`}>
-              <Input label={isHollow() ? "Numbers" : "Pieces"} type="number" value={form.quantity} onChange={e => {
+              <Input label={isHollow() ? "Numbers" : isOther() ? "Quantity / No." : "Pieces"} type="number" value={form.quantity} onChange={e => {
                 const pieces = +(e.target.value || 0);
                 const sqftPerPiece = +(form.sqftPerPiece || 0);
                 setForm({ ...form, quantity: e.target.value, sqftQty: !isHollow() && sqftPerPiece ? String(pieces * sqftPerPiece) : "" });
               }} placeholder="0" />
               {!isHollow() && <>
-                <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                <Input label={isOther() ? "1 Unit Sqft (optional)" : "1 Piece Sqft"} type="number" step="any" value={form.sqftPerPiece} onChange={e => {
                   const sqftPerPiece = +(e.target.value || 0);
                   const pieces = +(form.quantity || 0);
                   setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && pieces ? String(pieces * sqftPerPiece) : "" });
