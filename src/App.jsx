@@ -1,7 +1,24 @@
 import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
-const COMPANY = { name: "PK Interlock", logo: "🏭" };
+const COMPANY = {
+  companyName: "P. K. INTERLOCKS & HOLLOW BRICKS",
+  shortName: "PK Interlock",
+  logo: "🏭",
+  address: "HAJ ROAD, VILAKKODE, IRITTY",
+  state: "Kerala",
+  stateCode: "32",
+  gstin: "32AESHA2414P1ZP",
+  phone1: "7034116685",
+  phone2: "9946956685",
+  invoiceTitle: "TAX INVOICE",
+  invoicePrefix: "INV",
+  signatureName: "P.K. Interlocks & Hollowbricks",
+  bankName: "",
+  bankAccount: "",
+  bankIfsc: "",
+  terms: "Certified that the particulars given above are true and correct.",
+};
 const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
 const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
 const CURRENCY = "₹";
@@ -393,7 +410,7 @@ function DeviceManagement({ user }) {
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
-function Login({ onLogin }) {
+function Login({ onLogin, branding = COMPANY }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -444,8 +461,8 @@ function Login({ onLogin }) {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-3xl">{COMPANY.logo}</div>
-          <h1 className="text-2xl font-black text-gray-900">{COMPANY.name}</h1>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-3xl">{branding.logo || COMPANY.logo}</div>
+          <h1 className="text-2xl font-black text-gray-900">{branding.shortName || branding.companyName || COMPANY.shortName}</h1>
           <p className="text-slate-500 text-sm mt-1">Management System</p>
         </div>
         <div className="space-y-4">
@@ -4014,7 +4031,7 @@ function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, cus
 }
 
 // ─── SALES ────────────────────────────────────────────────────────────────────
-function Sales({ sales, setSales, stock, setStock, user }) {
+function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [modal, setModal] = useState(false);
   const [interlockTypes, setInterlockTypes] = useState([]);
   const [customerMaster, setCustomerMaster] = useState([]);
@@ -4177,6 +4194,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
 
   const printBill = () => {
     if (!printSale) return;
+    const brand = { ...COMPANY, ...(branding || {}) };
     const tax = printTax(printSale, printOptions);
     const withGst = printOptions.billType === "with_gst";
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
@@ -4231,9 +4249,9 @@ function Sales({ sales, setSales, stock, setStock, user }) {
       <button class="printbtn" onclick="window.print()">Print</button>
       <div class="invoice">
         <div class="title">
-          <div class="side"><b><i>TAX INVOICE</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Invoice Date : <b>${printSale.date || ""}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br><span class="pill">State Code: ${printSale.stateCode || "32"}</span></div>
-          <div class="brand"><h1>P. K. INTERLOCKS & HOLLOW BRICKS</h1><div class="addr">HAJ ROAD, VILAKKODE, IRITTY<br>State: Kerala</div><div class="gst">GSTIN: 32AESHA2414P1ZP</div></div>
-          <div class="side right"><b>PH:</b> 7034116685<br>9946956685<br><br>Date: <b>${printSale.date || ""}</b></div>
+          <div class="side"><b><i>${brand.invoiceTitle || "TAX INVOICE"}</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Invoice Date : <b>${printSale.date || ""}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br><span class="pill">State Code: ${printSale.stateCode || brand.stateCode || "32"}</span></div>
+          <div class="brand"><h1>${brand.companyName || COMPANY.companyName}</h1><div class="addr">${brand.address || "-"}<br>State: ${brand.state || "Kerala"}</div><div class="gst">GSTIN: ${brand.gstin || "-"}</div></div>
+          <div class="side right"><b>PH:</b> ${brand.phone1 || "-"}<br>${brand.phone2 || ""}<br><br>Date: <b>${printSale.date || ""}</b></div>
         </div>
         <div class="grid2">
           <div class="cell">
@@ -4267,7 +4285,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
         <div class="bottom">
           <div class="bank">
             <div class="section-title">BANK DETAILS</div>
-            <div class="body">Name of Bank : ${printSale.bankName || "-"}<br>Bank A/C No. : ${printSale.bankAccount || "-"}<br>Bank Branch IFSC : ${printSale.bankIfsc || "-"}<br><br><b>Terms & Conditions:</b><br>${printSale.terms || "Certified that the particulars given above are true and correct."}</div>
+            <div class="body">Name of Bank : ${printSale.bankName || brand.bankName || "-"}<br>Bank A/C No. : ${printSale.bankAccount || brand.bankAccount || "-"}<br>Bank Branch IFSC : ${printSale.bankIfsc || brand.bankIfsc || "-"}<br><br><b>Terms & Conditions:</b><br>${printSale.terms || brand.terms || "Certified that the particulars given above are true and correct."}</div>
           </div>
           <div class="amounts">
             <table><tbody>
@@ -4284,7 +4302,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
             </tbody></table>
           </div>
         </div>
-        <div class="footer"><div class="seal">(Common Seal)</div><div class="sign">For P.K. Interlocks & Hollowbricks<b>Authorised Signatory</b></div></div>
+        <div class="footer"><div class="seal">(Common Seal)</div><div class="sign">For ${brand.signatureName || brand.shortName || brand.companyName || COMPANY.shortName}<b>Authorised Signatory</b></div></div>
       </div>
       <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
     const w = window.open("", "_blank", "width=900,height=700");
@@ -4733,6 +4751,62 @@ function Users({ currentUser, allUsers, setAllUsers }) {
 }
 
 // ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
+function BrandingSettings({ branding, setBranding }) {
+  const [form, setForm] = useState({ ...COMPANY, ...(branding || {}) });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(()=>setForm({ ...COMPANY, ...(branding || {}) }), [branding]);
+
+  const save = async () => {
+    setSaving(true);
+    setMessage("");
+    const data = await api("PUT", "/settings/branding", form);
+    setSaving(false);
+    if (data?.companyName) {
+      setBranding({ ...COMPANY, ...data });
+      setMessage("Branding saved");
+    } else {
+      setMessage(data?.message || "Failed to save branding");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-black text-gray-900">Company Branding</h2>
+        <div className="text-xs text-gray-400">Used in app header, login screen, invoices, and invoice numbers</div>
+      </div>
+      <SectionBox title="Company Details" icon="Brand" color="blue">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Short Name" value={form.shortName || ""} onChange={e=>setForm({...form,shortName:e.target.value})} />
+          <Input label="Logo Text" value={form.logo || ""} onChange={e=>setForm({...form,logo:e.target.value})} />
+          <Input label="Company Name" value={form.companyName || ""} onChange={e=>setForm({...form,companyName:e.target.value})} />
+          <Input label="GSTIN" value={form.gstin || ""} onChange={e=>setForm({...form,gstin:e.target.value})} />
+          <Input label="Phone 1" value={form.phone1 || ""} onChange={e=>setForm({...form,phone1:e.target.value})} />
+          <Input label="Phone 2" value={form.phone2 || ""} onChange={e=>setForm({...form,phone2:e.target.value})} />
+          <Input label="State" value={form.state || ""} onChange={e=>setForm({...form,state:e.target.value})} />
+          <Input label="State Code" value={form.stateCode || ""} onChange={e=>setForm({...form,stateCode:e.target.value})} />
+          <div className="col-span-2"><Textarea label="Address" value={form.address || ""} onChange={e=>setForm({...form,address:e.target.value})} /></div>
+        </div>
+      </SectionBox>
+      <SectionBox title="Invoice Defaults" icon="Invoice" color="green">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Invoice Title" value={form.invoiceTitle || ""} onChange={e=>setForm({...form,invoiceTitle:e.target.value})} />
+          <Input label="Invoice Prefix" value={form.invoicePrefix || ""} onChange={e=>setForm({...form,invoicePrefix:e.target.value})} />
+          <Input label="Signature Name" value={form.signatureName || ""} onChange={e=>setForm({...form,signatureName:e.target.value})} />
+          <Input label="Bank Name" value={form.bankName || ""} onChange={e=>setForm({...form,bankName:e.target.value})} />
+          <Input label="Bank A/C No." value={form.bankAccount || ""} onChange={e=>setForm({...form,bankAccount:e.target.value})} />
+          <Input label="Bank IFSC" value={form.bankIfsc || ""} onChange={e=>setForm({...form,bankIfsc:e.target.value})} />
+          <div className="col-span-2"><Textarea label="Default Terms" value={form.terms || ""} onChange={e=>setForm({...form,terms:e.target.value})} /></div>
+        </div>
+      </SectionBox>
+      {message&&<div className={`text-sm font-bold ${message.includes("saved")?"text-green-700":"text-red-600"}`}>{message}</div>}
+      <button onClick={save} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:bg-amber-300">{saving ? "Saving..." : "Save Branding"}</button>
+    </div>
+  );
+}
+
 function AdminSiteReport() {
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
@@ -6163,7 +6237,12 @@ export default function App() {
   const [sales, setSales] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
+  const [branding, setBranding] = useState(COMPANY);
   const [loading, setLoading] = useState(false);
+
+  useEffect(()=>{
+    api("GET","/settings/branding").then(b=>{ if (b?.companyName) setBranding({ ...COMPANY, ...b }); });
+  },[]);
 
   useEffect(()=>{
     if (!currentUser) return;
@@ -6184,7 +6263,7 @@ export default function App() {
       }).catch(()=>setLoading(false));
   },[currentUser]);
 
-  if (!currentUser) return <Login onLogin={(u)=>{
+  if (!currentUser) return <Login branding={branding} onLogin={(u)=>{
     if (u.devicePending) {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
@@ -6231,7 +6310,8 @@ export default function App() {
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
-      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} />;
+      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={branding} />;
+      case "branding": return isAdminLike(currentUser.role)?<BrandingSettings branding={branding} setBranding={setBranding} />:null;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
@@ -6247,8 +6327,8 @@ export default function App() {
       <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
         <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{COMPANY.logo}</div>
-            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.name}</div><div className="text-slate-400 text-xs">Management System</div></div>
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{branding.logo || COMPANY.logo}</div>
+            <div><div className="text-white font-black text-sm leading-tight">{branding.shortName || branding.companyName || COMPANY.shortName}</div><div className="text-slate-400 text-xs">Management System</div></div>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
@@ -6274,7 +6354,8 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
+          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label || (page==="branding" ? "Branding" : "")}</h1>
+          {isAdminLike(currentUser.role)&&<button onClick={()=>setPage("branding")} className="bg-slate-100 text-slate-700 px-2 sm:px-3 py-1.5 rounded-full text-xs font-bold hover:bg-slate-200">Brand</button>}
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
