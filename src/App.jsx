@@ -83,13 +83,13 @@ function Badge({ children, color = "gray" }) {
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 backdrop-blur-sm p-3">
-      <div className={`bg-white rounded-xl shadow-xl border border-slate-200 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[92vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
-          <h3 className="font-black text-gray-900 text-base">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-0 sm:p-3">
+      <div className={`app-modal bg-white rounded-t-2xl sm:rounded-xl shadow-xl border border-slate-200 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto`}>
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
+          <h3 className="font-black text-gray-900 text-base leading-tight">{title}</h3>
+          <button onClick={onClose} className="w-10 h-10 rounded-full bg-slate-100 text-gray-500 hover:text-gray-700 text-2xl leading-none flex items-center justify-center">×</button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="app-modal-body px-4 sm:px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">{children}</div>
       </div>
     </div>
   );
@@ -99,7 +99,7 @@ function Input({ label, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <input className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props} />
+      <input className="w-full min-h-11 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props} />
     </div>
   );
 }
@@ -108,7 +108,7 @@ function Textarea({ label, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <textarea className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm resize-none" rows={3} {...props} />
+      <textarea className="w-full min-h-24 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm resize-none" rows={3} {...props} />
     </div>
   );
 }
@@ -117,7 +117,7 @@ function Select({ label, options, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <select className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props}>
+      <select className="w-full min-h-11 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props}>
         {options.map((o) => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
       </select>
     </div>

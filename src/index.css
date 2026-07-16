@@ -55,3 +55,17 @@
 .bg-gray-50 {
   background-color: #f8fafc;
 }
+
+@media (max-width: 640px) {
+  .app-modal-body .grid.grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .app-modal-body button {
+    min-height: 44px;
+  }
+
+  .app-modal-body table {
+    min-width: 680px;
+  }
+}
