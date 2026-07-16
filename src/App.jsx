@@ -2444,6 +2444,9 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
     const data = await api("GET", `/suppliers/reports${type ? `?type=${type}` : ""}`);
     if (data?.suppliers) setSupplierReports(data);
   };
+  const downloadExport = (dataset, format = "csv") => {
+    window.open(`${API}/export/${dataset}?format=${format}`, "_blank");
+  };
 
   const filterByDate = (r) => {
     if (fromDate && r.date<fromDate) return false;
@@ -2606,6 +2609,19 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
         <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
         <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
       </div>
+      <SectionBox title="Backup & Export" icon="Export" color="blue">
+        <div className="text-sm text-gray-600">Download a full backup or Excel-ready CSV files for business records.</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button onClick={()=>downloadExport("all","json")} className="bg-blue-600 text-white rounded-xl px-3 py-2.5 text-xs font-black hover:bg-blue-700">Full Backup</button>
+          {[
+            ["sales","Sales"],["purchases","Purchases"],["stock","Stock"],["customers","Customers"],
+            ["suppliers","Suppliers"],["workers","Workers"],["siteWorks","Sites"],["dailyReports","Daily Reports"],
+            ["productionSiteEntries","Production"],["rawMaterials","Raw Materials"],["masterInterlocks","Interlock Master"],["workerPayments","Worker Payments"]
+          ].map(([id,label])=>(
+            <button key={id} onClick={()=>downloadExport(id,"csv")} className="bg-white border border-blue-200 text-blue-700 rounded-xl px-3 py-2.5 text-xs font-black hover:bg-blue-50">{label}</button>
+          ))}
+        </div>
+      </SectionBox>
 
       {tab==="sites"&&(
         <div className="space-y-3">
