@@ -3828,7 +3828,8 @@ function Stock({ stock, setStock, user }) {
     const prefix = s.category ? `${s.category} - ` : "";
     const rawName = String(s.name || "").trim();
     const cleanName = prefix && rawName.toLowerCase().startsWith(prefix.toLowerCase()) ? rawName.slice(prefix.length).trim() : rawName;
-    const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${String(s.size || "").trim().toLowerCase()}|${String(s.unit || "").trim().toLowerCase()}`;
+    const sizeKey = s.productType === "hollowbrick" ? String(s.size || "").trim().toLowerCase() : "";
+    const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${sizeKey}|${String(s.unit || "").trim().toLowerCase()}`;
     const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${s.size} inch` : (cleanName || s.name);
     if (!acc[key]) acc[key] = { ...s, name: displayName, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
     acc[key].quantity += +(s.quantity) || 0;
