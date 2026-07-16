@@ -674,8 +674,8 @@ function MasterData() {
         <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} placeholder="e.g. Paver, Kerb, Tile" />
         <Input label="Shape" value={form.shape||""} onChange={e=>setForm({...form,shape:e.target.value})} placeholder="e.g. Rectangular" />
         <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} placeholder="e.g. Grey" />
-        <Input label="Size (cm)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 20x10x6" />
-        <Input label="Thickness (cm)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 6" />
+        <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 8x4" />
+        <Input label="Thickness (inch)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 2.5" />
         <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value})} placeholder="e.g. 0.22" />
         <Input label={`Default Rate (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
         <Input label={`Price/sqm (${CURRENCY})`} type="number" value={form.pricePerSqm||""} onChange={e=>setForm({...form,pricePerSqm:+e.target.value})} />
@@ -763,7 +763,7 @@ function MasterData() {
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1">
                 <div className="font-black text-gray-900">{item.name}</div>
-                {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size,item.thickness&&`${item.thickness}cm`].filter(Boolean).join(" · ")}</div>}
+                {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size&&`${item.size} inch`,item.thickness&&`${item.thickness} inch thick`].filter(Boolean).join(" / ")}</div>}
                 {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
                 {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,item.size&&`${item.size} inch`].filter(Boolean).join(" / ")}</div>}
@@ -3861,7 +3861,8 @@ function Stock({ stock, setStock, user }) {
             <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} />
             <Select label="Product Type" value={form.productType||""} options={[{value:"",label:"General"},{value:"interlock",label:"Interlock"},{value:"hollowbrick",label:"Hollow Brick"}]} onChange={e=>setForm({...form,productType:e.target.value})} />
             <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} />
-            <Input label="Size" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder={form.productType==="hollowbrick"?"e.g. 6 inch":"e.g. 20x10x6"} />
+            <Input label={form.productType==="interlock"?"Size (inch)":"Size"} value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder={form.productType==="hollowbrick"?"e.g. 6 inch":form.productType==="interlock"?"e.g. 8x4":"e.g. 20x10x6"} />
+            {form.productType==="interlock"&&<Input label="Thickness (inch)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 2.5" />}
             <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,sqftQuantity:(+e.target.value||0)*(+(form.sqftPerPiece)||0)})} />
             {form.productType!=="hollowbrick"&&<Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value,sqftQuantity:(+(form.quantity)||0)*(+e.target.value||0)})} />}
             <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
@@ -4158,7 +4159,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
     const tax = printTax(printSale, printOptions);
     const withGst = printOptions.billType === "with_gst";
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
-    const details = [printSale.shape, printSale.color, printSale.size, printSale.thickness ? `${printSale.thickness}cm` : ""].filter(Boolean).join(" / ");
+    const details = [printSale.shape, printSale.color, printSale.size ? `${printSale.size} inch` : "", printSale.thickness ? `${printSale.thickness} inch thick` : ""].filter(Boolean).join(" / ");
     const countOnly = isHollow(printSale);
     const saleSqft = countOnly ? 0 : (+(printSale.sqftQty || 0) || ((+(printSale.quantity || 0)) * (+(printSale.sqftPerPiece || 0))));
     const itemAmount = tax.taxable;
@@ -4505,7 +4506,7 @@ function Sales({ sales, setSales, stock, setStock, user }) {
               <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={form.itemId} onChange={e => {
                 const it = interlockTypes.find(x => x._id === e.target.value);
                 const isHb = it?.productType === "hollowbrick";
-                const details = it ? (isHb ? [it.category, it.size ? `${it.size} inch` : ""].filter(Boolean).join(" / ") : [it.shape, it.color, it.size, it.thickness ? `${it.thickness}cm` : ""].filter(Boolean).join(" / ")) : "";
+                const details = it ? (isHb ? [it.category, it.size ? `${it.size} inch` : ""].filter(Boolean).join(" / ") : [it.shape, it.color, it.size ? `${it.size} inch` : "", it.thickness ? `${it.thickness} inch thick` : ""].filter(Boolean).join(" / ")) : "";
                 const price = isHb ? (it?.price || 0) : (it?.pricePerSqft || 0);
                 const sqftPerPiece = isHb ? 0 : +(it?.sqftPerPiece || 0);
                 const pieces = +(form.quantity || 0);
@@ -5721,7 +5722,16 @@ function OfficeDailyReport({ user }) {
 
   const total = report.totals || {};
   const money = value => `${CURRENCY}${fmt(value)}`;
-  const detailText = entry => [entry.category, entry.shape, entry.color, entry.size, entry.thickness].filter(Boolean).join(", ");
+  const detailText = entry => {
+    const inchSized = entry?.productType === "interlock" || entry?.productType === "hollowbrick";
+    return [
+      entry.category,
+      entry.shape,
+      entry.color,
+      entry.size && inchSized ? `${entry.size} inch` : entry.size,
+      entry.thickness && inchSized ? `${entry.thickness} inch thick` : entry.thickness
+    ].filter(Boolean).join(", ");
+  };
 
   return (
     <div className="space-y-4">
