@@ -3389,7 +3389,7 @@ function ProductionSite({ user, setStock }) {
     if (!form.workerName) { setSaveError("Select a worker"); return; }
     if (!form.itemName) { setSaveError("Select an item"); return; }
     const producedQty = calcProducedQty();
-    if (!producedQty) { setSaveError(isHollowProduction() && form.productionUnit === "box" ? "Enter box count and 1 box count" : "Enter produced quantity"); return; }
+    if (!producedQty) { setSaveError(isHollowProduction() && form.productionUnit === "box" ? "Enter no. of boxes. If total is still 0, set 1 box count in Hollow Brick master." : "Enter produced quantity"); return; }
     if (!+(form.productionRate)) { setSaveError("Enter rate per box/unit manually"); return; }
     setSaving(true);
     try {
@@ -3647,11 +3647,7 @@ function ProductionSite({ user, setStock }) {
                   const boxCount = +(form.boxCount || 0);
                   setForm({ ...form, boxQty: e.target.value, producedQty: boxQty && boxCount ? String(boxQty * boxCount) : "" });
                 }} placeholder="e.g. 10" />}
-                {isHollowProduction()&&form.productionUnit==="box"&&<Input label="1 Box Count *" type="number" step="any" value={form.boxCount} onChange={e => {
-                  const boxCount = +(e.target.value || 0);
-                  const boxQty = +(form.boxQty || 0);
-                  setForm({ ...form, boxCount: e.target.value, producedQty: boxQty && boxCount ? String(boxQty * boxCount) : "" });
-                }} placeholder="e.g. 60" />}
+                {isHollowProduction()&&form.productionUnit==="box"&&<div className="text-xs text-gray-500 bg-gray-50 rounded-xl p-2">Using master value: 1 box = <b>{fmt(form.boxCount || 0)}</b> pieces</div>}
                 <Input label={isHollowProduction()&&form.productionUnit==="box" ? "Total Count (auto)" : "Produced Quantity *"} type="number" step="any" value={isHollowProduction()&&form.productionUnit==="box" ? calcProducedQty() : form.producedQty} readOnly={isHollowProduction()&&form.productionUnit==="box"} onChange={e => {
                   const producedQty = +(e.target.value || 0);
                   const sqftPerPiece = +(form.sqftPerPiece || 0);
