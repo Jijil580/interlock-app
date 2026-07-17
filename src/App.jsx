@@ -4254,6 +4254,42 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       printSale.sqftPerPiece && !countOnly ? `1 piece = ${fmt(printSale.sqftPerPiece)} sqft` : "",
       printSale.unit ? `Unit: ${printSale.unit}` : ""
     ].filter(Boolean).join("<br>");
+    if (!withGst) {
+      const smallQty = countOnly ? `${fmt(printSale.quantity)} ${printSale.unit || "piece"}` : `${fmt(printSale.quantity)} pcs${saleSqft ? ` / ${fmt(saleSqft)} sqft` : ""}`;
+      const smallHtml = `<!doctype html><html><head><title>Bill ${invoiceNo}</title>
+        <style>
+          *{box-sizing:border-box}body{margin:0;background:#f8fafc;color:#111;font-family:Arial,"Times New Roman",serif}.printbtn{position:fixed;right:12px;top:10px;padding:8px 14px;border:0;border-radius:8px;background:#111827;color:white;font-weight:700}
+          .bill{width:148mm;min-height:105mm;background:white;margin:12px auto;padding:5mm 6mm;border:1.5px solid #222}
+          .head{text-align:center;line-height:1.2}.head h1{font-family:"Times New Roman",serif;font-size:20px;margin:0 0 2px;font-weight:900;letter-spacing:.3px}.addr{font-size:13px;font-weight:700}.phone{font-size:12px;font-weight:700;margin-top:2px}
+          .meta{display:grid;grid-template-columns:1fr 1fr;align-items:end;margin:4mm 0 2mm;font-size:13px}.no{color:#b91c1c;font-size:19px;letter-spacing:2px}.date{text-align:right;font-style:italic;font-weight:700}.dots{display:inline-block;min-width:34mm;border-bottom:1px dotted #333;height:14px;vertical-align:bottom}
+          table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1.5px solid #222;padding:5px 6px;font-size:13px;vertical-align:top}th{text-align:center;font-weight:800}.datecol{width:24mm}.qty{width:24mm;text-align:center}.amt{width:28mm;text-align:right}.particulars{height:40mm}.total td{font-weight:900}.signature{text-align:right;font-style:italic;font-weight:700;padding-top:2mm;font-size:15px}
+          @media print{body{background:white}.printbtn{display:none}@page{size:A6 landscape;margin:4mm}.bill{width:148mm;min-height:105mm;margin:0;border:1.5px solid #222;box-shadow:none}}
+        </style></head><body>
+        <button class="printbtn" onclick="window.print()">Print</button>
+        <div class="bill">
+          <div class="head">
+            <h1>${brand.companyName || COMPANY.companyName}</h1>
+            <div class="addr">${brand.address || ""}</div>
+            <div class="phone">PH : ${[brand.phone1, brand.phone2].filter(Boolean).join(", ") || "-"}</div>
+          </div>
+          <div class="meta"><div class="no">${invoiceNo}</div><div class="date">Date <span class="dots">${printSale.date || ""}</span></div></div>
+          <table>
+            <thead><tr><th class="datecol">Date</th><th>Particulars</th><th class="qty">Qty</th><th class="amt">Amount</th></tr></thead>
+            <tbody>
+              <tr class="particulars"><td>${printSale.date || ""}</td><td><b>${printSale.product || "-"}</b><br>${fullDetails || ""}<br>${printSale.customer ? `Customer: ${printSale.customer}` : ""}</td><td class="qty">${smallQty}</td><td class="amt">${CURRENCY}${fmt(tax.total)}</td></tr>
+              <tr class="total"><td colspan="2" style="text-align:right">Total</td><td></td><td class="amt">${CURRENCY}${fmt(tax.total)}</td></tr>
+            </tbody>
+          </table>
+          <div class="signature">Signature</div>
+        </div>
+        <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+      const w = window.open("", "_blank", "width=700,height=520");
+      if (!w) return;
+      w.document.open();
+      w.document.write(smallHtml);
+      w.document.close();
+      return;
+    }
     const rows = `
       <tr>
         <td class="center">1</td>
