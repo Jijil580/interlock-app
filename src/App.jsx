@@ -713,6 +713,7 @@ function MasterData() {
       <div className="grid grid-cols-2 gap-2">
         <Input label="Category" value={form.category||"Hollow Brick"} onChange={e=>setForm({...form,category:e.target.value})} placeholder="Hollow Brick" />
         <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 4 inch / 6 inch / 8 inch" />
+        <Input label="1 Box Count" type="number" value={form.boxCount||""} onChange={e=>setForm({...form,boxCount:+e.target.value})} placeholder="e.g. 60" />
         <Input label={`Price / Piece (${CURRENCY})`} type="number" value={form.price||""} onChange={e=>setForm({...form,price:+e.target.value})} />
         <Input label="Stock Qty" type="number" value={form.stock||""} onChange={e=>setForm({...form,stock:+e.target.value})} />
       </div>
@@ -793,7 +794,7 @@ function MasterData() {
                 {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
                 {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,item.size&&`${item.size} inch`].filter(Boolean).join(" / ")}</div>}
-                {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.boxCount>0&&` / 1 box = ${fmt(item.boxCount)} pcs`} {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
                 {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
                 {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
                 {tab==="customers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile} · {item.address||"—"}</div>}
@@ -3313,7 +3314,8 @@ function ProductionSite({ user, setStock }) {
 
   const emptyForm = {
     date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
-    category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", unitType: "piece", producedQty: "", unit: "piece",
+    productType: "interlock", category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", unitType: "piece", producedQty: "", unit: "piece",
+    productionUnit: "unit", boxQty: "", boxCount: "",
     productionRate: "", paymentGiven: "", remarks: "",
   };
   const [form, setForm] = useState(emptyForm);
@@ -3322,11 +3324,13 @@ function ProductionSite({ user, setStock }) {
 
   useEffect(() => {
     Promise.all([
-      api("GET", "/productionsite"), api("GET", "/workers"), api("GET", "/masterdata/interlock"),
-    ]).then(([e, w, i]) => {
+      api("GET", "/productionsite"), api("GET", "/workers"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"),
+    ]).then(([e, w, i, h]) => {
+      const interlocks = Array.isArray(i) ? i.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
       setEntries(Array.isArray(e) ? e : []);
       setWorkers(Array.isArray(w) ? w : []);
-      setInterlockTypes(Array.isArray(i) ? i : []);
+      setInterlockTypes([...interlocks, ...hollow]);
       setLoading(false);
     });
   }, []);
@@ -3345,9 +3349,16 @@ function ProductionSite({ user, setStock }) {
     return q.length ? `&${q.join("&")}` : "";
   };
 
-  const calcTotal = () => +(form.producedQty || 0) * +(form.productionRate || 0);
-  const calcProductionSqft = () => +(form.sqftQty || 0) || ((+(form.producedQty || 0)) * (+(form.sqftPerPiece || 0)));
+  const isHollowProduction = () => form.productType === "hollowbrick";
+  const calcProducedQty = () => isHollowProduction() && form.productionUnit === "box" ? ((+(form.boxQty || 0)) * (+(form.boxCount || 0))) : +(form.producedQty || 0);
+  const calcRateQty = () => isHollowProduction() && form.productionUnit === "box" ? +(form.boxQty || 0) : calcProducedQty();
+  const calcTotal = () => calcRateQty() * +(form.productionRate || 0);
+  const calcProductionSqft = () => isHollowProduction() ? 0 : (+(form.sqftQty || 0) || ((+(form.producedQty || 0)) * (+(form.sqftPerPiece || 0))));
   const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
+  const productionQtyText = (entry) => entry?.productType === "hollowbrick" && entry?.productionUnit === "box"
+    ? `${fmt(entry.boxQty || 0)} box x ${fmt(entry.boxCount || 0)} = ${fmt(entry.producedQty || 0)} pieces`
+    : qtyWithSqft(entry, interlockTypes);
+  const productionRateLabel = (entry) => `${CURRENCY}${fmt(entry?.productionRate || 0)} / ${entry?.productType === "hollowbrick" && entry?.productionUnit === "box" ? "box" : "unit"}`;
   const productionWorkers = workers.filter(w => workerTypeOf(w)==="Production Worker" && isActiveWorker(w));
 
   const selectWorker = (id) => {
@@ -3359,14 +3370,16 @@ function ProductionSite({ user, setStock }) {
   const selectItem = (id) => {
     const it = interlockTypes.find(x => x._id === id);
     if (!it) return;
-    let unitType = (it.unit || "piece").toLowerCase();
+    const productType = it.productType || "interlock";
+    let unitType = productType === "hollowbrick" ? "piece" : (it.unit || "piece").toLowerCase();
     if (unitType === "nos" || unitType === "load") unitType = "piece";
     if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "piece";
-    const sqftPerPiece = +(it.sqftPerPiece || 0);
-    const producedQty = +(form.producedQty || 0);
+    const sqftPerPiece = productType === "hollowbrick" ? 0 : +(it.sqftPerPiece || 0);
+    const boxCount = +(it.boxCount || 0);
+    const producedQty = productType === "hollowbrick" && form.productionUnit === "box" ? (+(form.boxQty || 0) * boxCount) : +(form.producedQty || 0);
     setForm(f => ({
-      ...f, itemId: id, itemName: it.name, category: it.category || "", shape: it.shape || "", color: it.color || "", size: it.size || "", thickness: it.thickness || "",
-      sqftPerPiece: sqftPerPiece ? String(sqftPerPiece) : "", sqftQty: sqftPerPiece && producedQty ? String(sqftPerPiece * producedQty) : "", unitType, unit: unitType,
+      ...f, itemId: id, itemName: it.name, productType, category: it.category || "", shape: it.shape || "", color: it.color || "", size: it.size || "", thickness: it.thickness || "",
+      boxCount: boxCount ? String(boxCount) : "", sqftPerPiece: sqftPerPiece ? String(sqftPerPiece) : "", sqftQty: sqftPerPiece && producedQty ? String(sqftPerPiece * producedQty) : "", unitType, unit: "piece",
     }));
   };
 
@@ -3375,15 +3388,18 @@ function ProductionSite({ user, setStock }) {
     setSaveError("");
     if (!form.workerName) { setSaveError("Select a worker"); return; }
     if (!form.itemName) { setSaveError("Select an item"); return; }
-    if (!+(form.producedQty)) { setSaveError("Enter produced quantity"); return; }
-    if (!+(form.productionRate)) { setSaveError("Enter rate per unit manually"); return; }
+    const producedQty = calcProducedQty();
+    if (!producedQty) { setSaveError(isHollowProduction() && form.productionUnit === "box" ? "Enter box count and 1 box count" : "Enter produced quantity"); return; }
+    if (!+(form.productionRate)) { setSaveError("Enter rate per box/unit manually"); return; }
     setSaving(true);
     try {
       const item = await api("POST", "/productionsite", {
         ...form,
-        producedQty: +form.producedQty,
+        producedQty,
+        boxQty: +(form.boxQty || 0),
+        boxCount: +(form.boxCount || 0),
         sqftPerPiece: +(form.sqftPerPiece || 0),
-        sqftQty: calcProductionSqft(),
+        sqftQty: isHollowProduction() ? 0 : calcProductionSqft(),
         productionRate: +form.productionRate,
         paymentGiven: +(form.paymentGiven || 0),
         addedBy: user.name,
@@ -3468,7 +3484,7 @@ function ProductionSite({ user, setStock }) {
                   <div>
                     <div className="font-black">{e.workerName} · {e.itemName}</div>
                     <div className="text-xs text-gray-400">📅 {e.date}{e.shift ? ` · ${e.shift}` : ""}{e.color ? ` · ${e.color}` : ""}</div>
-                    <div className="text-sm text-gray-600">{qtyWithSqft(e, interlockTypes)} x {CURRENCY}{e.productionRate}</div>
+                    <div className="text-sm text-gray-600">{productionQtyText(e)} x {productionRateLabel(e)}</div>
                   </div>
                   <div className="text-right">
                     <div className="font-black text-green-700">{CURRENCY}{fmt(+(e.totalAmount) || 0)}</div>
@@ -3600,10 +3616,10 @@ function ProductionSite({ user, setStock }) {
 
             <SectionBox title="Product Details" icon="🧱" color="amber">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Select Item (Master Interlock) *</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Select Item *</label>
                 <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.itemId} onChange={e => selectItem(e.target.value)}>
-                  <option value="">-- Select Interlock Type --</option>
-                  {interlockTypes.map(it => <option key={it._id} value={it._id}>{it.name}{it.color ? ` (${it.color})` : ""}</option>)}
+                  <option value="">-- Select Interlock / Hollow Brick --</option>
+                  {interlockTypes.map(it => <option key={`${it.productType}-${it._id}`} value={it._id}>{it.productType === "hollowbrick" ? "Hollow Brick - " : ""}{it.name}{it.color ? ` (${it.color})` : ""}{it.size ? ` - ${it.size}${it.productType==="hollowbrick" ? " inch" : ""}` : ""}</option>)}
                 </select>
               </div>
               {form.itemName && (
@@ -3611,8 +3627,8 @@ function ProductionSite({ user, setStock }) {
                   <div><b>Item:</b> {form.itemName}</div>
                   <div><b>Category:</b> {form.category || "-"}</div>
                   <div><b>Color:</b> {form.color || "—"}</div>
-                  <div><b>1 Piece Sqft:</b> {form.sqftPerPiece || "0"}</div>
-                  <div><b>Unit:</b> {form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
+                  {isHollowProduction() ? <div><b>1 Box Count:</b> {form.boxCount || "0"} pieces</div> : <div><b>1 Piece Sqft:</b> {form.sqftPerPiece || "0"}</div>}
+                  <div><b>Unit:</b> {isHollowProduction() ? "Piece" : form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
                 </div>
               )}
               <div className="text-xs text-gray-500 mt-1">Rate is not taken from Master Data — enter manually below.</div>
@@ -3620,24 +3636,40 @@ function ProductionSite({ user, setStock }) {
 
             <SectionBox title="Production Details" icon="📦" color="green">
               <div className="grid grid-cols-2 gap-2">
-                <Input label="Produced Quantity *" type="number" step="any" value={form.producedQty} onChange={e => {
+                {isHollowProduction()&&<Select label="Production Entry Type" value={form.productionUnit} options={[{value:"unit",label:"Unit / Piece"},{value:"box",label:"Box"}]} onChange={e => {
+                  const productionUnit = e.target.value;
+                  const boxQty = +(form.boxQty || 0);
+                  const boxCount = +(form.boxCount || 0);
+                  setForm({ ...form, productionUnit, producedQty: productionUnit === "box" && boxQty && boxCount ? String(boxQty * boxCount) : form.producedQty });
+                }} />}
+                {isHollowProduction()&&form.productionUnit==="box"&&<Input label="No. of Boxes *" type="number" step="any" value={form.boxQty} onChange={e => {
+                  const boxQty = +(e.target.value || 0);
+                  const boxCount = +(form.boxCount || 0);
+                  setForm({ ...form, boxQty: e.target.value, producedQty: boxQty && boxCount ? String(boxQty * boxCount) : "" });
+                }} placeholder="e.g. 10" />}
+                {isHollowProduction()&&form.productionUnit==="box"&&<Input label="1 Box Count *" type="number" step="any" value={form.boxCount} onChange={e => {
+                  const boxCount = +(e.target.value || 0);
+                  const boxQty = +(form.boxQty || 0);
+                  setForm({ ...form, boxCount: e.target.value, producedQty: boxQty && boxCount ? String(boxQty * boxCount) : "" });
+                }} placeholder="e.g. 60" />}
+                <Input label={isHollowProduction()&&form.productionUnit==="box" ? "Total Count (auto)" : "Produced Quantity *"} type="number" step="any" value={isHollowProduction()&&form.productionUnit==="box" ? calcProducedQty() : form.producedQty} readOnly={isHollowProduction()&&form.productionUnit==="box"} onChange={e => {
                   const producedQty = +(e.target.value || 0);
                   const sqftPerPiece = +(form.sqftPerPiece || 0);
                   setForm({ ...form, producedQty: e.target.value, sqftQty: sqftPerPiece ? String(producedQty * sqftPerPiece) : form.sqftQty });
                 }} placeholder="e.g. 500" />
-                <Select label="Unit" value={form.unit} options={["sqft", "piece", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />
-                <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                {!isHollowProduction()&&<Select label="Unit" value={form.unit} options={["sqft", "piece", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />}
+                {!isHollowProduction()&&<Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
                   const sqftPerPiece = +(e.target.value || 0);
                   const producedQty = +(form.producedQty || 0);
                   setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && producedQty ? String(producedQty * sqftPerPiece) : "" });
-                }} placeholder="0" />
-                <Input label="Total Sqft" type="number" value={calcProductionSqft()} readOnly />
-                <Input label={`Rate per Unit (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder="Enter rate manually e.g. 7.50" />
+                }} placeholder="0" />}
+                {!isHollowProduction()&&<Input label="Total Sqft" type="number" value={calcProductionSqft()} readOnly />}
+                <Input label={`Rate per ${isHollowProduction() && form.productionUnit === "box" ? "Box" : "Unit"} (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder={isHollowProduction() && form.productionUnit === "box" ? "Rate per box" : "Rate per unit"} />
                 <Input label={`Payment Given (${CURRENCY})`} type="number" step="any" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
               </div>
               {+(form.producedQty) > 0 && +(form.productionRate) > 0 && (
                 <div className="bg-gray-50 rounded-xl p-2 text-xs text-gray-600 text-center">
-                  {form.producedQty} {form.unit} / {fmt(calcProductionSqft())} sqft x {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
+                  {isHollowProduction() && form.productionUnit === "box" ? `${fmt(form.boxQty)} box x ${fmt(form.boxCount)} = ${fmt(calcProducedQty())} pieces` : `${form.producedQty} ${form.unit} / ${fmt(calcProductionSqft())} sqft`} x {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
