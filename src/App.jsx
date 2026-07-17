@@ -2,31 +2,22 @@ import { useState, useEffect } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = {
-  companyName: "Interlock Management System",
-  shortName: "Interlock App",
+  companyName: "P. K. INTERLOCKS & HOLLOW BRICKS",
+  shortName: "PK Interlock",
   logo: "🏭",
-  address: "",
+  address: "HAJ ROAD, VILAKKODE, IRITTY",
   state: "Kerala",
   stateCode: "32",
-  gstin: "",
-  phone1: "",
-  phone2: "",
+  gstin: "32AESHA2414P1ZP",
+  phone1: "7034116685",
+  phone2: "9946956685",
   invoiceTitle: "TAX INVOICE",
   invoicePrefix: "INV",
-  signatureName: "Interlock App",
+  signatureName: "P.K. Interlocks & Hollowbricks",
   bankName: "",
   bankAccount: "",
   bankIfsc: "",
   terms: "Certified that the particulars given above are true and correct.",
-};
-const BRANDING_CACHE_KEY = "pk_branding_settings";
-const cachedBranding = () => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(BRANDING_CACHE_KEY) || "null");
-    return saved?.companyName ? { ...COMPANY, ...saved } : COMPANY;
-  } catch {
-    return COMPANY;
-  }
 };
 const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
 const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
@@ -4824,62 +4815,6 @@ function Users({ currentUser, allUsers, setAllUsers }) {
 }
 
 // ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
-function BrandingSettings({ branding, setBranding }) {
-  const [form, setForm] = useState({ ...COMPANY, ...(branding || {}) });
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(()=>setForm({ ...COMPANY, ...(branding || {}) }), [branding]);
-
-  const save = async () => {
-    setSaving(true);
-    setMessage("");
-    const data = await api("PUT", "/settings/branding", form);
-    setSaving(false);
-    if (data?.companyName) {
-      setBranding({ ...COMPANY, ...data });
-      setMessage("Branding saved");
-    } else {
-      setMessage(data?.message || "Failed to save branding");
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-black text-gray-900">Company Branding</h2>
-        <div className="text-xs text-gray-400">Used in app header, login screen, invoices, and invoice numbers</div>
-      </div>
-      <SectionBox title="Company Details" icon="Brand" color="blue">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Short Name" value={form.shortName || ""} onChange={e=>setForm({...form,shortName:e.target.value})} />
-          <Input label="Logo Text" value={form.logo || ""} onChange={e=>setForm({...form,logo:e.target.value})} />
-          <Input label="Company Name" value={form.companyName || ""} onChange={e=>setForm({...form,companyName:e.target.value})} />
-          <Input label="GSTIN" value={form.gstin || ""} onChange={e=>setForm({...form,gstin:e.target.value})} />
-          <Input label="Phone 1" value={form.phone1 || ""} onChange={e=>setForm({...form,phone1:e.target.value})} />
-          <Input label="Phone 2" value={form.phone2 || ""} onChange={e=>setForm({...form,phone2:e.target.value})} />
-          <Input label="State" value={form.state || ""} onChange={e=>setForm({...form,state:e.target.value})} />
-          <Input label="State Code" value={form.stateCode || ""} onChange={e=>setForm({...form,stateCode:e.target.value})} />
-          <div className="col-span-2"><Textarea label="Address" value={form.address || ""} onChange={e=>setForm({...form,address:e.target.value})} /></div>
-        </div>
-      </SectionBox>
-      <SectionBox title="Invoice Defaults" icon="Invoice" color="green">
-        <div className="grid grid-cols-2 gap-2">
-          <Input label="Invoice Title" value={form.invoiceTitle || ""} onChange={e=>setForm({...form,invoiceTitle:e.target.value})} />
-          <Input label="Invoice Prefix" value={form.invoicePrefix || ""} onChange={e=>setForm({...form,invoicePrefix:e.target.value})} />
-          <Input label="Signature Name" value={form.signatureName || ""} onChange={e=>setForm({...form,signatureName:e.target.value})} />
-          <Input label="Bank Name" value={form.bankName || ""} onChange={e=>setForm({...form,bankName:e.target.value})} />
-          <Input label="Bank A/C No." value={form.bankAccount || ""} onChange={e=>setForm({...form,bankAccount:e.target.value})} />
-          <Input label="Bank IFSC" value={form.bankIfsc || ""} onChange={e=>setForm({...form,bankIfsc:e.target.value})} />
-          <div className="col-span-2"><Textarea label="Default Terms" value={form.terms || ""} onChange={e=>setForm({...form,terms:e.target.value})} /></div>
-        </div>
-      </SectionBox>
-      {message&&<div className={`text-sm font-bold ${message.includes("saved")?"text-green-700":"text-red-600"}`}>{message}</div>}
-      <button onClick={save} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 disabled:bg-amber-300">{saving ? "Saving..." : "Save Branding"}</button>
-    </div>
-  );
-}
-
 function AdminSiteReport() {
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
@@ -6310,17 +6245,11 @@ export default function App() {
   const [sales, setSales] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
-  const [branding, setBranding] = useState(cachedBranding);
   const [loading, setLoading] = useState(false);
 
   useEffect(()=>{
-    api("GET","/settings/branding").then(b=>{ if (b?.companyName) setBranding({ ...COMPANY, ...b }); });
+    document.title = COMPANY.shortName;
   },[]);
-
-  useEffect(()=>{
-    try { localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(branding)); } catch {}
-    document.title = branding.shortName || branding.companyName || COMPANY.shortName;
-  },[branding]);
 
   useEffect(()=>{
     if (!currentUser) return;
@@ -6341,7 +6270,7 @@ export default function App() {
       }).catch(()=>setLoading(false));
   },[currentUser]);
 
-  if (!currentUser) return <Login branding={branding} onLogin={(u)=>{
+  if (!currentUser) return <Login branding={COMPANY} onLogin={(u)=>{
     if (u.devicePending) {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
@@ -6388,8 +6317,7 @@ export default function App() {
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
-      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={branding} />;
-      case "branding": return isAdminLike(currentUser.role)?<BrandingSettings branding={branding} setBranding={setBranding} />:null;
+      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
@@ -6405,8 +6333,8 @@ export default function App() {
       <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
         <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{branding.logo || COMPANY.logo}</div>
-            <div><div className="text-white font-black text-sm leading-tight">{branding.shortName || branding.companyName || COMPANY.shortName}</div><div className="text-slate-400 text-xs">Management System</div></div>
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{COMPANY.logo}</div>
+            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">Management System</div></div>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
@@ -6432,8 +6360,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label || (page==="branding" ? "Branding" : "")}</h1>
-          {isAdminLike(currentUser.role)&&<button onClick={()=>setPage("branding")} className="bg-slate-100 text-slate-700 px-2 sm:px-3 py-1.5 rounded-full text-xs font-bold hover:bg-slate-200">Brand</button>}
+          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
