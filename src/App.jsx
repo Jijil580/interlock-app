@@ -6379,6 +6379,7 @@ const NAV = {
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
     { id:"purchases", label:"Purchases", icon:"🛒" },
     { id:"workplan", label:"Work Planning", icon:"📅" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
   ],
   user: [
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
@@ -6488,7 +6489,7 @@ export default function App() {
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
-      case "quotations": return isAdminLike(currentUser.role) ? <QuotationModule user={currentUser} /> : null;
+      case "quotations": return <QuotationModule user={currentUser} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
