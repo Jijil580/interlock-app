@@ -6007,6 +6007,174 @@ function OfficeDailyReport({ user }) {
   );
 }
 
+function QuotationModule({ user }) {
+  const emptyItem = { productType: "interlock", itemId: "", product: "", category: "", color: "", size: "", thickness: "", hsnSac: "", description: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", rate: "", discountType: "amount", discountValue: "", cgstPercent: "9", sgstPercent: "9", igstPercent: "18" };
+  const emptyForm = { quotationNumber: "", date: today(), validUntil: today(), customer: "", mobileNumber: "", address: "", gstNumber: "", state: COMPANY.state, stateCode: COMPANY.stateCode, shipToName: "", shipToAddress: "", shipToGstNumber: "", shipToState: COMPANY.state, shipToStateCode: COMPANY.stateCode, billType: "with_gst", taxType: "cgst_sgst", placeOfSupply: COMPANY.state, terms: "1. This is an electronically generated quotation. 2. Prices are valid only until the quotation validity date.", notes: "", status: "draft", items: [{ ...emptyItem }] };
+  const [quotations, setQuotations] = useState([]);
+  const [masters, setMasters] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [modal, setModal] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
+  const [editingId, setEditingId] = useState("");
+  const [customerMode, setCustomerMode] = useState("existing");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [saveToMaster, setSaveToMaster] = useState(true);
+  const [form, setForm] = useState(emptyForm);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+
+  const load = () => {
+    Promise.all([api("GET", "/quotations"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([q, i, h, c]) => {
+      setQuotations(Array.isArray(q) ? q : []);
+      const interlocks = Array.isArray(i) ? i.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
+      setMasters([...interlocks, ...hollow]);
+      setCustomers(Array.isArray(c) ? c : []);
+    });
+  };
+
+  useEffect(load, []);
+
+  const calcLine = (row, source = form) => {
+    const qty = +(row.quantity || 0);
+    const rate = +(row.rate || 0);
+    const sqftQty = +(row.sqftQty || 0) || (qty * (+(row.sqftPerPiece || 0)));
+    const billingQty = row.productType === "hollowbrick" ? qty : (sqftQty || qty);
+    const base = billingQty * rate;
+    const discountValue = +(row.discountValue || 0);
+    const discount = row.discountType === "percent" ? base * discountValue / 100 : discountValue;
+    const taxable = Math.max(0, base - discount);
+    const withGst = source.billType === "with_gst";
+    const cgst = withGst && source.taxType !== "igst" ? taxable * (+(row.cgstPercent || 0)) / 100 : 0;
+    const sgst = withGst && source.taxType !== "igst" ? taxable * (+(row.sgstPercent || 0)) / 100 : 0;
+    const igst = withGst && source.taxType === "igst" ? taxable * (+(row.igstPercent || 0)) / 100 : 0;
+    return { base, discount, taxable, cgst, sgst, igst, total: taxable + cgst + sgst + igst, sqftQty };
+  };
+
+  const totals = (source = form) => {
+    const lines = (source.items || []).map(row => calcLine(row, source));
+    const subtotal = lines.reduce((a, x) => a + x.base, 0);
+    const discount = lines.reduce((a, x) => a + x.discount, 0);
+    const taxable = lines.reduce((a, x) => a + x.taxable, 0);
+    const cgst = lines.reduce((a, x) => a + x.cgst, 0);
+    const sgst = lines.reduce((a, x) => a + x.sgst, 0);
+    const igst = lines.reduce((a, x) => a + x.igst, 0);
+    const beforeRound = taxable + cgst + sgst + igst;
+    const total = Math.round(beforeRound);
+    return { subtotal, discount, taxable, cgst, sgst, igst, tax: cgst + sgst + igst, total, roundOff: total - beforeRound };
+  };
+
+  const setItem = (index, patch) => setForm(f => ({ ...f, items: f.items.map((it, i) => i === index ? { ...it, ...patch } : it) }));
+  const selectCustomer = (id) => {
+    setSelectedCustomerId(id);
+    const c = customers.find(x => x._id === id);
+    if (!c) return;
+    setForm(f => ({ ...f, customer: c.name || "", mobileNumber: c.mobile || "", address: c.address || "", gstNumber: c.gstNumber || "", shipToName: c.name || "", shipToAddress: c.address || "", shipToGstNumber: c.gstNumber || "" }));
+  };
+  const selectProduct = (index, value) => {
+    if (value === "other") return setItem(index, { productType: "other", itemId: "", product: "", unit: "piece", sqftPerPiece: "", sqftQty: "" });
+    const m = masters.find(x => x._id === value);
+    if (!m) return;
+    setItem(index, { productType: m.productType, itemId: m._id, product: m.name || m.category || "", category: m.category || m.name || "", color: m.color || "", size: m.size || "", thickness: m.thickness || "", sqftPerPiece: m.productType === "hollowbrick" ? "" : (m.sqftPerPiece || ""), unit: m.unit || "piece", rate: m.price || m.rate || "" });
+  };
+  const openNew = () => { setEditingId(""); setCustomerMode("existing"); setSelectedCustomerId(""); setForm(emptyForm); setError(""); setModal(true); };
+  const openEdit = (q) => { setEditingId(q._id); setCustomerMode("new"); setSelectedCustomerId(""); setForm({ ...emptyForm, ...q, items: (q.items || []).length ? q.items : [{ ...emptyItem }] }); setError(""); setModal(true); };
+
+  const save = async () => {
+    setError("");
+    const mobile = (form.mobileNumber || "").replace(/\D/g, "").slice(-10);
+    if (!form.customer) return setError("Customer name is required");
+    if (mobile.length < 10) return setError("Valid mobile number is required");
+    const validItems = (form.items || []).filter(x => x.product && +(x.quantity || 0) > 0 && +(x.rate || 0) >= 0);
+    if (!validItems.length) return setError("Add at least one valid product");
+    const body = { ...form, mobileNumber: mobile, addedBy: user.name, saveToCustomerMaster: customerMode === "new" ? saveToMaster : true, items: validItems.map(x => ({ ...x, ...calcLine(x), quantity: +(x.quantity || 0), rate: +(x.rate || 0), sqftPerPiece: +(x.sqftPerPiece || 0), sqftQty: calcLine(x).sqftQty })) };
+    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/quotations/${editingId}` : "/quotations", body);
+    if (!saved?._id) return setError(saved.message || "Failed to save quotation");
+    setModal(false);
+    load();
+  };
+
+  const printQuotation = (q) => {
+    const t = totals(q);
+    const withGst = q.billType === "with_gst";
+    const taxLabel = q.taxType === "igst" ? "IGST" : "CGST / SGST";
+    const rows = (q.items || []).map((it, i) => {
+      const l = calcLineForPrint(it, q);
+      const spec = [it.description, it.color, it.size, it.thickness, l.sqftQty ? `${fmt(l.sqftQty)} sqft` : ""].filter(Boolean).join("<br>");
+      const discount = `${CURRENCY_HTML}${fmt(l.discount)}${it.discountType === "percent" ? ` (${fmt(it.discountValue)}%)` : ""}`;
+      const tax = withGst ? (q.taxType === "igst" ? `${fmt(it.igstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.igst)}` : `${fmt(it.cgstPercent || 0)}% + ${fmt(it.sgstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.cgst + l.sgst)}`) : "-";
+      return `<tr><td>${i + 1}</td><td><b>${escapeHtml(it.product)}</b><br><small>${spec}</small></td><td>${fmt(it.quantity)}</td><td>${escapeHtml(it.unit || "piece")}</td><td>${CURRENCY_HTML}${fmt(it.rate)}</td><td>${discount}</td><td>${CURRENCY_HTML}${fmt(l.taxable)}</td><td>${tax}</td><td><b>${CURRENCY_HTML}${fmt(l.total)}</b></td></tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><title>Quotation ${q.quotationNumber || ""}</title><style>
+      @page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111;margin:0}.sheet{border:1px solid #111;min-height:276mm}.top{height:14px;background:#f2c300}.thanks{text-align:center;font-style:italic;font-size:12px;padding:8px}.head{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:18px}.company h2{margin:0 0 6px;font-size:20px}.company div{font-size:13px;line-height:1.5}.title{font-size:38px;font-weight:900;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #111}.meta div{padding:10px;font-size:13px}.partyHead,.totalRow{background:#f8f0d9;font-weight:700}.party{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111}.party>div{padding:10px;min-height:105px}.party h3{margin:0 0 8px;font-size:17px}.party p{margin:4px 0;font-size:13px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #111;padding:8px;font-size:12px;text-align:left}th{text-align:center;background:#f8f0d9}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:center}td:nth-child(n+5){text-align:right}.summary{display:grid;grid-template-columns:1.5fr 1fr;border-bottom:1px solid #111}.words{padding:14px;text-align:center;font-size:13px}.totals div{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:8px 12px;font-size:13px}.totals .grand{background:#f8f0d9;font-weight:900;font-size:20px;padding:14px}.bottom{display:grid;grid-template-columns:1.4fr 1fr;min-height:145px}.terms{padding:12px;border-right:1px solid #111}.sign{text-align:center;padding:12px}.line{height:62px}.small{font-size:12px;color:#333}@media print{button{display:none}.sheet{border-color:#111}}</style></head><body><div class="top"></div><div class="thanks">Thank-you for doing business with us</div><div class="sheet">
+      <div class="head"><div class="company"><h2>${escapeHtml(COMPANY.companyName)}</h2><div>${escapeHtml(COMPANY.address)}</div><div>${escapeHtml(COMPANY.state)} - State Code: ${escapeHtml(COMPANY.stateCode)}</div><div>PH: ${escapeHtml(COMPANY.phone1)}, ${escapeHtml(COMPANY.phone2)}</div><div>GSTIN: ${escapeHtml(COMPANY.gstin)}</div></div><div class="title">QUOTATION</div></div>
+      <div class="meta"><div>Quotation Number: <b>${escapeHtml(q.quotationNumber || "")}</b></div><div>Quotation Validity: <b>${escapeHtml(q.validUntil || "")}</b></div><div>Date: <b>${escapeHtml(q.date || "")}</b></div></div>
+      <div class="meta partyHead"><div>Quotation For</div><div>Ship To</div><div>${withGst ? taxLabel : "Without GST"}</div></div>
+      <div class="party"><div><h3>${escapeHtml(q.customer || "")}</h3><p>${escapeHtml(q.address || "")}</p><p>State: ${escapeHtml(q.state || "")}</p><p>GST: ${escapeHtml(q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.stateCode || "")}</p><p>Mobile: ${escapeHtml(q.mobileNumber || "")}</p></div><div><h3>${escapeHtml(q.shipToName || q.customer || "")}</h3><p>${escapeHtml(q.shipToAddress || q.address || "")}</p><p>State: ${escapeHtml(q.shipToState || q.state || "")}</p><p>GST: ${escapeHtml(q.shipToGstNumber || q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.shipToStateCode || q.stateCode || "")}</p></div></div>
+      <table><thead><tr><th>Sr. No.</th><th>Name of Product</th><th>QTY</th><th>Unit</th><th>Rate</th><th>Discount</th><th>Taxable Value</th><th>${taxLabel}</th><th>Total</th></tr></thead><tbody>${rows}<tr class="totalRow"><td></td><td>Total</td><td>${fmt((q.items || []).reduce((a,x)=>a+(+(x.quantity)||0),0))}</td><td></td><td></td><td>${CURRENCY_HTML}${fmt(t.discount)}</td><td>${CURRENCY_HTML}${fmt(t.taxable)}</td><td>${CURRENCY_HTML}${fmt(t.tax)}</td><td>${CURRENCY_HTML}${fmt(t.total)}</td></tr></tbody></table>
+      <div class="summary"><div class="words"><b>Total Amount</b><br>${CURRENCY_HTML}${fmt(t.total)} only</div><div class="totals"><div><span>Taxable Amount</span><b>${CURRENCY_HTML}${fmt(t.taxable)}</b></div><div><span>Add: Tax</span><span>${CURRENCY_HTML}${fmt(t.tax)}</span></div><div><span>Round Off Value</span><span>${CURRENCY_HTML}${fmt(t.roundOff)}</span></div><div class="grand"><span>Total Amount</span><span>${CURRENCY_HTML}${fmt(t.total)}</span></div></div></div>
+      <div class="bottom"><div class="terms"><b>Terms and conditions</b><p class="small">${escapeHtml(q.terms || COMPANY.terms)}</p></div><div class="sign"><div>Certified that the particulars given above are true and correct, for</div><h3>${escapeHtml(COMPANY.signatureName)}</h3><div class="line"></div><div>Authorised Signatory</div></div></div>
+      </div><script>window.print()</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const CURRENCY_HTML = "&#8377;";
+  const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  const calcLineForPrint = (row, quotation) => {
+    return calcLine(row, quotation);
+  };
+
+  const filtered = quotations.filter(q => !search || [q.quotationNumber, q.customer, q.mobileNumber].join(" ").toLowerCase().includes(search.toLowerCase()));
+  const t = totals();
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-xl font-black text-gray-900">Quotations</h2><div className="text-xs text-gray-400">Create, edit, view and print customer quotations</div></div>
+        <button onClick={openNew} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm">+ New Quotation</button>
+      </div>
+      <Input placeholder="Search quotation, customer or mobile" value={search} onChange={e=>setSearch(e.target.value)} />
+      {filtered.length === 0 ? <EmptyState icon="QT" text="No quotations found" /> : <div className="grid gap-3">{filtered.map(q => <div key={q._id} className="bg-white border rounded-xl shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
+        <div><div className="font-black text-gray-900">{q.quotationNumber}</div><div className="text-sm text-gray-500">{q.customer} - {q.mobileNumber}</div><div className="text-xs text-gray-400">{q.date} | Valid until {q.validUntil || "-"}</div></div>
+        <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(q.total)}</div><Badge color={q.billType === "with_gst" ? "blue" : "gray"}>{q.billType === "with_gst" ? "With GST" : "Without GST"}</Badge></div>
+        <div className="flex gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">View</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">Print</button></div>
+      </div>)}</div>}
+
+      {modal && <Modal title={editingId ? "Edit Quotation" : "New Quotation"} onClose={()=>setModal(false)} wide>
+        <div className="space-y-4">
+          <div className="grid sm:grid-cols-3 gap-3"><Input label="Quotation No." value={form.quotationNumber} onChange={e=>setForm({...form, quotationNumber:e.target.value})} placeholder="Auto" /><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /><Input label="Valid Until" type="date" value={form.validUntil} onChange={e=>setForm({...form, validUntil:e.target.value})} /></div>
+          <div className="grid sm:grid-cols-3 gap-3"><Select label="Customer" value={customerMode} options={[{value:"existing",label:"Existing Customer"},{value:"new",label:"New Customer"}]} onChange={e=>setCustomerMode(e.target.value)} />{customerMode==="existing"&&<Select label="Select Customer" value={selectedCustomerId} options={[{value:"",label:"Select customer"}, ...customers.map(c=>({value:c._id,label:`${c.name} - ${c.mobile}`}))]} onChange={e=>selectCustomer(e.target.value)} />}<label className="flex items-center gap-2 text-xs font-bold text-slate-600 pt-7"><input type="checkbox" checked={saveToMaster} onChange={e=>setSaveToMaster(e.target.checked)} /> Save new customer</label></div>
+          <div className="grid sm:grid-cols-2 gap-3"><Input label="Customer Name" value={form.customer} onChange={e=>setForm({...form, customer:e.target.value, shipToName: form.shipToName || e.target.value})} /><Input label="Mobile Number" value={form.mobileNumber} onChange={e=>setForm({...form, mobileNumber:e.target.value})} /><Textarea label="Billing Address" value={form.address} onChange={e=>setForm({...form, address:e.target.value, shipToAddress: form.shipToAddress || e.target.value})} /><Textarea label="Shipping Address" value={form.shipToAddress} onChange={e=>setForm({...form, shipToAddress:e.target.value})} /><Input label="GST Number" value={form.gstNumber} onChange={e=>setForm({...form, gstNumber:e.target.value, shipToGstNumber: form.shipToGstNumber || e.target.value})} /><Input label="Place of Supply" value={form.placeOfSupply} onChange={e=>setForm({...form, placeOfSupply:e.target.value})} /></div>
+          <div className="grid sm:grid-cols-2 gap-3"><Select label="Bill Type" value={form.billType} options={[{value:"with_gst",label:"With GST"},{value:"without_gst",label:"Without GST"}]} onChange={e=>setForm({...form, billType:e.target.value})} /><Select label="GST Type" value={form.taxType} options={[{value:"cgst_sgst",label:"CGST + SGST"},{value:"igst",label:"IGST"}]} onChange={e=>setForm({...form, taxType:e.target.value})} /></div>
+          <SectionBox title="Products" icon="QT" color="amber">
+            <div className="space-y-3">{form.items.map((it,i)=>{ const line = calcLine(it); return <div key={i} className="border rounded-xl p-3 space-y-3 bg-slate-50">
+              <div className="flex justify-between items-center"><div className="font-black text-sm">Item {i+1}</div>{form.items.length>1&&<button onClick={()=>setForm(f=>({...f,items:f.items.filter((_,idx)=>idx!==i)}))} className="text-red-600 text-xs font-bold">Remove</button>}</div>
+              <div className="grid sm:grid-cols-3 gap-3"><Select label="Product" value={it.itemId || (it.productType==="other" ? "other" : "")} options={[{value:"",label:"Select product"},{value:"other",label:"Other - type manually"}, ...masters.map(m=>({value:m._id,label:`${m.name || m.category}${m.color?` - ${m.color}`:""}${m.size?` - ${m.size}`:""}`}))]} onChange={e=>selectProduct(i,e.target.value)} /><Input label="Product Name" value={it.product} onChange={e=>setItem(i,{product:e.target.value})} /><Input label="HSN / SAC" value={it.hsnSac} onChange={e=>setItem(i,{hsnSac:e.target.value})} /></div>
+              <div className="grid sm:grid-cols-4 gap-3"><Input label="Qty" type="number" value={it.quantity} onChange={e=>setItem(i,{quantity:e.target.value, sqftQty:(+(e.target.value)||0)*(+(it.sqftPerPiece)||0)})} /><Input label="Sqft / Piece" type="number" value={it.sqftPerPiece} onChange={e=>setItem(i,{sqftPerPiece:e.target.value, sqftQty:(+(it.quantity)||0)*(+(e.target.value)||0)})} /><Input label="Total Sqft" type="number" value={line.sqftQty || ""} onChange={e=>setItem(i,{sqftQty:e.target.value})} /><Input label="Unit" value={it.unit} onChange={e=>setItem(i,{unit:e.target.value})} /></div>
+              <div className="grid sm:grid-cols-4 gap-3"><Input label="Rate" type="number" value={it.rate} onChange={e=>setItem(i,{rate:e.target.value})} /><Select label="Discount Type" value={it.discountType} options={[{value:"amount",label:"Amount"},{value:"percent",label:"Percentage"}]} onChange={e=>setItem(i,{discountType:e.target.value})} /><Input label="Discount" type="number" value={it.discountValue} onChange={e=>setItem(i,{discountValue:e.target.value})} />{form.taxType==="igst"?<Input label="IGST %" type="number" value={it.igstPercent} onChange={e=>setItem(i,{igstPercent:e.target.value})} />:<><Input label="CGST %" type="number" value={it.cgstPercent} onChange={e=>setItem(i,{cgstPercent:e.target.value})} /><Input label="SGST %" type="number" value={it.sgstPercent} onChange={e=>setItem(i,{sgstPercent:e.target.value})} /></>}</div>
+              <Textarea label="Description / Size / Remarks" value={it.description} onChange={e=>setItem(i,{description:e.target.value})} />
+              <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-white rounded-lg p-2">Taxable<br/><b>{CURRENCY}{fmt(line.taxable)}</b></div><div className="bg-white rounded-lg p-2">Tax<br/><b>{CURRENCY}{fmt(line.cgst+line.sgst+line.igst)}</b></div><div className="bg-white rounded-lg p-2">Total<br/><b>{CURRENCY}{fmt(line.total)}</b></div></div>
+            </div>})}</div>
+            <button onClick={()=>setForm(f=>({...f,items:[...f.items,{...emptyItem}]}))} className="mt-3 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold">+ Add Product</button>
+          </SectionBox>
+          <Textarea label="Terms and Conditions" value={form.terms} onChange={e=>setForm({...form, terms:e.target.value})} />
+          <div className="bg-slate-950 text-white rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm"><div>Subtotal<br/><b>{CURRENCY}{fmt(t.subtotal)}</b></div><div>Discount<br/><b>{CURRENCY}{fmt(t.discount)}</b></div><div>Taxable<br/><b>{CURRENCY}{fmt(t.taxable)}</b></div><div>Tax<br/><b>{CURRENCY}{fmt(t.tax)}</b></div><div>Total<br/><b className="text-xl">{CURRENCY}{fmt(t.total)}</b></div></div>
+          {error&&<div className="text-sm text-red-600 font-bold">{error}</div>}
+          <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">{editingId ? "Update Quotation" : "Submit Quotation"}</button>
+        </div>
+      </Modal>}
+
+      {viewItem && <Modal title="Quotation Details" onClose={()=>setViewItem(null)} wide>
+        <div className="space-y-3"><div className="flex justify-between"><div><div className="font-black">{viewItem.quotationNumber}</div><div className="text-sm text-gray-500">{viewItem.customer}</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(viewItem.total)}</div></div>
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left border-b"><th className="py-2">Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Taxable</th><th>Total</th></tr></thead><tbody>{(viewItem.items||[]).map((it,i)=><tr key={i} className="border-b"><td className="py-2 font-bold">{it.product}<div className="font-normal text-gray-400">{it.description}</div></td><td>{fmt(it.quantity)} {it.unit}</td><td>{CURRENCY}{fmt(it.rate)}</td><td>{CURRENCY}{fmt(it.discountAmount)}</td><td>{CURRENCY}{fmt(it.taxableAmount)}</td><td className="font-bold">{CURRENCY}{fmt(it.total)}</td></tr>)}</tbody></table></div>
+        <div className="flex gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 bg-green-600 text-white py-2 rounded-lg font-bold">Print</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
+      </Modal>}
+    </div>
+  );
+}
+
 function DailyCashFlow({ user, allUsers }) {
   const [view, setView] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(today());
@@ -6195,6 +6363,7 @@ const NAV = {
     { id:"stock", label:"Stock", icon:"📦" },
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
     { id:"devices", label:"Devices", icon:"📱" },
     { id:"users", label:"Users", icon:"👥" },
     { id:"reports", label:"Reports", icon:"📈" },
@@ -6230,6 +6399,7 @@ const NAV = {
     { id:"stock", label:"Stock", icon:"📦" },
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
     { id:"reports", label:"Reports", icon:"📈" },
   ],
 };
@@ -6318,6 +6488,7 @@ export default function App() {
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
+      case "quotations": return isAdminLike(currentUser.role) ? <QuotationModule user={currentUser} /> : null;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
