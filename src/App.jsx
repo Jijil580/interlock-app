@@ -4074,6 +4074,8 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [saveError, setSaveError] = useState("");
   const [printSale, setPrintSale] = useState(null);
   const [printOptions, setPrintOptions] = useState({ billType: "without_gst", gstNumber: "", cgstPercent: "", sgstPercent: "" });
+  const [customerPayModal, setCustomerPayModal] = useState(null);
+  const [customerPayForm, setCustomerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
   const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
@@ -4170,6 +4172,22 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     const isMobile = /^\d{6,}$/.test(q.replace(/\D/g, ""));
     if (isMobile) await openLedger(q.replace(/\D/g, "").slice(-10));
     else await openLedger(null, q);
+  };
+
+  const receiveCustomerCash = async () => {
+    const mobile = customerPayModal?.mobile;
+    const amount = +(customerPayForm.amount || 0);
+    if (!mobile || amount <= 0) return;
+    const updated = await api("POST", `/customers/${mobile}/payment`, { ...customerPayForm, amount, addedBy: user.name });
+    if (updated?.ok) {
+      setLedger({ customer: updated.customer, purchases: updated.purchases || [], itemSummary: updated.itemSummary || [] });
+      setCustomerPayModal(null);
+      setCustomerPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      api("GET", "/sales").then(sa => setSales(Array.isArray(sa) ? sa : []));
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+    } else if (updated?.message) {
+      window.alert(updated.message);
+    }
   };
 
   const selectMasterCustomer = (id) => {
@@ -4438,6 +4456,17 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
               <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.customer.totalPaid)}`} icon="✅" color="teal" />
               <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.customer.totalPending)}`} icon="⏳" color="red" />
             </div>
+            {+(ledger.customer.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setCustomerPayModal(ledger.customer);
+                  setCustomerPayForm({ amount: String(ledger.customer.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Receive Cash from Customer
+              </button>
+            )}
             {(ledger.itemSummary || []).length > 0 && (
               <SectionBox title="Purchased Items Summary" icon="📦" color="blue">
                 <table className="w-full text-xs">
@@ -4725,6 +4754,21 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
             </div>
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
+          </div>
+        </Modal>
+      )}
+      {customerPayModal && (
+        <Modal title="Receive Cash from Customer" onClose={() => setCustomerPayModal(null)}>
+          <div className="space-y-3">
+            <div className="bg-red-50 rounded-xl p-3 text-sm">
+              <div className="font-bold">{customerPayModal.name || "-"}</div>
+              <div>Pending: <b>{CURRENCY}{fmt(customerPayModal.totalPending || 0)}</b></div>
+            </div>
+            <Input label="Payment Date" type="date" value={customerPayForm.date} onChange={e => setCustomerPayForm({ ...customerPayForm, date: e.target.value })} />
+            <Input label={`Amount (${CURRENCY})`} type="number" value={customerPayForm.amount} onChange={e => setCustomerPayForm({ ...customerPayForm, amount: e.target.value })} />
+            <Select label="Mode" value={customerPayForm.mode} options={["Cash", "UPI", "Bank Transfer", "Cheque"]} onChange={e => setCustomerPayForm({ ...customerPayForm, mode: e.target.value })} />
+            <Input label="Note" value={customerPayForm.note} onChange={e => setCustomerPayForm({ ...customerPayForm, note: e.target.value })} />
+            <button onClick={receiveCustomerCash} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Receive Payment</button>
           </div>
         </Modal>
       )}
@@ -5072,6 +5116,8 @@ function AdminWorkerReport({ user }) {
   const [addModal, setAddModal] = useState(false);
   const [selectedSite, setSelectedSite] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
+  const [workerPayModal, setWorkerPayModal] = useState(null);
+  const [workerPayForm, setWorkerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({ fromDate: "", toDate: "", customDate: "", datePreset: "", item: "", color: "", site: "" });
   const emptySiteWorkerEntry = { date: today(), workerName: "", siteName: "", siteId: "", workCategory: "Fitting", workArea: "", unit: "Sqft", rate: "", paymentGiven: "", paymentMode: "Cash", remarks: "" };
@@ -5135,6 +5181,29 @@ function AdminWorkerReport({ user }) {
       const data = await api("GET", `/workers/reports/overall?name=${encodeURIComponent(name)}${queryParams()}`);
       setOverall(data);
       setReport(null);
+    }
+  };
+
+  const makeWorkerPayment = async () => {
+    if (!workerPayModal?.name) return;
+    const amount = +(workerPayForm.amount || 0);
+    if (amount <= 0) return;
+    const source = tab === "site" ? "worker-ledger-site" : "worker-ledger-production";
+    const saved = await api("POST", "/workerpayments", {
+      workerName: workerPayModal.name,
+      amount,
+      date: workerPayForm.date,
+      note: workerPayForm.note || `${tab === "site" ? "Site" : "Production"} worker wage payment`,
+      addedBy: user.name,
+      source
+    });
+    if (saved?._id) {
+      const name = workerPayModal.name;
+      setWorkerPayModal(null);
+      setWorkerPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      loadReport(name);
+    } else if (saved?.message) {
+      window.alert(saved.message);
     }
   };
 
@@ -5344,6 +5413,17 @@ function AdminWorkerReport({ user }) {
               <StatCard label="Payments Given" value={`${CURRENCY}${fmt(report.worker.totalPaid)}`} icon="✅" color="teal" />
               <StatCard label="Pending" value={`${CURRENCY}${fmt(report.worker.totalPending)}`} icon="⏳" color="red" />
             </div>
+            {isAdminLike(user.role) && +(report.worker.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setWorkerPayModal(report.worker);
+                  setWorkerPayForm({ amount: String(report.worker.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Make Worker Payment
+              </button>
+            )}
             {(report.itemSummary || []).length > 0 && (
               <SectionBox title="Production Summary" icon="📦" color="blue">
                 {report.itemSummary.map((it, i) => <div key={i} className="flex justify-between text-sm py-1 border-b"><span className="font-bold">{it.item}</span><span>{qtyWithSqft(it)}</span></div>)}
@@ -5375,6 +5455,18 @@ function AdminWorkerReport({ user }) {
                 <button key={sub.id} onClick={() => { setSiteSubTab(sub.id); setSelectedSite(null); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${siteSubTab === sub.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}>{sub.label}</button>
               ))}
             </div>
+
+            {isAdminLike(user.role) && +(report.worker.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setWorkerPayModal(report.worker);
+                  setWorkerPayForm({ amount: String(report.worker.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Make Worker Payment
+              </button>
+            )}
 
             {siteSubTab === "daily" && (
               <div className="space-y-4">
@@ -5586,6 +5678,21 @@ function AdminWorkerReport({ user }) {
               <StatCard label="Grand Total Pending" value={`${CURRENCY}${fmt(overall.grandTotal.totalPending)}`} icon="⏳" color="red" sub={`Paid ${CURRENCY}${fmt(overall.grandTotal.totalPaid)}`} />
             </div>
           </>
+        )}
+        {workerPayModal && (
+          <Modal title="Make Worker Payment" onClose={() => setWorkerPayModal(null)}>
+            <div className="space-y-3">
+              <div className="bg-red-50 rounded-xl p-3 text-sm">
+                <div className="font-bold">{workerPayModal.name || "-"}</div>
+                <div>Pending: <b>{CURRENCY}{fmt(workerPayModal.totalPending || 0)}</b></div>
+              </div>
+              <Input label="Payment Date" type="date" value={workerPayForm.date} onChange={e => setWorkerPayForm({ ...workerPayForm, date: e.target.value })} />
+              <Input label={`Amount (${CURRENCY})`} type="number" value={workerPayForm.amount} onChange={e => setWorkerPayForm({ ...workerPayForm, amount: e.target.value })} />
+              <Select label="Mode" value={workerPayForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setWorkerPayForm({ ...workerPayForm, mode: e.target.value })} />
+              <Input label="Note" value={workerPayForm.note} onChange={e => setWorkerPayForm({ ...workerPayForm, note: e.target.value })} />
+              <button onClick={makeWorkerPayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button>
+            </div>
+          </Modal>
         )}
       </div>
     );
@@ -6272,7 +6379,7 @@ function DriverReports({ user }) {
   const [data, setData] = useState({ reports: [], summary: {} });
   const [filters, setFilters] = useState({ driver: "", mobile: "", datePreset: "today", customDate: today(), fromDate: "", toDate: "", category: "" });
   const [editReport, setEditReport] = useState(null);
-  const [payReport, setPayReport] = useState(null);
+  const [payDriver, setPayDriver] = useState(null);
   const [payForm, setPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
 
   const query = () => {
@@ -6293,11 +6400,25 @@ function DriverReports({ user }) {
     if (updated?._id) { setEditReport(null); load(); }
   };
   const savePayment = async () => {
-    const updated = await api("POST", `/driverreports/${payReport._id}/payment`, { ...payForm, addedBy: user.name, amount: +(payForm.amount || 0) });
-    if (updated?._id) { setPayReport(null); setPayForm({ amount: "", date: today(), mode: "Cash", note: "" }); load(); }
+    const updated = await api("POST", "/driverreports/payment", {
+      ...payForm,
+      driverName: payDriver?.driverName || filters.driver,
+      driverMobile: payDriver?.driverMobile || filters.mobile,
+      addedBy: user.name,
+      amount: +(payForm.amount || 0)
+    });
+    if (updated?.reports) {
+      setPayDriver(null);
+      setPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      setData(updated);
+    } else if (updated?.message) {
+      window.alert(updated.message);
+    }
   };
   const canOfficeEdit = isAdminLike(user.role);
   const summary = data.summary || {};
+  const driverKeys = [...new Set((data.reports || []).map(r => r.driverMobile || r.driverName).filter(Boolean))];
+  const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1 && +(summary.totalPending || 0) > 0;
 
   return (
     <div className="space-y-4">
@@ -6318,20 +6439,37 @@ function DriverReports({ user }) {
         <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
         <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
       </div>
+      {canPayDriverTotal && (
+        <button
+          onClick={() => {
+            const driver = (data.reports || [])[0] || {};
+            setPayDriver(driver);
+            setPayForm({ amount: String(summary.totalPending || ""), date: today(), mode: "Cash", note: "" });
+          }}
+          className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+        >
+          Make Payment to Driver
+        </button>
+      )}
+      {canOfficeEdit && +(summary.totalPending || 0) > 0 && !canPayDriverTotal && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-3 text-xs font-bold">
+          Select one driver by name or mobile to make a total payment.
+        </div>
+      )}
       <div className="space-y-3">
         {(data.reports || []).length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
         {(data.reports || []).map(r => <div key={r._id} className="bg-white border rounded-xl shadow-sm p-4 space-y-2">
           <div className="flex justify-between gap-2"><div><div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div><div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div><div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div></div><Badge color={r.driverWagePending > 0 ? "red" : "green"}>{r.driverWagePending > 0 ? "Pending" : "Paid"}</Badge></div>
           {r.category === "Raw Material" && <div className="text-xs bg-teal-50 rounded-lg p-2">Supplier: <b>{r.supplierName || "-"}</b> | Given {CURRENCY}{fmt(r.cashGivenToSupplier)} | Pending {CURRENCY}{fmt(r.supplierPendingCash)}</div>}
           <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
-          {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button>{r.driverWagePending > 0 && <button onClick={() => { setPayReport(r); setPayForm({ amount: String(r.driverWagePending), date: today(), mode: "Cash", note: "" }); }} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-xs font-bold">Mark Payment Given</button>}</div>}
+          {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button></div>}
         </div>)}
       </div>
       {editReport && <Modal title="Edit Driver Wage" onClose={() => setEditReport(null)}>
         <div className="space-y-3"><Input label="Driver" value={editReport.driverName} readOnly /><Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} /><Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} /><Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} /><button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button></div>
       </Modal>}
-      {payReport && <Modal title="Driver Wage Payment" onClose={() => setPayReport(null)}>
-        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payReport.driverWagePending)}</b></div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Mark as Payment Given</button></div>
+      {payDriver && <Modal title="Driver Total Payment" onClose={() => setPayDriver(null)}>
+        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm"><div className="font-bold">{payDriver.driverName || "-"}</div>Pending: <b>{CURRENCY}{fmt(summary.totalPending)}</b></div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button></div>
       </Modal>}
     </div>
   );
