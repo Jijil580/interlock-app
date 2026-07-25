@@ -694,8 +694,7 @@ function MasterData() {
         <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 8x4" />
         <Input label="Thickness (inch)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 2.5" />
         <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value})} placeholder="e.g. 0.22" />
-        <Input label={`Default Rate (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
-        <Input label={`Price/sqm (${CURRENCY})`} type="number" value={form.pricePerSqm||""} onChange={e=>setForm({...form,pricePerSqm:+e.target.value})} />
+        <Input label={`Default Rate / sqft (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
       </div>
       <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
     </>;
@@ -782,7 +781,7 @@ function MasterData() {
               <div className="flex-1">
                 <div className="font-black text-gray-900">{item.name}</div>
                 {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size&&`${item.size} inch`,item.thickness&&`${item.thickness} inch thick`].filter(Boolean).join(" / ")}</div>}
-                {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}`} {item.pricePerSqm&&`· ${CURRENCY}${fmt(item.pricePerSqm)}/sqm`}</div>}
+                {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}/sqft`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
                 {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,item.size&&`${item.size} inch`].filter(Boolean).join(" / ")}</div>}
                 {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.boxCount>0&&` / 1 box = ${fmt(item.boxCount)} pcs`} {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
@@ -4769,14 +4768,15 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
 // ─── USERS ────────────────────────────────────────────────────────────────────
 function Users({ currentUser, allUsers, setAllUsers }) {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ name:"", username:"", password:"", role:"user" });
+  const emptyUserForm = { name:"", username:"", password:"", role:"user", mobile:"", vehicleName:"", vehicleNumber:"" };
+  const [form, setForm] = useState(emptyUserForm);
   const [saveError, setSaveError] = useState("");
 
   const save = async () => {
     if (!form.name||!form.username||!form.password) { setSaveError("All fields required"); return; }
     setSaveError("");
     const user=await api("POST","/users",form);
-    if(user._id){setAllUsers(p=>[...p,user]);setModal(false);setForm({name:"",username:"",password:"",role:"user"});}
+    if(user._id){setAllUsers(p=>[...p,user]);setModal(false);setForm(emptyUserForm);}
     else setSaveError(user.message||"Failed to add user");
   };
 
@@ -4795,7 +4795,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
       <div className="space-y-2">
         {allUsers.map(u=>(
           <div key={u._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="flex items-center gap-2"><span className="font-black">{u.name}</span><Badge color={u.role==="admin"?"purple":u.role==="supervisor"?"green":"blue"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}</div></div>
+            <div><div className="flex items-center gap-2"><span className="font-black">{u.name}</span><Badge color={u.role==="admin"?"purple":u.role==="supervisor"?"green":u.role==="driver"?"amber":"blue"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}{u.role==="driver"&&` | ${u.mobile || "-"} | ${u.vehicleNumber || "-"}`}</div></div>
             {u._id!==currentUser._id&&<button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${u.active?"bg-red-50 text-red-600 border-red-200":"bg-green-50 text-green-600 border-green-200"}`}>{u.active?"Deactivate":"Activate"}</button>}
           </div>
         ))}
@@ -4805,7 +4805,14 @@ function Users({ currentUser, allUsers, setAllUsers }) {
           <Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
           <Input label="Username" value={form.username} onChange={e=>setForm({...form,username:e.target.value})} />
           <Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
-          <Select label="Role" value={form.role} options={["admin","supervisor","user"]} onChange={e=>setForm({...form,role:e.target.value})} />
+          <Select label="Role" value={form.role} options={["admin","user","supervisor","driver"]} onChange={e=>setForm({...form,role:e.target.value})} />
+          {form.role==="driver"&&(
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile Number" value={form.mobile} onChange={e=>setForm({...form,mobile:e.target.value})} />
+              <Input label="Vehicle Name" value={form.vehicleName} onChange={e=>setForm({...form,vehicleName:e.target.value})} />
+              <Input label="Vehicle Number" value={form.vehicleNumber} onChange={e=>setForm({...form,vehicleNumber:e.target.value})} />
+            </div>
+          )}
           {saveError&&<div className="text-xs text-red-600 font-semibold bg-red-50 rounded-xl p-3">{saveError}</div>}
           <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Add User</button>
         </div>
@@ -6175,6 +6182,161 @@ function QuotationModule({ user }) {
   );
 }
 
+function DriverSubmitReport({ user }) {
+  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", driverChargeType: "batha", driverCharge: "", remarks: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [masters, setMasters] = useState({ interlock: [], hollowbricks: [], materials: [] });
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierMode, setSupplierMode] = useState("existing");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/masterdata/materials"), api("GET", "/suppliers")]).then(([i, h, m, s]) => {
+      setMasters({ interlock: Array.isArray(i) ? i : [], hollowbricks: Array.isArray(h) ? h : [], materials: Array.isArray(m) ? m : [] });
+      setSuppliers(Array.isArray(s) ? s : []);
+    });
+  }, []);
+
+  const categoryItems = form.category === "Interlock" ? masters.interlock : form.category === "Hollow Bricks" ? masters.hollowbricks : form.category === "Raw Material" ? masters.materials : [];
+  const selectItem = (id) => {
+    if (id === "other") return setForm(f => ({ ...f, itemId: "other", itemName: "", itemDetails: "" }));
+    const item = categoryItems.find(x => x._id === id);
+    if (!item) return;
+    setForm(f => ({ ...f, itemId: id, itemName: item.name || item.category || "", itemDetails: [item.color, item.size, item.thickness].filter(Boolean).join(" / "), unit: item.unit || (f.category === "Raw Material" ? "load" : "piece") }));
+  };
+  const selectSupplier = (id) => {
+    const s = suppliers.find(x => x._id === id);
+    if (!s) return setForm(f => ({ ...f, supplierId: id }));
+    setForm(f => ({ ...f, supplierId: id, supplierName: s.name || "", supplierMobile: s.mobile || s.phone || "", supplierAddress: s.address || s.location || "" }));
+  };
+  const save = async () => {
+    setMessage("");
+    if (!form.itemName || !form.loadingFrom || !form.unloadedLocation) return setMessage("Item, loading from and unloaded location are required");
+    const saved = await api("POST", "/driverreports", { ...form, quantity: +(form.quantity || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
+    if (saved?._id) {
+      setMessage("Report submitted successfully");
+      setForm({ ...emptyForm, date: today() });
+    } else setMessage(saved.message || "Failed to submit report");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Driver Submit Report</h2><div className="text-xs text-gray-400">Submit vehicle trip and delivery details</div></div>
+      <SectionBox title="Driver Details" icon="DR" color="blue">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+          <Input label="Driver Name" value={form.driverName} readOnly />
+          <Input label="Mobile" value={form.driverMobile || ""} onChange={e => setForm({ ...form, driverMobile: e.target.value })} />
+          <Input label="Vehicle Name" value={form.vehicleName || ""} onChange={e => setForm({ ...form, vehicleName: e.target.value })} />
+          <Input label="Vehicle Number" value={form.vehicleNumber || ""} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} />
+        </div>
+      </SectionBox>
+      <SectionBox title="Load Details" icon="LD" color="amber">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Select label="Category" value={form.category} options={["Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setForm({ ...form, category: e.target.value, itemId: "", itemName: "", itemDetails: "", unit: e.target.value === "Raw Material" ? "load" : "piece" })} />
+          {form.category !== "Other" ? <Select label="Item Name" value={form.itemId} options={[{ value: "", label: "Select item" }, { value: "other", label: "Other - type manually" }, ...categoryItems.map(x => ({ value: x._id, label: `${x.name || x.category}${x.color ? ` - ${x.color}` : ""}${x.size ? ` - ${x.size}` : ""}` }))]} onChange={e => selectItem(e.target.value)} /> : <Input label="Item Name" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />}
+          {form.itemId === "other" && <Input label="Type Item Name" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />}
+          <Input label="Item Details" value={form.itemDetails || ""} onChange={e => setForm({ ...form, itemDetails: e.target.value })} placeholder="Color, size, remarks" />
+          <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
+          <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} />
+        </div>
+      </SectionBox>
+      {form.category === "Raw Material" && <SectionBox title="Supplier Details" icon="SP" color="teal">
+        <div className="flex gap-2"><button onClick={() => setSupplierMode("existing")} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${supplierMode === "existing" ? "bg-teal-600 text-white" : "bg-white"}`}>Existing Supplier</button><button onClick={() => setSupplierMode("new")} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${supplierMode === "new" ? "bg-teal-600 text-white" : "bg-white"}`}>New Supplier</button></div>
+        {supplierMode === "existing" && <Select label="Select Supplier" value={form.supplierId} options={[{ value: "", label: "Select supplier" }, ...suppliers.map(s => ({ value: s._id, label: `${s.name} - ${s.mobile || s.phone || ""}` }))]} onChange={e => selectSupplier(e.target.value)} />}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Supplier Name" value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} />
+          <Input label="Supplier Mobile" value={form.supplierMobile} onChange={e => setForm({ ...form, supplierMobile: e.target.value })} />
+          <Textarea label="Supplier Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
+          <label className="flex items-center gap-2 text-xs font-bold text-slate-600 pt-7"><input type="checkbox" checked={form.saveToSupplierMaster} onChange={e => setForm({ ...form, saveToSupplierMaster: e.target.checked })} /> Save supplier to master</label>
+          <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={form.cashGivenToSupplier} onChange={e => setForm({ ...form, cashGivenToSupplier: e.target.value })} />
+          <Input label={`Pending Cash (${CURRENCY})`} type="number" value={form.supplierPendingCash} onChange={e => setForm({ ...form, supplierPendingCash: e.target.value })} />
+        </div>
+      </SectionBox>}
+      <SectionBox title="Trip & Wage" icon="TR" color="green">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Loading From" value={form.loadingFrom} onChange={e => setForm({ ...form, loadingFrom: e.target.value })} />
+          <Input label="Unloaded Location" value={form.unloadedLocation} onChange={e => setForm({ ...form, unloadedLocation: e.target.value })} />
+          <Select label="Driver Charge Type" value={form.driverChargeType} options={[{ value: "batha", label: "Batha - add every report" }, { value: "coolie", label: "Coolie - fixed once per day" }]} onChange={e => setForm({ ...form, driverChargeType: e.target.value })} />
+          <Input label={`Driver Charge (${CURRENCY})`} type="number" value={form.driverCharge} onChange={e => setForm({ ...form, driverCharge: e.target.value })} />
+        </div>
+        <Textarea label="Remarks" value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} />
+      </SectionBox>
+      {message && <div className={`text-sm font-bold rounded-xl p-3 ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>{message}</div>}
+      <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">Submit Report</button>
+    </div>
+  );
+}
+
+function DriverReports({ user }) {
+  const [data, setData] = useState({ reports: [], summary: {} });
+  const [filters, setFilters] = useState({ driver: "", mobile: "", datePreset: "today", customDate: today(), fromDate: "", toDate: "", category: "" });
+  const [editReport, setEditReport] = useState(null);
+  const [payReport, setPayReport] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
+
+  const query = () => {
+    const params = new URLSearchParams({ role: user.role, name: user.name });
+    if (filters.driver) params.set("driver", filters.driver);
+    if (filters.mobile) params.set("mobile", filters.mobile);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.datePreset === "today") params.set("date", today());
+    if (filters.datePreset === "custom") params.set("date", filters.customDate);
+    if (filters.datePreset === "range") { if (filters.fromDate) params.set("fromDate", filters.fromDate); if (filters.toDate) params.set("toDate", filters.toDate); }
+    return params.toString();
+  };
+  const load = () => api("GET", `/driverreports?${query()}`).then(d => setData(d?.reports ? d : { reports: [], summary: {} }));
+  useEffect(load, [user.role, user.name, filters.driver, filters.mobile, filters.datePreset, filters.customDate, filters.fromDate, filters.toDate, filters.category]);
+
+  const saveEdit = async () => {
+    const updated = await api("PUT", `/driverreports/${editReport._id}`, editReport);
+    if (updated?._id) { setEditReport(null); load(); }
+  };
+  const savePayment = async () => {
+    const updated = await api("POST", `/driverreports/${payReport._id}/payment`, { ...payForm, addedBy: user.name, amount: +(payForm.amount || 0) });
+    if (updated?._id) { setPayReport(null); setPayForm({ amount: "", date: today(), mode: "Cash", note: "" }); load(); }
+  };
+  const canOfficeEdit = isAdminLike(user.role);
+  const summary = data.summary || {};
+
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Driver Reports</h2><div className="text-xs text-gray-400">{canOfficeEdit ? "All driver ledgers" : "Your submitted reports"}</div></div>
+      <div className="bg-white rounded-xl border p-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
+        {canOfficeEdit && <Input label="Driver Name" value={filters.driver} onChange={e => setFilters({ ...filters, driver: e.target.value })} />}
+        {canOfficeEdit && <Input label="Mobile" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} />}
+        <Select label="Date Filter" value={filters.datePreset} options={[{ value: "", label: "All" }, { value: "today", label: "Today" }, { value: "custom", label: "Date Wise" }, { value: "range", label: "Date Range" }]} onChange={e => setFilters({ ...filters, datePreset: e.target.value })} />
+        {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
+        {filters.datePreset === "range" && <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />}
+        {filters.datePreset === "range" && <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />}
+        <Select label="Category" value={filters.category} options={["", "Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setFilters({ ...filters, category: e.target.value })} />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+        <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
+        <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
+        <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
+        <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
+        <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
+      </div>
+      <div className="space-y-3">
+        {(data.reports || []).length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
+        {(data.reports || []).map(r => <div key={r._id} className="bg-white border rounded-xl shadow-sm p-4 space-y-2">
+          <div className="flex justify-between gap-2"><div><div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div><div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div><div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div></div><Badge color={r.driverWagePending > 0 ? "red" : "green"}>{r.driverWagePending > 0 ? "Pending" : "Paid"}</Badge></div>
+          {r.category === "Raw Material" && <div className="text-xs bg-teal-50 rounded-lg p-2">Supplier: <b>{r.supplierName || "-"}</b> | Given {CURRENCY}{fmt(r.cashGivenToSupplier)} | Pending {CURRENCY}{fmt(r.supplierPendingCash)}</div>}
+          <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
+          {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button>{r.driverWagePending > 0 && <button onClick={() => { setPayReport(r); setPayForm({ amount: String(r.driverWagePending), date: today(), mode: "Cash", note: "" }); }} className="flex-1 bg-green-600 text-white py-2 rounded-lg text-xs font-bold">Mark Payment Given</button>}</div>}
+        </div>)}
+      </div>
+      {editReport && <Modal title="Edit Driver Wage" onClose={() => setEditReport(null)}>
+        <div className="space-y-3"><Input label="Driver" value={editReport.driverName} readOnly /><Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} /><Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} /><Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} /><button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button></div>
+      </Modal>}
+      {payReport && <Modal title="Driver Wage Payment" onClose={() => setPayReport(null)}>
+        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payReport.driverWagePending)}</b></div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Mark as Payment Given</button></div>
+      </Modal>}
+    </div>
+  );
+}
+
 function DailyCashFlow({ user, allUsers }) {
   const [view, setView] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(today());
@@ -6364,6 +6526,7 @@ const NAV = {
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
     { id:"quotations", label:"Quotations", icon:"QT" },
+    { id:"driverreports", label:"Driver Reports", icon:"DR" },
     { id:"devices", label:"Devices", icon:"📱" },
     { id:"users", label:"Users", icon:"👥" },
     { id:"reports", label:"Reports", icon:"📈" },
@@ -6401,7 +6564,12 @@ const NAV = {
     { id:"raw", label:"Raw Material", icon:"🧱" },
     { id:"sales", label:"Sales", icon:"💰" },
     { id:"quotations", label:"Quotations", icon:"QT" },
+    { id:"driverreports", label:"Driver Reports", icon:"DR" },
     { id:"reports", label:"Reports", icon:"📈" },
+  ],
+  driver: [
+    { id:"driversubmit", label:"Submit Report", icon:"DR" },
+    { id:"driverreports", label:"Driver Reports", icon:"DL" },
   ],
 };
 
@@ -6446,7 +6614,7 @@ export default function App() {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
       setCurrentUser(u);
-      setPage(u.role==="supervisor"?"sitework":"dashboard");
+      setPage(u.role==="driver"?"driversubmit":u.role==="supervisor"?"sitework":"dashboard");
     }
   }} />;
   
@@ -6457,13 +6625,13 @@ export default function App() {
       deviceInfo={currentUser.deviceInfo}
       onRetry={()=>{
         setCurrentUser({...currentUser, _pendingDevice: false});
-        setPage(currentUser.role==="supervisor"?"sitework":"dashboard");
+        setPage(currentUser.role==="driver"?"driversubmit":currentUser.role==="supervisor"?"sitework":"dashboard");
       }}
     />;
   }
 
   const nav = NAV[effectiveRoleOf(currentUser.role)]||[];
-  const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700" };
+  const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
   const renderPage = () => {
     if (loading) return <Loader />;
@@ -6490,6 +6658,8 @@ export default function App() {
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
       case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
       case "quotations": return <QuotationModule user={currentUser} />;
+      case "driversubmit": return <DriverSubmitReport user={currentUser} />;
+      case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
