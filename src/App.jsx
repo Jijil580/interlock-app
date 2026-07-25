@@ -6747,6 +6747,23 @@ export default function App() {
       }).catch(()=>setLoading(false));
   },[currentUser]);
 
+  const logout = () => {
+    setCurrentUser(null);
+    setPage("dashboard");
+    setSidebarOpen(false);
+    setLoading(false);
+    setStock([]);
+    setRaw([]);
+    setProduction([]);
+    setSales([]);
+    setAllUsers([]);
+    setSiteWorks([]);
+    ["currentUser", "user", "authUser", "token", "authToken", "pk_current_user"].forEach(key => localStorage.removeItem(key));
+    if (window.location.pathname !== "/" || window.location.hash) {
+      window.history.replaceState(null, "", "/");
+    }
+  };
+
   if (!currentUser) return <Login branding={COMPANY} onLogin={(u)=>{
     if (u.devicePending) {
       setCurrentUser({...u, _pendingDevice: true});
@@ -6833,7 +6850,7 @@ export default function App() {
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{currentUser.role}</div></div>
-            <button onClick={()=>setCurrentUser(null)} className="text-stone-500 hover:text-red-400 text-xs font-bold" title="Logout">⏻</button>
+            <button onClick={logout} className="text-stone-500 hover:text-red-400 text-xs font-bold" title="Logout">⏻</button>
           </div>
         </div>
       </aside>
