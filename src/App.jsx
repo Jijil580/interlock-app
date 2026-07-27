@@ -6377,6 +6377,7 @@ function DriverSubmitReport({ user }) {
 
 function DriverReports({ user }) {
   const [data, setData] = useState({ reports: [], summary: {} });
+  const [drivers, setDrivers] = useState([]);
   const [loadError, setLoadError] = useState("");
   const [filters, setFilters] = useState({ driver: "", mobile: "", datePreset: "today", customDate: today(), fromDate: "", toDate: "", category: "" });
   const [editReport, setEditReport] = useState(null);
@@ -6397,6 +6398,13 @@ function DriverReports({ user }) {
     reports: Array.isArray(d?.reports) ? d.reports : [],
     summary: d?.summary || {},
   });
+  useEffect(() => {
+    if (!isAdminLike(user.role)) return;
+    api("GET", "/users").then(u => {
+      const list = Array.isArray(u) ? u.filter(x => x.role === "driver" && x.active !== false) : [];
+      setDrivers(list);
+    }).catch(() => setDrivers([]));
+  }, [user.role]);
   const load = async () => {
     setLoadError("");
     try {
@@ -6440,7 +6448,17 @@ function DriverReports({ user }) {
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Driver Reports</h2><div className="text-xs text-gray-400">{canOfficeEdit ? "All driver ledgers" : "Your submitted reports"}</div></div>
       <div className="bg-white rounded-xl border p-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
-        {canOfficeEdit && <Input label="Driver Name" value={filters.driver} onChange={e => setFilters({ ...filters, driver: e.target.value })} />}
+        {canOfficeEdit && (
+          <Select
+            label="Driver Name"
+            value={filters.driver}
+            options={[{ value: "", label: "All Drivers" }, ...drivers.map(d => ({ value: d.name, label: `${d.name}${d.vehicleNumber ? ` - ${d.vehicleNumber}` : ""}` }))]}
+            onChange={e => {
+              const selected = drivers.find(d => d.name === e.target.value);
+              setFilters({ ...filters, driver: e.target.value, mobile: selected?.mobile || "" });
+            }}
+          />
+        )}
         {canOfficeEdit && <Input label="Mobile" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} />}
         <Select label="Date Filter" value={filters.datePreset} options={[{ value: "", label: "All" }, { value: "today", label: "Today" }, { value: "custom", label: "Date Wise" }, { value: "range", label: "Date Range" }]} onChange={e => setFilters({ ...filters, datePreset: e.target.value })} />
         {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
