@@ -5993,7 +5993,8 @@ function SupervisorSiteReport({ user }) {
 
 function OfficeDailyReport({ user }) {
   const [selectedDate, setSelectedDate] = useState(today());
-  const [report, setReport] = useState({ totals: {}, sales: [], purchases: [], productionEntries: [], productionItemSummary: [], productionPayments: [] });
+  const emptyOfficeReport = { totals: {}, sales: [], purchases: [], driverReports: [], driverExpenses: [], productionEntries: [], productionItemSummary: [], productionPayments: [] };
+  const [report, setReport] = useState(emptyOfficeReport);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -6002,7 +6003,7 @@ function OfficeDailyReport({ user }) {
     const params = new URLSearchParams({ date: selectedDate, role: effectiveRoleOf(user.role), name: user.name });
     api("GET", `/office-daily-report?${params.toString()}`).then(data => {
       if (!active) return;
-      setReport(data?.totals ? data : { totals: {}, sales: [], purchases: [], productionEntries: [], productionItemSummary: [], productionPayments: [] });
+      setReport(data?.totals ? data : emptyOfficeReport);
       setLoading(false);
     });
     return () => { active = false; };
@@ -6026,7 +6027,7 @@ function OfficeDailyReport({ user }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-xl font-black text-gray-900">Office Daily Report</h2>
-          <div className="text-xs text-gray-400">Daily sales, purchases, production, and production worker payments</div>
+          <div className="text-xs text-gray-400">Daily sales, purchases, driver expenses, production, and worker payments</div>
         </div>
         <div className="bg-white border rounded-2xl shadow-sm p-3">
           <Input label="Report Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
@@ -6042,6 +6043,7 @@ function OfficeDailyReport({ user }) {
             <StatCard label="Production Paid" value={money(total.productionPayments)} icon="W" color="purple" sub={`Pending ${money(total.productionPending)}`} />
             <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft || 0)} sqft | ${total.productionCount||0} entries`} />
             <StatCard label="Production Value" value={money(total.productionEarnings)} icon="V" color="green" />
+            <StatCard label="Driver Expenses" value={money(total.driverExpenseTotal)} icon="DE" color="amber" sub={`${(report.driverExpenses||[]).length} entries`} />
             <StatCard label="Total Cash Paid" value={money(total.cashPaid)} icon="-" color="red" />
             <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
           </div>
@@ -6102,6 +6104,27 @@ function OfficeDailyReport({ user }) {
                       <td className="text-right text-green-700 font-bold">{money(p.amountPaid)}</td>
                       <td className="text-right text-red-600 font-bold">{money(p.amountPending)}</td>
                       <td>{[p.vehicleNumber,p.driverName].filter(Boolean).join(" / ") || "-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Driver Expenses" icon="DE" color="amber">
+            {(report.driverExpenses||[]).length===0 ? <div className="text-xs text-gray-400">No driver expenses for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Driver</th><th>Vehicle</th><th>Expense</th><th>Trip / Item</th><th>Route</th><th className="text-right">Amount</th><th>Note</th></tr></thead>
+                  <tbody>{report.driverExpenses.map((e,i)=>(
+                    <tr key={`${e.reportId}-${i}`} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{e.driverName||"-"}</td>
+                      <td>{[e.vehicleName,e.vehicleNumber].filter(Boolean).join(" / ") || "-"}</td>
+                      <td>{e.category||"Other"}</td>
+                      <td>{[e.tripCategory,e.itemName].filter(Boolean).join(" / ") || "-"}</td>
+                      <td>{[e.loadingFrom,e.unloadedLocation].filter(Boolean).join(" -> ") || "-"}</td>
+                      <td className="text-right text-red-600 font-bold">{money(e.amount)}</td>
+                      <td>{e.note||"-"}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -6325,7 +6348,8 @@ function QuotationModule({ user }) {
 }
 
 function DriverSubmitReport({ user }) {
-  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", driverChargeType: "batha", driverCharge: "", remarks: "" };
+  const emptyExpense = { category: "Diesel", amount: "", note: "" };
+  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", expenses: [], driverChargeType: "batha", driverCharge: "", remarks: "" };
   const [form, setForm] = useState(emptyForm);
   const [masters, setMasters] = useState({ interlock: [], hollowbricks: [], materials: [] });
   const [suppliers, setSuppliers] = useState([]);
@@ -6351,10 +6375,14 @@ function DriverSubmitReport({ user }) {
     if (!s) return setForm(f => ({ ...f, supplierId: id }));
     setForm(f => ({ ...f, supplierId: id, supplierName: s.name || "", supplierMobile: s.mobile || s.phone || "", supplierAddress: s.address || s.location || "" }));
   };
+  const setExpense = (index, patch) => setForm(f => ({ ...f, expenses: (f.expenses || []).map((e, i) => i === index ? { ...e, ...patch } : e) }));
+  const addExpense = () => setForm(f => ({ ...f, expenses: [...(f.expenses || []), { ...emptyExpense }] }));
+  const removeExpense = (index) => setForm(f => ({ ...f, expenses: (f.expenses || []).filter((_, i) => i !== index) }));
   const save = async () => {
     setMessage("");
     if (!form.itemName || !form.loadingFrom || !form.unloadedLocation) return setMessage("Item, loading from and unloaded location are required");
-    const saved = await api("POST", "/driverreports", { ...form, quantity: +(form.quantity || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
+    const expenses = (form.expenses || []).map(e => ({ ...e, amount: +(e.amount || 0) })).filter(e => e.amount > 0 || e.note);
+    const saved = await api("POST", "/driverreports", { ...form, expenses, quantity: +(form.quantity || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
     if (saved?._id) {
       setMessage("Report submitted successfully");
       setForm({ ...emptyForm, date: today() });
@@ -6395,6 +6423,23 @@ function DriverSubmitReport({ user }) {
           <Input label={`Pending Cash (${CURRENCY})`} type="number" value={form.supplierPendingCash} onChange={e => setForm({ ...form, supplierPendingCash: e.target.value })} />
         </div>
       </SectionBox>}
+      <SectionBox title="Driver Expenses" icon="EX" color="red">
+        <div className="space-y-2">
+          {(form.expenses || []).length === 0 && <div className="text-xs text-gray-400">No driver expenses added</div>}
+          {(form.expenses || []).map((expense, i) => (
+            <div key={i} className="grid sm:grid-cols-4 gap-2 border rounded-xl p-2 bg-red-50/40">
+              <Select label="Expense" value={expense.category} options={["Vehicle Service", "Diesel", "Petrol", "Food", "Other"]} onChange={e => setExpense(i, { category: e.target.value })} />
+              <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount} onChange={e => setExpense(i, { amount: e.target.value })} />
+              <Input label="Note" value={expense.note || ""} onChange={e => setExpense(i, { note: e.target.value })} />
+              <div className="flex items-end"><button onClick={() => removeExpense(i)} className="w-full bg-red-100 text-red-700 py-2.5 rounded-lg text-xs font-bold">Remove</button></div>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={addExpense} className="bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold">+ Add Expense</button>
+            <div className="text-sm font-black text-red-700">Total: {CURRENCY}{fmt((form.expenses || []).reduce((a, e) => a + (+(e.amount) || 0), 0))}</div>
+          </div>
+        </div>
+      </SectionBox>
       <SectionBox title="Trip & Wage" icon="TR" color="green">
         <div className="grid sm:grid-cols-2 gap-3">
           <Input label="Loading From" value={form.loadingFrom} onChange={e => setForm({ ...form, loadingFrom: e.target.value })} />
@@ -6501,12 +6546,13 @@ function DriverReports({ user }) {
         {filters.datePreset === "range" && <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />}
         <Select label="Category" value={filters.category} options={["", "Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setFilters({ ...filters, category: e.target.value })} />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
         <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
         <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
         <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
         <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
         <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
+        <StatCard label="Expenses" value={`${CURRENCY}${fmt(summary.totalExpenses)}`} icon="EX" color="amber" />
       </div>
       {canPayDriverTotal && (
         <button
@@ -6530,6 +6576,8 @@ function DriverReports({ user }) {
         {reports.length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
         {reports.map(r => {
           const payments = Array.isArray(r.payments) ? r.payments : [];
+          const expenses = Array.isArray(r.expenses) ? r.expenses : [];
+          const expenseTotal = expenses.reduce((a, e) => a + (+(e.amount) || 0), 0);
           return <div key={r._id || `${r.driverName}-${r.date}-${r.itemName}`} className="bg-white border rounded-xl shadow-sm p-4 space-y-3">
           <div className="flex justify-between gap-2">
             <div className="min-w-0">
@@ -6556,6 +6604,17 @@ function DriverReports({ user }) {
               <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
             </div>
           )}
+          {expenses.length > 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 text-xs">
+              <div className="flex justify-between font-bold text-amber-700 mb-1"><span>Driver Expenses</span><span>{CURRENCY}{fmt(expenseTotal)}</span></div>
+              {expenses.map((e, i) => (
+                <div key={i} className="flex justify-between border-t border-amber-100 py-1 first:border-t-0">
+                  <span>{e.category || "Other"}{e.note ? ` | ${e.note}` : ""}</span>
+                  <span className="font-black">{CURRENCY}{fmt(e.amount || 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {payments.length > 0 && (
             <div className="bg-green-50 border border-green-100 rounded-lg p-2 text-xs">
               <div className="font-bold text-green-700 mb-1">Driver Payment History</div>
@@ -6574,7 +6633,26 @@ function DriverReports({ user }) {
         })}
       </div>
       {editReport && <Modal title="Edit Driver Wage" onClose={() => setEditReport(null)}>
-        <div className="space-y-3"><Input label="Driver" value={editReport.driverName} readOnly /><Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} /><Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} /><Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} /><button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button></div>
+        <div className="space-y-3">
+          <Input label="Driver" value={editReport.driverName} readOnly />
+          <Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} />
+          <Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} />
+          <SectionBox title="Driver Expenses" icon="EX" color="red">
+            <div className="space-y-2">
+              {((editReport.expenses || [])).map((expense, i) => (
+                <div key={i} className="grid sm:grid-cols-4 gap-2 border rounded-xl p-2 bg-red-50/40">
+                  <Select label="Expense" value={expense.category || "Other"} options={["Vehicle Service", "Diesel", "Petrol", "Food", "Other"]} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, category: e.target.value } : x) }))} />
+                  <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, amount: e.target.value } : x) }))} />
+                  <Input label="Note" value={expense.note || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, note: e.target.value } : x) }))} />
+                  <div className="flex items-end"><button onClick={() => setEditReport(r => ({ ...r, expenses: (r.expenses || []).filter((_, idx) => idx !== i) }))} className="w-full bg-red-100 text-red-700 py-2.5 rounded-lg text-xs font-bold">Remove</button></div>
+                </div>
+              ))}
+              <button onClick={() => setEditReport(r => ({ ...r, expenses: [...(r.expenses || []), { category: "Diesel", amount: "", note: "" }] }))} className="bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold">+ Add Expense</button>
+            </div>
+          </SectionBox>
+          <Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} />
+          <button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button>
+        </div>
       </Modal>}
       {payDriver && <Modal title="Driver Total Payment" onClose={() => setPayDriver(null)}>
         <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm"><div className="font-bold">{payDriver.driverName || "-"}</div>Pending: <b>{CURRENCY}{fmt(summary.totalPending)}</b></div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button></div>
