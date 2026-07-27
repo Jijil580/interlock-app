@@ -88,7 +88,12 @@ async function api(method, path, body) {
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return res.json();
+    const data = await res.json();
+    if (res.ok && method !== "GET" && !path.includes("/devices/check")) {
+      const label = method === "POST" ? "Saved successfully" : method === "PUT" ? "Updated successfully" : method === "DELETE" ? "Deleted successfully" : "Success";
+      window.dispatchEvent(new CustomEvent("app-success", { detail: data?.successMessage || data?.message || label }));
+    }
+    return data;
   } catch { return {}; }
 }
 
@@ -3088,6 +3093,20 @@ function Purchases({ user }) {
     }
   };
 
+  const deletePurchase = async (purchase) => {
+    if (user.role !== "admin" || !purchase?._id) return;
+    if (!window.confirm("Delete this purchase? Supplier pending will be updated.")) return;
+    const deleted = await api("DELETE", `/purchases/${purchase._id}`);
+    if (deleted?.ok) {
+      setPurchases(p => p.filter(x => x._id !== purchase._id));
+      setViewModal(null);
+      api("GET", "/suppliers").then(s => setSupplierMaster(Array.isArray(s) ? s : []));
+      if (ledger?.supplier?.mobile) openSupplierLedger(ledger.supplier.mobile);
+    } else if (deleted?.message) {
+      window.alert(deleted.message);
+    }
+  };
+
   const filtered = filterPurchases();
   const canAdd = isAdminLike(user.role);
 
@@ -3208,6 +3227,7 @@ function Purchases({ user }) {
             {(p.supplierMobile || p.supplierPhone) && (
               <button onClick={() => openSupplierLedger(p.supplierMobile || p.supplierPhone)} className="mt-2 text-xs text-teal-600 font-bold hover:underline">View Supplier Ledger →</button>
             )}
+            {user.role === "admin" && <button onClick={() => deletePurchase(p)} className="mt-2 ml-3 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>}
           </div>
         ))}
       </div>
@@ -4227,6 +4247,20 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     }
   };
 
+  const deleteSale = async (sale) => {
+    if (user.role !== "admin" || !sale?._id) return;
+    if (!window.confirm("Delete this sale? Stock and customer pending will be updated.")) return;
+    const deleted = await api("DELETE", `/sales/${sale._id}`);
+    if (deleted?.ok) {
+      setSales(p => p.filter(x => x._id !== sale._id));
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      if (ledger?.customer?.mobile) openLedger(ledger.customer.mobile);
+    } else if (deleted?.message) {
+      window.alert(deleted.message);
+    }
+  };
+
   const openPrintBill = (sale) => {
     setPrintSale(sale);
     setPrintOptions({
@@ -4583,6 +4617,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
                 <button onClick={() => openLedger(s.mobileNumber)} className="text-xs text-amber-600 font-bold hover:underline">View Customer Ledger</button>
               )}
               <button onClick={() => openPrintBill(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Print Bill</button>
+              {user.role === "admin" && <button onClick={() => deleteSale(s)} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>}
             </div>
           </div>
         ))}
@@ -6787,6 +6822,7 @@ const NAV = {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [successToast, setSuccessToast] = useState("");
   const [page, setPage] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stock, setStock] = useState([]);
@@ -6800,6 +6836,19 @@ export default function App() {
   useEffect(()=>{
     document.title = COMPANY.shortName;
   },[]);
+
+  useEffect(() => {
+    const show = (event) => {
+      setSuccessToast(event.detail || "Saved successfully");
+      window.clearTimeout(show.timer);
+      show.timer = window.setTimeout(() => setSuccessToast(""), 2400);
+    };
+    window.addEventListener("app-success", show);
+    return () => {
+      window.removeEventListener("app-success", show);
+      window.clearTimeout(show.timer);
+    };
+  }, []);
 
   useEffect(()=>{
     if (!currentUser) return;
@@ -6899,6 +6948,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
+      {successToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[80] bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-black border border-green-500">
+          {successToast}
+        </div>
+      )}
       {sidebarOpen&&<div className="fixed inset-0 bg-black/30 z-20 lg:hidden" onClick={()=>setSidebarOpen(false)} />}
       <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
         <div className="px-5 py-5 border-b border-slate-800">
