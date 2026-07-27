@@ -6820,7 +6820,7 @@ export default function App() {
     />;
   }
 
-  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item => currentUser.role !== "user" || item.id !== "devices");
+  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item => currentUser.role !== "user" || !["devices", "users"].includes(item.id));
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
   const renderPage = () => {
