@@ -6377,6 +6377,7 @@ function DriverSubmitReport({ user }) {
 
 function DriverReports({ user }) {
   const [data, setData] = useState({ reports: [], summary: {} });
+  const [loadError, setLoadError] = useState("");
   const [filters, setFilters] = useState({ driver: "", mobile: "", datePreset: "today", customDate: today(), fromDate: "", toDate: "", category: "" });
   const [editReport, setEditReport] = useState(null);
   const [payDriver, setPayDriver] = useState(null);
@@ -6392,8 +6393,22 @@ function DriverReports({ user }) {
     if (filters.datePreset === "range") { if (filters.fromDate) params.set("fromDate", filters.fromDate); if (filters.toDate) params.set("toDate", filters.toDate); }
     return params.toString();
   };
-  const load = () => api("GET", `/driverreports?${query()}`).then(d => setData(d?.reports ? d : { reports: [], summary: {} }));
-  useEffect(load, [user.role, user.name, filters.driver, filters.mobile, filters.datePreset, filters.customDate, filters.fromDate, filters.toDate, filters.category]);
+  const normalizeDriverData = (d) => ({
+    reports: Array.isArray(d?.reports) ? d.reports : [],
+    summary: d?.summary || {},
+  });
+  const load = async () => {
+    setLoadError("");
+    try {
+      const d = await api("GET", `/driverreports?${query()}`);
+      setData(normalizeDriverData(d));
+      if (d?.message) setLoadError(d.message);
+    } catch {
+      setData({ reports: [], summary: {} });
+      setLoadError("Unable to load driver reports.");
+    }
+  };
+  useEffect(() => { load(); }, [user.role, user.name, filters.driver, filters.mobile, filters.datePreset, filters.customDate, filters.fromDate, filters.toDate, filters.category]);
 
   const saveEdit = async () => {
     const updated = await api("PUT", `/driverreports/${editReport._id}`, editReport);
@@ -6416,8 +6431,9 @@ function DriverReports({ user }) {
     }
   };
   const canOfficeEdit = isAdminLike(user.role);
+  const reports = Array.isArray(data.reports) ? data.reports : [];
   const summary = data.summary || {};
-  const driverKeys = [...new Set((data.reports || []).map(r => r.driverMobile || r.driverName).filter(Boolean))];
+  const driverKeys = [...new Set(reports.map(r => r.driverMobile || r.driverName).filter(Boolean))];
   const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1 && +(summary.totalPending || 0) > 0;
 
   return (
@@ -6442,7 +6458,7 @@ function DriverReports({ user }) {
       {canPayDriverTotal && (
         <button
           onClick={() => {
-            const driver = (data.reports || [])[0] || {};
+            const driver = reports[0] || {};
             setPayDriver(driver);
             setPayForm({ amount: String(summary.totalPending || ""), date: today(), mode: "Cash", note: "" });
           }}
@@ -6456,9 +6472,12 @@ function DriverReports({ user }) {
           Select one driver by name or mobile to make a total payment.
         </div>
       )}
+      {loadError && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-xs font-bold">{loadError}</div>}
       <div className="space-y-3">
-        {(data.reports || []).length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
-        {(data.reports || []).map(r => <div key={r._id} className="bg-white border rounded-xl shadow-sm p-4 space-y-3">
+        {reports.length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
+        {reports.map(r => {
+          const payments = Array.isArray(r.payments) ? r.payments : [];
+          return <div key={r._id || `${r.driverName}-${r.date}-${r.itemName}`} className="bg-white border rounded-xl shadow-sm p-4 space-y-3">
           <div className="flex justify-between gap-2">
             <div className="min-w-0">
               <div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div>
@@ -6484,10 +6503,10 @@ function DriverReports({ user }) {
               <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
             </div>
           )}
-          {(r.payments || []).length > 0 && (
+          {payments.length > 0 && (
             <div className="bg-green-50 border border-green-100 rounded-lg p-2 text-xs">
               <div className="font-bold text-green-700 mb-1">Driver Payment History</div>
-              {(r.payments || []).map((p, i) => (
+              {payments.map((p, i) => (
                 <div key={i} className="flex justify-between border-t border-green-100 py-1 first:border-t-0">
                   <span>{p.date || "-"} | {p.mode || "Cash"}{p.note ? ` | ${p.note}` : ""}</span>
                   <span className="font-black">{CURRENCY}{fmt(p.amount || 0)}</span>
@@ -6498,7 +6517,8 @@ function DriverReports({ user }) {
           {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
           <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
           {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button></div>}
-        </div>)}
+        </div>;
+        })}
       </div>
       {editReport && <Modal title="Edit Driver Wage" onClose={() => setEditReport(null)}>
         <div className="space-y-3"><Input label="Driver" value={editReport.driverName} readOnly /><Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} /><Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} /><Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} /><button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button></div>
