@@ -6545,10 +6545,41 @@ function DriverReports({ user }) {
   const summary = data.summary || {};
   const driverKeys = [...new Set(reports.map(r => r.driverMobile || r.driverName).filter(Boolean))];
   const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1 && +(summary.totalPending || 0) > 0;
+  const escapePrint = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  const driverExpenseText = (report) => {
+    const items = Array.isArray(report.expenses) ? report.expenses : [];
+    if (!items.length) return "-";
+    return items.map(e => `${e.category || "Other"}${+(e.liters || 0) > 0 ? ` (${fmt(e.liters)} L)` : ""}: ${CURRENCY}${fmt(e.amount || 0)}${e.note ? ` - ${e.note}` : ""}`).join("; ");
+  };
+  const printDriverLedger = () => {
+    const title = filters.driver || filters.mobile || (canOfficeEdit ? "All Drivers" : user.name);
+    const rows = reports.map((r, i) => {
+      const km = r.vehicleKm || {};
+      return `<tr>
+        <td>${i + 1}</td><td>${escapePrint(r.date || "")}</td><td>${escapePrint(r.driverName || "")}</td><td>${escapePrint([r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / "))}</td>
+        <td>${escapePrint([r.category, r.itemName].filter(Boolean).join(" / ") || "-")}</td><td>${escapePrint([r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-")}</td>
+        <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
+        <td class="right">${CURRENCY}${fmt(r.driverWageEarned || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePaid || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePending || 0)}</td>
+      </tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><title>Driver Ledger</title><style>
+      body{font-family:Arial,sans-serif;color:#111;margin:16px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}.company{font-weight:900;font-size:18px}.muted{font-size:12px;color:#555}.title{text-align:right;font-size:24px;font-weight:900}.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:15px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px;vertical-align:top}th{background:#f3f4f6}.right{text-align:right}.printbtn{position:fixed;right:16px;top:12px;background:#111;color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700}@media print{.printbtn{display:none}body{margin:8mm}.summary{grid-template-columns:repeat(3,1fr)}} 
+    </style></head><body><button class="printbtn" onclick="window.print()">Print</button>
+      <div class="top"><div><div class="company">${escapePrint(COMPANY.companyName)}</div><div class="muted">${escapePrint(COMPANY.address)} | ${escapePrint(COMPANY.phone1 || "")}</div></div><div class="title">DRIVER LEDGER<div class="muted">${escapePrint(title)}</div></div></div>
+      <div class="summary"><div class="box">Trips<b>${fmt(summary.totalTrips || 0)}</b></div><div class="box">Total Earned<b>${CURRENCY}${fmt(summary.totalEarned || 0)}</b></div><div class="box">Total Paid<b>${CURRENCY}${fmt(summary.totalPaid || 0)}</b></div><div class="box">Total Pending<b>${CURRENCY}${fmt(summary.totalPending || 0)}</b></div><div class="box">Expenses<b>${CURRENCY}${fmt(summary.totalExpenses || 0)}</b></div><div class="box">KM Run<b>${fmt(summary.totalKm || 0)}</b></div></div>
+      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Earned</th><th>Paid</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="12">No driver ledger entries found</td></tr>`}</tbody></table>
+    <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
 
   return (
     <div className="space-y-4">
-      <div><h2 className="text-xl font-black text-gray-900">Driver Reports</h2><div className="text-xs text-gray-400">{canOfficeEdit ? "All driver ledgers" : "Your submitted reports"}</div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">Driver Ledger</h2><div className="text-xs text-gray-400">{canOfficeEdit ? "All driver ledgers" : "Your submitted reports"}</div></div>
+        <button onClick={printDriverLedger} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>
+      </div>
       <div className="bg-white rounded-xl border p-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
         {canOfficeEdit && (
           <Select
@@ -6596,6 +6627,29 @@ function DriverReports({ user }) {
         </div>
       )}
       {loadError && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-xs font-bold">{loadError}</div>}
+      <SectionBox title="Driver Ledger View" icon="DL" color="blue">
+        {reports.length === 0 ? <div className="text-xs text-gray-400">No driver reports found</div> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Date</th><th>Driver</th><th>Vehicle</th><th>Item / Route</th><th>Expenses</th><th className="text-right">KM</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+              <tbody>{reports.map(r => {
+                const km = r.vehicleKm || {};
+                return <tr key={`ledger-${r._id}`} className="border-b border-gray-100">
+                  <td className="py-2 font-semibold">{r.date || "-"}</td>
+                  <td className="font-bold">{r.driverName || "-"}</td>
+                  <td>{[r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / ") || "-"}</td>
+                  <td><div className="font-semibold">{[r.category, r.itemName].filter(Boolean).join(" / ") || "-"}</div><div className="text-gray-400">{[r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-"}</div></td>
+                  <td>{driverExpenseText(r)}</td>
+                  <td className="text-right font-bold">{fmt(km.totalKm || 0)}</td>
+                  <td className="text-right text-green-700 font-black">{CURRENCY}{fmt(r.driverWageEarned || 0)}</td>
+                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(r.driverWagePaid || 0)}</td>
+                  <td className="text-right text-red-600 font-black">{CURRENCY}{fmt(r.driverWagePending || 0)}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        )}
+      </SectionBox>
       <div className="space-y-3">
         {reports.length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
         {reports.map(r => {
