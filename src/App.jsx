@@ -6458,9 +6458,44 @@ function DriverReports({ user }) {
       )}
       <div className="space-y-3">
         {(data.reports || []).length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
-        {(data.reports || []).map(r => <div key={r._id} className="bg-white border rounded-xl shadow-sm p-4 space-y-2">
-          <div className="flex justify-between gap-2"><div><div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div><div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div><div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div></div><Badge color={r.driverWagePending > 0 ? "red" : "green"}>{r.driverWagePending > 0 ? "Pending" : "Paid"}</Badge></div>
-          {r.category === "Raw Material" && <div className="text-xs bg-teal-50 rounded-lg p-2">Supplier: <b>{r.supplierName || "-"}</b> | Given {CURRENCY}{fmt(r.cashGivenToSupplier)} | Pending {CURRENCY}{fmt(r.supplierPendingCash)}</div>}
+        {(data.reports || []).map(r => <div key={r._id} className="bg-white border rounded-xl shadow-sm p-4 space-y-3">
+          <div className="flex justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div>
+              <div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div>
+              <div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div>
+            </div>
+            <Badge color={r.driverWagePending > 0 ? "red" : "green"}>{r.driverWagePending > 0 ? "Pending" : "Paid"}</Badge>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Material / Item</div><div className="font-bold text-gray-900">{r.itemName || "-"}</div>{r.itemDetails && <div className="text-gray-500 mt-0.5">{r.itemDetails}</div>}</div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Quantity</div><div className="font-bold text-gray-900">{fmt(r.quantity || 0)} {r.unit || "piece"}</div></div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Vehicle</div><div className="font-bold text-gray-900">{r.vehicleName || "-"} {r.vehicleNumber ? `(${r.vehicleNumber})` : ""}</div></div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Charge Type</div><div className="font-bold text-gray-900 capitalize">{r.driverChargeType || "-"}</div><div className="text-gray-500">{CURRENCY}{fmt(r.driverCharge || 0)}</div></div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-lg p-2"><div className="text-blue-500">Loading From</div><div className="font-bold text-blue-900">{r.loadingFrom || "-"}</div></div>
+            <div className="bg-blue-50 rounded-lg p-2"><div className="text-blue-500">Unloaded Location</div><div className="font-bold text-blue-900">{r.unloadedLocation || "-"}</div></div>
+          </div>
+          {r.category === "Raw Material" && (
+            <div className="grid sm:grid-cols-3 gap-2 text-xs">
+              <div className="bg-teal-50 rounded-lg p-2"><div className="text-teal-500">Supplier</div><div className="font-bold text-teal-900">{r.supplierName || "-"}</div>{r.supplierMobile && <div className="text-teal-700">{r.supplierMobile}</div>}</div>
+              <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-600">Cash Given to Supplier</div><div className="font-black text-green-700">{CURRENCY}{fmt(r.cashGivenToSupplier || 0)}</div></div>
+              <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
+            </div>
+          )}
+          {(r.payments || []).length > 0 && (
+            <div className="bg-green-50 border border-green-100 rounded-lg p-2 text-xs">
+              <div className="font-bold text-green-700 mb-1">Driver Payment History</div>
+              {(r.payments || []).map((p, i) => (
+                <div key={i} className="flex justify-between border-t border-green-100 py-1 first:border-t-0">
+                  <span>{p.date || "-"} | {p.mode || "Cash"}{p.note ? ` | ${p.note}` : ""}</span>
+                  <span className="font-black">{CURRENCY}{fmt(p.amount || 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
           <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
           {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button></div>}
         </div>)}
@@ -6785,7 +6820,7 @@ export default function App() {
     />;
   }
 
-  const nav = NAV[effectiveRoleOf(currentUser.role)]||[];
+  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item => currentUser.role !== "user" || item.id !== "devices");
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
   const renderPage = () => {
