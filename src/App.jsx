@@ -198,8 +198,8 @@ function StatCard({ label, value, sub, icon, color }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-start gap-3">
       <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
-      <div className="min-w-0">
-        <div className="text-xl font-black text-slate-950 truncate">{value}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-lg sm:text-xl font-black text-slate-950 leading-tight break-words whitespace-normal">{value}</div>
         <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</div>
         {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
       </div>
