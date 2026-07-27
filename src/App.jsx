@@ -6441,7 +6441,7 @@ function DriverSubmitReport({ user }) {
           {(form.expenses || []).length === 0 && <div className="text-xs text-gray-400">No driver expenses added</div>}
           {(form.expenses || []).map((expense, i) => (
             <div key={i} className="grid sm:grid-cols-5 gap-2 border rounded-xl p-2 bg-red-50/40">
-              <Select label="Expense" value={expense.category} options={["Vehicle Service", "Diesel", "Petrol", "Food", "Other"]} onChange={e => setExpense(i, { category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? expense.liters : "" })} />
+              <Select label="Expense" value={expense.category} options={["Vehicle Service", "Diesel", "Petrol", "Other"]} onChange={e => setExpense(i, { category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? expense.liters : "" })} />
               {["Diesel", "Petrol"].includes(expense.category) && <Input label="Liters Filled" type="number" value={expense.liters || ""} onChange={e => setExpense(i, { liters: e.target.value })} />}
               <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount} onChange={e => setExpense(i, { amount: e.target.value })} />
               <Input label="Note" value={expense.note || ""} onChange={e => setExpense(i, { note: e.target.value })} />
@@ -6737,7 +6737,7 @@ function DriverReports({ user }) {
             <div className="space-y-2">
               {((editReport.expenses || [])).map((expense, i) => (
                 <div key={i} className="grid sm:grid-cols-5 gap-2 border rounded-xl p-2 bg-red-50/40">
-                  <Select label="Expense" value={expense.category || "Other"} options={["Vehicle Service", "Diesel", "Petrol", "Food", "Other"]} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? x.liters : "" } : x) }))} />
+                  <Select label="Expense" value={expense.category || "Other"} options={["Vehicle Service", "Diesel", "Petrol", "Other"]} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? x.liters : "" } : x) }))} />
                   {["Diesel", "Petrol"].includes(expense.category) && <Input label="Liters Filled" type="number" value={expense.liters || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, liters: e.target.value } : x) }))} />}
                   <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, amount: e.target.value } : x) }))} />
                   <Input label="Note" value={expense.note || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, note: e.target.value } : x) }))} />
