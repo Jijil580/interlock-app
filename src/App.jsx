@@ -6927,8 +6927,150 @@ function DailyCashFlow({ user, allUsers }) {
   );
 }
 
+function SupervisorCashFlow({ user, allUsers }) {
+  const supervisors = (allUsers || []).filter(u => u.role === "supervisor");
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [dateMode, setDateMode] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7));
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [data, setData] = useState({ history: [], total: {} });
+  const [loading, setLoading] = useState(true);
+
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const dateLabel = value => {
+    if (!value) return "-";
+    const [y, m, d] = String(value).split("-");
+    return d && m && y ? `${d}-${m}-${y}` : value;
+  };
+  const monthRange = (month) => {
+    const [year, mon] = String(month || today().slice(0, 7)).split("-");
+    const last = new Date(+year, +mon, 0).getDate();
+    return { from: `${year}-${mon}-01`, to: `${year}-${mon}-${String(last).padStart(2, "0")}` };
+  };
+  const getRange = () => {
+    if (dateMode === "daily") return { from: selectedDate, to: selectedDate };
+    if (dateMode === "month") return monthRange(selectedMonth);
+    if (dateMode === "range") return { from: fromDate, to: toDate };
+    return { from: "", to: "" };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const range = getRange();
+    const supervisorName = user.role === "supervisor" ? user.name : selectedSupervisor;
+    const params = new URLSearchParams({
+      role: isAdminLike(user.role) ? "admin" : user.role,
+      name: user.name,
+      personRole: "supervisor",
+      fromDate: range.from,
+      toDate: range.to,
+    });
+    if (supervisorName) params.set("person", supervisorName);
+    setLoading(true);
+    api("GET", `/cashflow?${params.toString()}`).then(result => {
+      if (!active) return;
+      setData(result?.history ? result : { history: [], total: {} });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate]);
+
+  const total = data.total || {};
+  const rows = Array.isArray(data.history) ? data.history : [];
+  const workerRows = row => (row.spentDetails || []).filter(d => d.type === "Worker Payment");
+  const expenseRows = row => (row.spentDetails || []).filter(d => d.type !== "Worker Payment");
+  const selectedLabel = user.role === "supervisor" ? user.name : (selectedSupervisor || "All Supervisors");
+  const printReport = () => {
+    const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+    const detailRows = rows.map(row => `
+      <tr class="day"><td colspan="5">${esc(dateLabel(row.date))} - ${esc(row.person)}</td></tr>
+      ${(row.receivedDetails || []).map(d => `<tr><td>Income</td><td>${esc(d.site || "-")}</td><td>${esc(d.source || "-")}</td><td class="right">${money(d.amount)}</td><td></td></tr>`).join("")}
+      ${(row.spentDetails || []).map(d => `<tr><td>Expense</td><td>${esc(d.type || "-")}</td><td>${esc(d.details || "-")}</td><td></td><td class="right">${money(d.amount)}</td></tr>`).join("")}
+      <tr class="total"><td colspan="3">Daily Net</td><td class="right">${money(row.received)}</td><td class="right">${money(row.totalExpenses)} | Net ${money(row.netBalance)}</td></tr>
+    `).join("");
+    const html = `<!doctype html><html><head><title>Supervisor Cashflow</title><style>
+      body{font-family:Arial,sans-serif;margin:16px;color:#111}.top{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px}.brand{font-size:18px;font-weight:900}.title{text-align:right;font-size:24px;font-weight:900}.muted{font-size:12px;color:#555}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:16px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #222;padding:6px;vertical-align:top}th,.day{background:#f3f4f6;font-weight:900}.right{text-align:right}.total{font-weight:900}.printbtn{position:fixed;right:16px;top:12px;background:#111;color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700}@media print{.printbtn{display:none}body{margin:8mm}.summary{grid-template-columns:repeat(2,1fr)}}
+    </style></head><body><button class="printbtn" onclick="window.print()">Print</button><div class="top"><div><div class="brand">${esc(COMPANY.companyName)}</div><div class="muted">${esc(COMPANY.address)}</div></div><div class="title">SUPERVISOR CASHFLOW<div class="muted">${esc(selectedLabel)}</div></div></div>
+    <div class="summary"><div class="box">Cash Received<b>${money(total.received)}</b></div><div class="box">Worker Payments<b>${money(total.workerPayments)}</b></div><div class="box">Total Expenses<b>${money(total.totalExpenses)}</b></div><div class="box">Net Balance<b>${money(total.netBalance)}</b></div></div>
+    <table><thead><tr><th>Type</th><th>Site / Category</th><th>Details</th><th>Income</th><th>Expense</th></tr></thead><tbody>${detailRows || `<tr><td colspan="5">No records found</td></tr>`}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Supervisor Cashflow</h2>
+          <div className="text-xs text-gray-400">Site cash received, worker payments and daily report expenses</div>
+        </div>
+        <button onClick={printReport} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Report</button>
+      </div>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {isAdminLike(user.role) && <Select label="Supervisor" value={selectedSupervisor} options={[{ value:"", label:"All Supervisors" }, ...supervisors.map(s => ({ value:s.name, label:`${s.name}${s.username ? ` (@${s.username})` : ""}` }))]} onChange={e => setSelectedSupervisor(e.target.value)} />}
+        <Select label="Date Filter" value={dateMode} options={[{ value:"daily", label:"Date Wise" }, { value:"month", label:"Month Wise" }, { value:"range", label:"Date Range" }, { value:"all", label:"All Time" }]} onChange={e => setDateMode(e.target.value)} />
+        {dateMode === "daily" && <Input label="Date" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />}
+        {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} />}
+        {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />}
+        {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e => setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Total Income" value={money(total.received)} icon="IN" color="green" />
+            <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+            <StatCard label="Other Expenses" value={money((total.vehicleCharges || 0) + (total.materialPayments || 0) + (total.equipmentPayments || 0) + (total.otherExpenses || 0))} icon="EX" color="purple" />
+            <StatCard label="Net Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance) >= 0 ? "green" : "red"} />
+            <StatCard label="Material Payments" value={money(total.materialPayments)} icon="M" color="teal" />
+            <StatCard label="Equipment Payments" value={money(total.equipmentPayments)} icon="EQ" color="gray" />
+            <StatCard label="Vehicle Charges" value={money(total.vehicleCharges)} icon="V" color="blue" />
+            <StatCard label="Total Expense" value={money(total.totalExpenses)} icon="OUT" color="red" />
+          </div>
+          {rows.length === 0 ? <EmptyState icon="IN" text="No supervisor cashflow records found" /> : (
+            <div className="space-y-3">
+              {rows.map((row, i) => (
+                <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <div><div className="font-black">{dateLabel(row.date)} - {row.person}</div><div className="text-xs text-gray-400">Daily report cashflow details</div></div>
+                    <div className={`font-black ${row.netBalance >= 0 ? "text-green-700" : "text-red-600"}`}>{money(row.netBalance)}</div>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-green-50 rounded-lg p-2 text-center"><b className="text-green-700">{money(row.received)}</b><br />Income</div>
+                    <div className="bg-amber-50 rounded-lg p-2 text-center"><b className="text-amber-700">{money(row.workerPayments)}</b><br />Worker Paid</div>
+                    <div className="bg-red-50 rounded-lg p-2 text-center"><b className="text-red-600">{money(row.totalExpenses)}</b><br />Expense</div>
+                    <div className={`${row.netBalance >= 0 ? "bg-green-50" : "bg-red-50"} rounded-lg p-2 text-center`}><b>{money(row.netBalance)}</b><br />Net</div>
+                  </div>
+                  <SectionBox title="Cash Received From Sites" icon="IN" color="green">
+                    {(row.receivedDetails || []).length === 0 ? <div className="text-xs text-gray-400">No site cash received</div> : (row.receivedDetails || []).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.site || "-"}</span><span>{d.source || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                  <SectionBox title="Cash Given To Workers" icon="W" color="amber">
+                    {workerRows(row).length === 0 ? <div className="text-xs text-gray-400">No worker payments</div> : workerRows(row).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-amber-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                  <SectionBox title="Other Daily Report Expenses" icon="EX" color="red">
+                    {expenseRows(row).length === 0 ? <div className="text-xs text-gray-400">No other expenses</div> : expenseRows(row).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const NAV = {
   admin: [
+    { id:"supervisorcashflow", label:"Sup. Cashflow", icon:"SC" },
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"officedaily", label:"Office Daily Report", icon:"DR" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -6966,6 +7108,7 @@ const NAV = {
     { id:"quotations", label:"Quotations", icon:"QT" },
   ],
   user: [
+    { id:"supervisorcashflow", label:"Sup. Cashflow", icon:"SC" },
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
@@ -7112,6 +7255,7 @@ export default function App() {
       case "quotations": return <QuotationModule user={currentUser} />;
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
+      case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
