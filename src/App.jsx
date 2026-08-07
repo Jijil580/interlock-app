@@ -6708,7 +6708,16 @@ function DriverReports({ user }) {
   const reports = Array.isArray(data.reports) ? data.reports : [];
   const summary = data.summary || {};
   const driverKeys = [...new Set(reports.map(r => r.driverMobile || r.driverName).filter(Boolean))];
-  const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1 && +(summary.totalPending || 0) > 0;
+  const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1;
+  const driverPayableAmount = (report) => {
+    const storedEarned = +(report?.driverWageEarned || 0);
+    const supplierCash = +(report?.cashGivenToSupplier || 0);
+    const charge = +(report?.driverCharge || 0);
+    return storedEarned >= (charge + supplierCash) ? storedEarned : storedEarned + supplierCash;
+  };
+  const driverPaidAmount = (report) => +(report?.driverWagePaid || 0);
+  const driverPendingAmount = (report) => Math.max(0, driverPayableAmount(report) - driverPaidAmount(report));
+  const driverCreditAmount = (report) => Math.max(0, driverPaidAmount(report) - driverPayableAmount(report));
   const escapePrint = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
   const driverExpenseText = (report) => {
     const items = Array.isArray(report.expenses) ? report.expenses : [];
@@ -6723,7 +6732,7 @@ function DriverReports({ user }) {
         <td>${i + 1}</td><td>${escapePrint(r.date || "")}</td><td>${escapePrint(r.driverName || "")}</td><td>${escapePrint([r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / "))}</td>
         <td>${escapePrint([r.category, r.itemName].filter(Boolean).join(" / ") || "-")}</td><td>${escapePrint([r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-")}</td>
         <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}<br>${+(r.loadAmount || 0) > 0 ? CURRENCY + fmt(r.loadAmount) : ""}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
-        <td class="right">${CURRENCY}${fmt(r.driverWageEarned || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePaid || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePending || 0)}</td>
+        <td class="right">${CURRENCY}${fmt(driverPayableAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPaidAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPendingAmount(r))}${driverCreditAmount(r) > 0 ? `<br>Credit ${CURRENCY}${fmt(driverCreditAmount(r))}` : ""}</td>
       </tr>`;
     }).join("");
     const html = `<!doctype html><html><head><title>Driver Ledger</title><style>
@@ -6763,12 +6772,13 @@ function DriverReports({ user }) {
         {filters.datePreset === "range" && <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />}
         <Select label="Category" value={filters.category} options={["", "Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setFilters({ ...filters, category: e.target.value })} />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-8 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-9 gap-2">
         <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
         <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
         <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
         <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
         <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
+        <StatCard label="Credit" value={`${CURRENCY}${fmt(summary.totalCredit || 0)}`} icon="CR" color="green" />
         <StatCard label="Expenses" value={`${CURRENCY}${fmt(summary.totalExpenses)}`} icon="EX" color="amber" sub={+(summary.totalLoadAmount || 0) > 0 ? `Load ${CURRENCY}${fmt(summary.totalLoadAmount)}` : ""} />
         <StatCard label="Fuel Liters" value={fmt(summary.totalLiters || 0)} icon="L" color="blue" />
         <StatCard label="KM Run" value={fmt(summary.totalKm || 0)} icon="KM" color="purple" />
@@ -6778,7 +6788,7 @@ function DriverReports({ user }) {
           onClick={() => {
             const driver = reports[0] || {};
             setPayDriver(driver);
-            setPayForm({ amount: String(summary.totalPending || ""), date: today(), mode: "Cash", note: "" });
+            setPayForm({ amount: +(summary.totalPending || 0) > 0 ? String(summary.totalPending || "") : "", date: today(), mode: "Cash", note: +(summary.totalPending || 0) > 0 ? "" : "Driver advance / extra payment" });
           }}
           className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
         >
@@ -6805,9 +6815,9 @@ function DriverReports({ user }) {
                   <td><div className="font-semibold">{[r.category, r.itemName].filter(Boolean).join(" / ") || "-"}</div><div className="text-gray-400">{[r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-"}</div></td>
                   <td>{driverExpenseText(r)}</td>
                   <td className="text-right font-bold">{fmt(km.totalKm || 0)}</td>
-                  <td className="text-right text-green-700 font-black">{CURRENCY}{fmt(r.driverWageEarned || 0)}</td>
-                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(r.driverWagePaid || 0)}</td>
-                  <td className="text-right text-red-600 font-black">{CURRENCY}{fmt(r.driverWagePending || 0)}</td>
+                  <td className="text-right text-green-700 font-black">{CURRENCY}{fmt(driverPayableAmount(r))}</td>
+                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(driverPaidAmount(r))}</td>
+                  <td className="text-right text-red-600 font-black">{CURRENCY}{fmt(driverPendingAmount(r))}{driverCreditAmount(r) > 0 && <div className="text-green-700">Credit {CURRENCY}{fmt(driverCreditAmount(r))}</div>}</td>
                 </tr>;
               })}</tbody>
             </table>
@@ -6829,7 +6839,7 @@ function DriverReports({ user }) {
               <div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div>
               <div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div>
             </div>
-            <Badge color={r.driverWagePending > 0 ? "red" : "green"}>{r.driverWagePending > 0 ? "Pending" : "Paid"}</Badge>
+            <Badge color={driverPendingAmount(r) > 0 ? "red" : "green"}>{driverPendingAmount(r) > 0 ? "Pending" : driverCreditAmount(r) > 0 ? "Credit" : "Paid"}</Badge>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
             <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Material / Item</div><div className="font-bold text-gray-900">{r.itemName || "-"}</div>{r.itemDetails && <div className="text-gray-500 mt-0.5">{r.itemDetails}</div>}</div>
@@ -6853,7 +6863,7 @@ function DriverReports({ user }) {
             <div className="grid sm:grid-cols-4 gap-2 text-xs">
               <div className="bg-teal-50 rounded-lg p-2"><div className="text-teal-500">Supplier</div><div className="font-bold text-teal-900">{r.supplierName || "-"}</div>{r.supplierMobile && <div className="text-teal-700">{r.supplierMobile}</div>}</div>
               <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="text-blue-600">Material Amount</div><div className="font-black text-blue-700">{CURRENCY}{fmt(r.loadAmount || ((+(r.cashGivenToSupplier)||0)+ (+(r.supplierPendingCash)||0)))}</div></div>
-              <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-600">Cash Given to Supplier</div><div className="font-black text-green-700">{CURRENCY}{fmt(r.cashGivenToSupplier || 0)}</div></div>
+              <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-600">Cash Given by Driver</div><div className="font-black text-green-700">{CURRENCY}{fmt(r.cashGivenToSupplier || 0)}</div><div className="text-green-700">Added to driver pending</div></div>
               <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
             </div>
           )}
@@ -6880,7 +6890,7 @@ function DriverReports({ user }) {
             </div>
           )}
           {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
-          <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
+          <div className="grid grid-cols-4 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPayableAmount(r))}</b><br />Payable</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPaidAmount(r))}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPendingAmount(r))}</b><br />Pending</div><div className="bg-emerald-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverCreditAmount(r))}</b><br />Credit</div></div>
           {(canOfficeEdit || user.role === "driver") && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Report</button><button onClick={() => deleteDriverReport(r)} className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold">Delete</button></div>}
         </div>;
         })}
@@ -6935,7 +6945,7 @@ function DriverReports({ user }) {
         </div>
       </Modal>}
       {payDriver && <Modal title="Driver Total Payment" onClose={() => setPayDriver(null)}>
-        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm"><div className="font-bold">{payDriver.driverName || "-"}</div>Pending: <b>{CURRENCY}{fmt(summary.totalPending)}</b></div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button></div>
+        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm"><div className="font-bold">{payDriver.driverName || "-"}</div>Pending: <b>{CURRENCY}{fmt(summary.totalPending)}</b>{+(summary.totalCredit || 0) > 0 && <div className="text-green-700 font-bold">Credit: {CURRENCY}{fmt(summary.totalCredit || 0)}</div>}</div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button></div>
       </Modal>}
     </div>
   );
