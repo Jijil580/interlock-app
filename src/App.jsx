@@ -7319,11 +7319,133 @@ function ReportAuditLog({ user }) {
   );
 }
 
+function CompanyPurchase({ user }) {
+  const emptyForm = { date: today(), materialName: "", quantity: "", unit: "nos", amount: "", paymentMode: "Cash", note: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [message, setMessage] = useState("");
+
+  const save = async () => {
+    setMessage("");
+    if (!form.materialName || +(form.amount || 0) <= 0) return setMessage("Material name and amount required");
+    const saved = await api("POST", "/company-purchases", {
+      ...form,
+      quantity: +(form.quantity || 0),
+      amount: +(form.amount || 0),
+      purchasedBy: user.name,
+      purchasedByRole: user.role,
+      accountName: user.name,
+    });
+    if (saved?._id) {
+      setMessage("Company purchase saved successfully");
+      setForm(emptyForm);
+    } else setMessage(saved?.message || "Failed to save company purchase");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Company Purchase</h2><div className="text-xs text-gray-400">Office/company purchases entered by current user</div></div>
+      <SectionBox title="Purchase Details" icon="CP" color="amber">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Purchased By" value={user.name || ""} readOnly />
+          <Input label="Material Name" value={form.materialName} onChange={e=>setForm({...form,materialName:e.target.value})} placeholder="Material / item name" />
+          <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value})} />
+          <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} placeholder="nos / kg / bag" />
+          <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+        </div>
+      </SectionBox>
+      {message && <div className={`text-sm font-bold rounded-xl p-3 ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>{message}</div>}
+      <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">Submit Company Purchase</button>
+    </div>
+  );
+}
+
+function CompanyExpense({ user }) {
+  const [tab, setTab] = useState("salary");
+  const [dateMode, setDateMode] = useState("today");
+  const [date, setDate] = useState(today());
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [data, setData] = useState({ rows: [], totals: {} });
+  const [loading, setLoading] = useState(true);
+
+  const query = () => {
+    const params = new URLSearchParams({ tab });
+    if (dateMode === "today") params.set("date", today());
+    if (dateMode === "date") params.set("date", date);
+    if (dateMode === "range") { params.set("fromDate", fromDate); params.set("toDate", toDate); }
+    return params.toString();
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    api("GET", `/company-expenses?${query()}`).then(d => {
+      setData(d?.rows ? d : { rows: [], totals: {} });
+      setLoading(false);
+    });
+  }, [tab, dateMode, date, fromDate, toDate]);
+
+  const rows = data.rows || [];
+  const totals = data.totals || {};
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">Company Expense</h2><div className="text-xs text-gray-400">Salary payments and company expense history</div></div>
+        <div className="flex bg-white border rounded-xl p-1">
+          <button onClick={()=>setTab("salary")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab==="salary"?"bg-amber-500 text-white":"text-gray-500"}`}>Salary</button>
+          <button onClick={()=>setTab("other")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab==="other"?"bg-amber-500 text-white":"text-gray-500"}`}>Other</button>
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border p-4 grid sm:grid-cols-4 gap-3">
+        <Select label="Date Filter" value={dateMode} options={[{value:"today",label:"Today"},{value:"date",label:"Date Wise"},{value:"range",label:"Date Range"},{value:"all",label:"All"}]} onChange={e=>setDateMode(e.target.value)} />
+        {dateMode==="date" && <Input label="Date" type="date" value={date} onChange={e=>setDate(e.target.value)} />}
+        {dateMode==="range" && <Input label="From" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+        {dateMode==="range" && <Input label="To" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            <StatCard label="Records" value={totals.count || 0} icon="N" color="blue" />
+            <StatCard label={tab==="salary" ? "Salary Paid" : "Expense Amount"} value={`${CURRENCY}${fmt(totals.paid || 0)}`} icon="₹" color="red" />
+            {tab==="salary" && <StatCard label="Salary Earned" value={`${CURRENCY}${fmt(totals.earned || 0)}`} icon="E" color="green" />}
+            {tab==="salary" && <StatCard label="Pending" value={`${CURRENCY}${fmt(totals.pending || 0)}`} icon="P" color="amber" />}
+          </div>
+          <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+            {rows.length === 0 ? <EmptyState icon="EXP" text="No company expense records" /> : (
+              <table className="w-full text-xs">
+                <thead>
+                  {tab==="salary" ? (
+                    <tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Role</th><th className="p-2 text-left">Source</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th><th className="p-2 text-left">Paid By</th></tr>
+                  ) : (
+                    <tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Material/Expense</th><th className="p-2 text-left">Qty</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Purchased By</th><th className="p-2 text-left">Source</th></tr>
+                  )}
+                </thead>
+                <tbody>
+                  {rows.map((r,i)=>tab==="salary" ? (
+                    <tr key={i} className="border-t"><td className="p-2">{r.date}</td><td className="p-2 font-bold">{r.personName}</td><td className="p-2">{r.role}</td><td className="p-2">{r.source}<div className="text-gray-400">{r.siteName || r.itemName || r.details || ""}</div></td><td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(r.earned)}</td><td className="p-2 text-right text-blue-700 font-bold">{CURRENCY}{fmt(r.paid)}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(r.pending)}</td><td className="p-2">{r.paidBy || "-"}</td></tr>
+                  ) : (
+                    <tr key={i} className="border-t"><td className="p-2">{r.date}</td><td className="p-2 font-bold">{r.type}</td><td className="p-2">{r.name}<div className="text-gray-400">{r.details || ""}</div></td><td className="p-2">{r.quantity || "-"}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(r.amount)}</td><td className="p-2">{r.mode || "-"}</td><td className="p-2">{r.purchasedBy || "-"}</td><td className="p-2">{r.source}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const NAV = {
   admin: [
     { id:"reportaudit", label:"Report Audit", icon:"AUD" },
     { id:"supervisorcashflow", label:"Sup. Cashflow", icon:"SC" },
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"officedaily", label:"Office Daily Report", icon:"DR" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
@@ -7348,6 +7470,8 @@ const NAV = {
   ],
   supervisor: [
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"dailyreport", label:"Daily Report", icon:"📋" },
     { id:"mysitereports", label:"My Site Reports", icon:"📊" },
@@ -7362,6 +7486,8 @@ const NAV = {
   user: [
     { id:"supervisorcashflow", label:"Sup. Cashflow", icon:"SC" },
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
     { id:"sitework", label:"Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
@@ -7510,6 +7636,8 @@ export default function App() {
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
+      case "companyexpense": return <CompanyExpense user={currentUser} />;
+      case "companypurchase": return (isAdminLike(currentUser.role)||currentUser.role==="supervisor")?<CompanyPurchase user={currentUser} />:null;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
