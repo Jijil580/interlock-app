@@ -1749,10 +1749,30 @@ function DailyReport({ user }) {
     setAddModal(true);
   };
 
+  const normalizeDailyReport = (report = {}) => ({
+    ...emptyForm,
+    ...report,
+    payments: (report.payments || []).filter(p => p.type !== "Worker Payment"),
+    workerEntries: report.workerEntries || []
+  });
+
+  const openDailyReportView = (report) => {
+    if (!report?._id) return;
+    setAddModal(false);
+    setViewModal(normalizeDailyReport(report));
+  };
+
   const editDailyReport = (report) => {
+    if (!report?._id) return;
     setViewModal(null);
-    setForm({ ...emptyForm, ...report, payments: (report.payments || []).filter(p => p.type !== "Worker Payment"), workerEntries: report.workerEntries || [] });
+    setForm(normalizeDailyReport(report));
     setSiteSearch(report.siteName || "");
+    setPayForm(emptyPayForm);
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
     setAddModal(true);
   };
 
@@ -1827,8 +1847,9 @@ function DailyReport({ user }) {
                   <div key={r._id||i} className="flex items-center justify-between text-xs py-1 border-b border-blue-100">
                     <span>Report {i+1} ? {r.workerEntries?.length||0} workers ? {CURRENCY}{fmt(r.totalPayments||0)} paid</span>
                     <div className="flex gap-1">
-                      <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                      <button onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                      <button type="button" onClick={(e)=>{e.stopPropagation(); openDailyReportView(r);}} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                      <button type="button" onClick={(e)=>{e.stopPropagation(); editDailyReport(r);}} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                      <button type="button" onClick={(e)=>{e.stopPropagation(); deleteDailyReport(r);}} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
                     </div>
                   </div>
                 ))}
@@ -1885,9 +1906,9 @@ function DailyReport({ user }) {
                         <div className="text-gray-400">By: {r.addedBy || "-"}</div>
                       </div>
                       <div className="flex flex-wrap justify-end gap-1 shrink-0">
-                        <button onClick={()=>setViewModal(r)} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
-                        <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                        <button onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                        <button type="button" onClick={(e)=>{e.stopPropagation(); openDailyReportView(r);}} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                        <button type="button" onClick={(e)=>{e.stopPropagation(); editDailyReport(r);}} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                        <button type="button" onClick={(e)=>{e.stopPropagation(); deleteDailyReport(r);}} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
                       </div>
                     </div>
                   </div>
