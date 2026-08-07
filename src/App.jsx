@@ -1746,6 +1746,7 @@ function DailyReport({ user }) {
       workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
+    setSelectedSite(null);
     setAddModal(true);
   };
 
@@ -1758,12 +1759,14 @@ function DailyReport({ user }) {
 
   const openDailyReportView = (report) => {
     if (!report?._id) return;
+    setSelectedSite(null);
     setAddModal(false);
     setViewModal(normalizeDailyReport(report));
   };
 
   const editDailyReport = (report) => {
     if (!report?._id) return;
+    setSelectedSite(null);
     setViewModal(null);
     setForm(normalizeDailyReport(report));
     setSiteSearch(report.siteName || "");
