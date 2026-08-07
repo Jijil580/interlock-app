@@ -1732,6 +1732,7 @@ function DailyReport({ user }) {
     if(item._id){
       setReports(p=>form._id ? p.map(r=>r._id===item._id?item:r) : [item,...p]);
       if (form.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
+      setSelectedDate(item.date || form.date || null);
       setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch("");
     }
     else if (item.message) window.alert(item.message);
@@ -1873,6 +1874,26 @@ function DailyReport({ user }) {
               <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{sr.length}</div><div className="text-xs text-gray-400">Reports</div></div>
               <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">Total Received</div></div>
             </div>
+            {sr.length>0&&(
+              <SectionBox title="Submitted Reports" icon="Report" color="blue">
+                {sr.map((r,i)=>(
+                  <div key={r._id||i} className="bg-white rounded-xl border border-blue-100 p-2 mb-2 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-black text-gray-800">{r.date} - Report {sr.length-i}</div>
+                        <div className="text-gray-500">{r.workerEntries?.length||0} workers | {r.completedToday||0} sqft | {CURRENCY}{fmt(r.totalPayments||0)} paid</div>
+                        <div className="text-gray-400">By: {r.addedBy || "-"}</div>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-1 shrink-0">
+                        <button onClick={()=>setViewModal(r)} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                        <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                        <button onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
             {allWorkers.length>0&&(
               <SectionBox title="Worker Summary" icon="👷" color="teal">
                 {Object.entries(allWorkers.reduce((acc,w)=>{
