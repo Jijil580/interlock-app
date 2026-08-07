@@ -97,6 +97,20 @@ async function api(method, path, body) {
   } catch { return {}; }
 }
 
+function requestAuditReason(action, label, user) {
+  const reason = window.prompt(`Enter reason to ${action} this ${label}:`);
+  if (!reason || !reason.trim()) {
+    window.alert("Reason is required.");
+    return null;
+  }
+  return {
+    auditReason: reason.trim(),
+    reasonType: action,
+    auditBy: user?.name || "",
+    auditRole: user?.role || "",
+  };
+}
+
 // ─── UI COMPONENTS ─────────────────────────────────────────────────────────────
 function Badge({ children, color = "gray" }) {
   const c = { green:"bg-green-100 text-green-700 border-green-200", red:"bg-red-100 text-red-700 border-red-200", yellow:"bg-yellow-100 text-yellow-700 border-yellow-200", blue:"bg-blue-100 text-blue-700 border-blue-200", gray:"bg-gray-100 text-gray-600 border-gray-200", orange:"bg-orange-100 text-orange-700 border-orange-200", purple:"bg-purple-100 text-purple-700 border-purple-200", teal:"bg-teal-100 text-teal-700 border-teal-200", amber:"bg-amber-100 text-amber-700 border-amber-200" };
@@ -1707,9 +1721,16 @@ function DailyReport({ user }) {
     // 3. Calculate site payment received & AUTO-UPDATE sitework
     const sitePayments = cleanPayments.filter(p=>p.type==="Site Payment Received");
     const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
-    const item = await api("POST","/dailyreport",{...form,payments:cleanPayments,totalPayments,totalReceived,addedBy:user.name});
+    let item;
+    if (form._id) {
+      const audit = requestAuditReason("edit", "daily report", user);
+      if (!audit) return;
+      item = await api("PUT", `/dailyreport/${form._id}`, {...form,payments:cleanPayments,totalPayments,totalReceived,addedBy:form.addedBy || user.name,...audit});
+    } else {
+      item = await api("POST","/dailyreport",{...form,payments:cleanPayments,totalPayments,totalReceived,addedBy:user.name});
+    }
     if(item._id){
-      setReports(p=>[item,...p]);
+      setReports(p=>form._id ? p.map(r=>r._id===item._id?item:r) : [item,...p]);
       if (form.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
       setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch("");
     }
@@ -1725,6 +1746,25 @@ function DailyReport({ user }) {
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
     setAddModal(true);
+  };
+
+  const editDailyReport = (report) => {
+    setViewModal(null);
+    setForm({ ...emptyForm, ...report, payments: (report.payments || []).filter(p => p.type !== "Worker Payment"), workerEntries: report.workerEntries || [] });
+    setSiteSearch(report.siteName || "");
+    setAddModal(true);
+  };
+
+  const deleteDailyReport = async (report) => {
+    if (!report?._id) return;
+    const audit = requestAuditReason("delete", "daily report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/dailyreport/${report._id}`, audit);
+    if (deleted?.ok) {
+      setReports(p => p.filter(r => r._id !== report._id));
+      setViewModal(null);
+      if (form.siteId || report.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
+    } else if (deleted?.message) window.alert(deleted.message);
   };
 
   if (loading) return <Loader />;
@@ -1785,7 +1825,10 @@ function DailyReport({ user }) {
                 {(dateReport.sourceReports||[]).map((r,i)=>(
                   <div key={r._id||i} className="flex items-center justify-between text-xs py-1 border-b border-blue-100">
                     <span>Report {i+1} ? {r.workerEntries?.length||0} workers ? {CURRENCY}{fmt(r.totalPayments||0)} paid</span>
-                    <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                    <div className="flex gap-1">
+                      <button onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                      <button onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                    </div>
                   </div>
                 ))}
               </SectionBox>
@@ -2099,7 +2142,7 @@ function DailyReport({ user }) {
       {viewModal&&(
         <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>editDailyReport(viewModal)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button></div>
+            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><div className="flex gap-2"><button onClick={()=>editDailyReport(viewModal)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button><button onClick={()=>deleteDailyReport(viewModal)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-red-100">Delete</button></div></div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
               <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(viewModal.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
@@ -3096,7 +3139,9 @@ function Purchases({ user }) {
   const deletePurchase = async (purchase) => {
     if (user.role !== "admin" || !purchase?._id) return;
     if (!window.confirm("Delete this purchase? Supplier pending will be updated.")) return;
-    const deleted = await api("DELETE", `/purchases/${purchase._id}`);
+    const audit = requestAuditReason("delete", "purchase report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/purchases/${purchase._id}`, audit);
     if (deleted?.ok) {
       setPurchases(p => p.filter(x => x._id !== purchase._id));
       setViewModal(null);
@@ -4250,7 +4295,9 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const deleteSale = async (sale) => {
     if (user.role !== "admin" || !sale?._id) return;
     if (!window.confirm("Delete this sale? Stock and customer pending will be updated.")) return;
-    const deleted = await api("DELETE", `/sales/${sale._id}`);
+    const audit = requestAuditReason("delete", "sale report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/sales/${sale._id}`, audit);
     if (deleted?.ok) {
       setSales(p => p.filter(x => x._id !== sale._id));
       api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
@@ -5286,13 +5333,16 @@ function AdminWorkerReport({ user }) {
 
     let saved;
     if (existingReport?._id) {
+      const audit = requestAuditReason("edit", "daily report", user);
+      if (!audit) return;
       const workerEntries = [...(existingReport.workerEntries || []), entry];
       const payments = (existingReport.payments || []).filter(p => p.type !== "Worker Payment");
       saved = await api("PUT", `/dailyreport/${existingReport._id}`, {
         ...existingReport,
         payments,
         workerEntries,
-        totalPayments: paymentsTotal(workerEntries, payments)
+        totalPayments: paymentsTotal(workerEntries, payments),
+        ...audit
       });
       if (saved?._id) setDailyReports(p => p.map(r => r._id === saved._id ? saved : r));
     } else {
@@ -6521,8 +6571,18 @@ function DriverReports({ user }) {
   useEffect(() => { load(); }, [user.role, user.name, filters.driver, filters.mobile, filters.datePreset, filters.customDate, filters.fromDate, filters.toDate, filters.category]);
 
   const saveEdit = async () => {
-    const updated = await api("PUT", `/driverreports/${editReport._id}`, editReport);
+    const audit = requestAuditReason("edit", "driver report", user);
+    if (!audit) return;
+    const updated = await api("PUT", `/driverreports/${editReport._id}`, { ...editReport, ...audit });
     if (updated?._id) { setEditReport(null); load(); }
+  };
+  const deleteDriverReport = async (report) => {
+    if (!report?._id) return;
+    const audit = requestAuditReason("delete", "driver report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/driverreports/${report._id}`, audit);
+    if (deleted?.ok) load();
+    else if (deleted?.message) window.alert(deleted.message);
   };
   const savePayment = async () => {
     const updated = await api("POST", "/driverreports/payment", {
@@ -6716,7 +6776,7 @@ function DriverReports({ user }) {
           )}
           {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
           <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWageEarned)}</b><br />Earned</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePaid)}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(r.driverWagePending)}</b><br />Pending</div></div>
-          {canOfficeEdit && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Wage</button></div>}
+          {(canOfficeEdit || user.role === "driver") && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Report</button><button onClick={() => deleteDriverReport(r)} className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold">Delete</button></div>}
         </div>;
         })}
       </div>
@@ -7068,8 +7128,67 @@ function SupervisorCashFlow({ user, allUsers }) {
   );
 }
 
+function ReportAuditLog({ user }) {
+  const [audits, setAudits] = useState([]);
+  const [filters, setFilters] = useState({ recordType: "", action: "", fromDate: "", toDate: "" });
+  const [loading, setLoading] = useState(true);
+  const load = () => {
+    const params = new URLSearchParams({ role: user.role });
+    if (filters.recordType) params.set("recordType", filters.recordType);
+    if (filters.action) params.set("action", filters.action);
+    if (filters.fromDate) params.set("fromDate", filters.fromDate);
+    if (filters.toDate) params.set("toDate", filters.toDate);
+    setLoading(true);
+    api("GET", `/report-audits?${params.toString()}`).then(data => {
+      setAudits(Array.isArray(data) ? data : []);
+      setLoading(false);
+    });
+  };
+  useEffect(load, [filters.recordType, filters.action, filters.fromDate, filters.toDate]);
+  const dateTime = value => value ? new Date(value).toLocaleString() : "-";
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-black text-gray-900">Report Edit/Delete Audit</h2>
+        <div className="text-xs text-gray-400">Admin view of report changes with submitted reasons</div>
+      </div>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Select label="Report Type" value={filters.recordType} options={["", "Supervisor Daily Report", "Driver Report", "Sale", "Purchase"]} onChange={e=>setFilters({...filters,recordType:e.target.value})} />
+        <Select label="Action" value={filters.action} options={["", "edit", "delete"]} onChange={e=>setFilters({...filters,action:e.target.value})} />
+        <Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})} />
+        <Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})} />
+      </div>
+      {loading ? <Loader /> : audits.length === 0 ? <EmptyState icon="AUD" text="No report edit/delete audit records" /> : (
+        <div className="space-y-3">
+          {audits.map(a => (
+            <div key={a._id} className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <div>
+                  <div className="font-black text-gray-900">{a.title || a.recordType}</div>
+                  <div className="text-xs text-gray-400">{a.recordType} | Record Date: {a.recordDate || "-"}</div>
+                </div>
+                <Badge color={a.action === "delete" ? "red" : "blue"}>{String(a.action || "").toUpperCase()}</Badge>
+              </div>
+              <div className="grid sm:grid-cols-3 gap-2 text-xs">
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">By</div><div className="font-bold">{a.performedBy || "-"} ({a.performedRole || "-"})</div></div>
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">Time</div><div className="font-bold">{dateTime(a.createdAt)}</div></div>
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">Reason Type</div><div className="font-bold">{a.reasonType || a.action || "-"}</div></div>
+              </div>
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-900">
+                <div className="text-xs font-black text-amber-700 uppercase mb-1">Reason</div>
+                {a.reason || "-"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const NAV = {
   admin: [
+    { id:"reportaudit", label:"Report Audit", icon:"AUD" },
     { id:"supervisorcashflow", label:"Sup. Cashflow", icon:"SC" },
     { id:"cashflow", label:"Daily Cash Flow", icon:"₹" },
     { id:"officedaily", label:"Office Daily Report", icon:"DR" },
@@ -7256,6 +7375,7 @@ export default function App() {
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
+      case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
       case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
