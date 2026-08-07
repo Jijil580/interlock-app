@@ -3050,6 +3050,7 @@ function Purchases({ user }) {
   const [supplierMaster, setSupplierMaster] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [viewModal, setViewModal] = useState(null);
   const [supplierMode, setSupplierMode] = useState("existing");
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -3122,14 +3123,18 @@ function Purchases({ user }) {
     if (!form.supplierName || !form.itemName) return;
     const total = calcTotal();
     const amountPaid = +(form.amountPaid || 0);
-    const item = await api("POST", "/purchases", {
+    const payload = {
       ...form, totalAmount: total, amountPaid, amountPending: calcPending(),
       supplierMobile: (form.supplierMobile || form.supplierPhone || "").replace(/\D/g, "").slice(-10),
       addedBy: user.name, saveToSupplierMaster: supplierMode === "new" ? saveToMaster : true,
-    });
+    };
+    const audit = editItem ? requestAuditReason("edit", "purchase report", user) : null;
+    if (editItem && !audit) return;
+    const item = await api(editItem ? "PUT" : "POST", editItem ? `/purchases/${editItem._id}` : "/purchases", editItem ? { ...payload, ...audit } : payload);
     if (item._id) {
-      setPurchases(p => [item, ...p]);
+      setPurchases(p => editItem ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
       setModal(false);
+      setEditItem(null);
       setForm(emptyForm);
       setSelectedSupplierId("");
       api("GET", "/suppliers").then(s => setSupplierMaster(Array.isArray(s) ? s : []));
@@ -3137,7 +3142,7 @@ function Purchases({ user }) {
   };
 
   const deletePurchase = async (purchase) => {
-    if (user.role !== "admin" || !purchase?._id) return;
+    if (!isAdminLike(user.role) || !purchase?._id) return;
     if (!window.confirm("Delete this purchase? Supplier pending will be updated.")) return;
     const audit = requestAuditReason("delete", "purchase report", user);
     if (!audit) return;
@@ -3154,13 +3159,19 @@ function Purchases({ user }) {
 
   const filtered = filterPurchases();
   const canAdd = isAdminLike(user.role);
+  const openEditPurchase = (purchase) => {
+    setEditItem(purchase);
+    setForm({ ...emptyForm, ...purchase, supplierPhone: purchase.supplierPhone || purchase.supplierMobile || "" });
+    setSupplierMode("new");
+    setModal(true);
+  };
 
   if (loading) return <Loader />;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {canAdd && <button onClick={() => { setForm(emptyForm); setSupplierMode("existing"); setSaveToMaster(true); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {canAdd && <button onClick={() => { setEditItem(null); setForm(emptyForm); setSupplierMode("existing"); setSaveToMaster(true); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm p-3">
@@ -3272,12 +3283,17 @@ function Purchases({ user }) {
             {(p.supplierMobile || p.supplierPhone) && (
               <button onClick={() => openSupplierLedger(p.supplierMobile || p.supplierPhone)} className="mt-2 text-xs text-teal-600 font-bold hover:underline">View Supplier Ledger →</button>
             )}
-            {user.role === "admin" && <button onClick={() => deletePurchase(p)} className="mt-2 ml-3 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>}
+            {isAdminLike(user.role) && (
+              <>
+                <button onClick={() => openEditPurchase(p)} className="mt-2 ml-3 text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Edit</button>
+                <button onClick={() => deletePurchase(p)} className="mt-2 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>
+              </>
+            )}
           </div>
         ))}
       </div>
 
-      {modal && <Modal title="Add Purchase" onClose={() => setModal(false)} wide>
+      {modal && <Modal title={editItem ? "Edit Purchase" : "Add Purchase"} onClose={() => { setModal(false); setEditItem(null); setForm(emptyForm); }} wide>
         <div className="space-y-3">
           <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
           <SectionBox title="Supplier" icon="🏪" color="blue">
@@ -3329,7 +3345,7 @@ function Purchases({ user }) {
             setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
           }} />
           <Textarea label="Note" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
-          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Submit</button>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">{editItem ? "Save Purchase" : "Submit"}</button>
         </div>
       </Modal>}
       {viewModal && <Modal title="Purchase Details" onClose={() => setViewModal(null)}>
@@ -4125,6 +4141,7 @@ function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, cus
 // ─── SALES ────────────────────────────────────────────────────────────────────
 function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [modal, setModal] = useState(false);
+  const [editSale, setEditSale] = useState(null);
   const [interlockTypes, setInterlockTypes] = useState([]);
   const [customerMaster, setCustomerMaster] = useState([]);
   const [customerMode, setCustomerMode] = useState("existing");
@@ -4271,17 +4288,21 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     if (!form.product) { setSaveError("Select a product"); return; }
     const total = calcTotal();
     const amountPaid = +(form.amountPaid || 0);
-    const item = await api("POST", "/sales", {
+    const payload = {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
       taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: hasSqftSale() ? calcSqftQty() : 0, cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
       cgstAmount: calcCgst(), sgstAmount: calcSgst(),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
       saveToCustomerMaster: customerMode === "new" ? saveToMaster : true,
-    });
+    };
+    const audit = editSale ? requestAuditReason("edit", "sale report", user) : null;
+    if (editSale && !audit) return;
+    const item = await api(editSale ? "PUT" : "POST", editSale ? `/sales/${editSale._id}` : "/sales", editSale ? { ...payload, ...audit } : payload);
     if (item._id) {
-      setSales(p => [item, ...p]);
+      setSales(p => editSale ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
       setModal(false);
+      setEditSale(null);
       setForm(emptyForm);
       setCustomerPreview(null);
       setSelectedCustomerId("");
@@ -4293,7 +4314,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   };
 
   const deleteSale = async (sale) => {
-    if (user.role !== "admin" || !sale?._id) return;
+    if (!isAdminLike(user.role) || !sale?._id) return;
     if (!window.confirm("Delete this sale? Stock and customer pending will be updated.")) return;
     const audit = requestAuditReason("delete", "sale report", user);
     if (!audit) return;
@@ -4306,6 +4327,29 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     } else if (deleted?.message) {
       window.alert(deleted.message);
     }
+  };
+
+  const openEditSale = (sale) => {
+    setEditSale(sale);
+    setForm({
+      ...emptyForm,
+      ...sale,
+      date: sale.date || today(),
+      quantity: String(sale.quantity ?? ""),
+      sqftPerPiece: String(sale.sqftPerPiece ?? ""),
+      sqftQty: String(sale.sqftQty ?? ""),
+      price: String(sale.price ?? ""),
+      discount: String(sale.discount ?? ""),
+      amountPaid: String(sale.amountPaid ?? ""),
+      cgstPercent: String(sale.cgstPercent ?? ""),
+      sgstPercent: String(sale.sgstPercent ?? ""),
+    });
+    setCustomerMode("new");
+    setSelectedCustomerId("");
+    setCustomerPreview(null);
+    setSaveToMaster(true);
+    setSaveError("");
+    setModal(true);
   };
 
   const openPrintBill = (sale) => {
@@ -4485,7 +4529,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
-        <button onClick={() => { setModal(true); setSaveError(""); setCustomerPreview(null); setCustomerMode("existing"); setSaveToMaster(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
+        <button onClick={() => { setEditSale(null); setForm(emptyForm); setSelectedCustomerId(""); setModal(true); setSaveError(""); setCustomerPreview(null); setCustomerMode("existing"); setSaveToMaster(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
       </div>
 
       {/* Quick Search */}
@@ -4664,7 +4708,12 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
                 <button onClick={() => openLedger(s.mobileNumber)} className="text-xs text-amber-600 font-bold hover:underline">View Customer Ledger</button>
               )}
               <button onClick={() => openPrintBill(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Print Bill</button>
-              {user.role === "admin" && <button onClick={() => deleteSale(s)} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>}
+              {isAdminLike(user.role) && (
+                <>
+                  <button onClick={() => openEditSale(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Edit</button>
+                  <button onClick={() => deleteSale(s)} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>
+                </>
+              )}
             </div>
           </div>
         ))}
@@ -4672,7 +4721,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
 
       {/* Record Sale Modal */}
       {modal && (
-        <Modal title="Record Sale" onClose={() => { setModal(false); setSaveError(""); setCustomerPreview(null); }} wide>
+        <Modal title={editSale ? "Edit Sale" : "Record Sale"} onClose={() => { setModal(false); setEditSale(null); setSaveError(""); setCustomerPreview(null); }} wide>
           <div className="space-y-3">
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
               <div className="text-xs font-bold text-blue-700">Customer Details</div>
@@ -4835,7 +4884,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
               <Textarea label="Terms & Conditions" value={form.terms || ""} onChange={e => setForm({ ...form, terms: e.target.value })} placeholder="Terms & conditions" />
             </div>
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Record Sale</button>
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{editSale ? "Save Sale" : "Record Sale"}</button>
           </div>
         </Modal>
       )}
@@ -6780,7 +6829,7 @@ function DriverReports({ user }) {
         </div>;
         })}
       </div>
-      {editReport && <Modal title="Edit Driver Wage" onClose={() => setEditReport(null)}>
+      {editReport && <Modal title="Edit Driver Report" onClose={() => setEditReport(null)}>
         <div className="space-y-3">
           <Input label="Driver" value={editReport.driverName} readOnly />
           <Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} />
@@ -6808,7 +6857,7 @@ function DriverReports({ user }) {
             </div>
           </SectionBox>
           <Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} />
-          <button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Wage</button>
+          <button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Report</button>
         </div>
       </Modal>}
       {payDriver && <Modal title="Driver Total Payment" onClose={() => setPayDriver(null)}>
