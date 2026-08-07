@@ -5369,6 +5369,7 @@ function AdminWorkerReport({ user }) {
       workerName: workerPayModal.name,
       amount,
       date: workerPayForm.date,
+      mode: workerPayForm.mode,
       note: workerPayForm.note || `${tab === "site" ? "Site" : "Production"} worker wage payment`,
       addedBy: user.name,
       source
@@ -6497,7 +6498,7 @@ function QuotationModule({ user }) {
 
 function DriverSubmitReport({ user }) {
   const emptyExpense = { category: "Diesel", amount: "", liters: "", note: "" };
-  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", expenses: [], vehicleKm: { startKm: "", endKm: "", totalKm: "", note: "" }, driverChargeType: "batha", driverCharge: "", remarks: "" };
+  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", loadAmount: "", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", expenses: [], vehicleKm: { startKm: "", endKm: "", totalKm: "", note: "" }, driverChargeType: "batha", driverCharge: "", remarks: "" };
   const [form, setForm] = useState(emptyForm);
   const [masters, setMasters] = useState({ interlock: [], hollowbricks: [], materials: [] });
   const [suppliers, setSuppliers] = useState([]);
@@ -6535,11 +6536,11 @@ function DriverSubmitReport({ user }) {
       endKm: +(form.vehicleKm?.endKm || 0),
       totalKm: +(form.vehicleKm?.totalKm || 0) || Math.max(0, +(form.vehicleKm?.endKm || 0) - +(form.vehicleKm?.startKm || 0)),
     };
-    const hasTrip = form.itemName || form.loadingFrom || form.unloadedLocation || +(form.quantity || 0) > 0 || +(form.driverCharge || 0) > 0 || +(form.cashGivenToSupplier || 0) > 0 || +(form.supplierPendingCash || 0) > 0;
+    const hasTrip = form.itemName || form.loadingFrom || form.unloadedLocation || +(form.quantity || 0) > 0 || +(form.loadAmount || 0) > 0 || +(form.driverCharge || 0) > 0 || +(form.cashGivenToSupplier || 0) > 0 || +(form.supplierPendingCash || 0) > 0;
     const hasExpense = expenses.length > 0;
     const hasKm = vehicleKm.startKm > 0 || vehicleKm.endKm > 0 || vehicleKm.totalKm > 0 || vehicleKm.note;
     if (!hasTrip && !hasExpense && !hasKm) return setMessage("Add trip details, driver expense, or vehicle KM before submitting");
-    const saved = await api("POST", "/driverreports", { ...form, expenses, vehicleKm, quantity: +(form.quantity || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
+    const saved = await api("POST", "/driverreports", { ...form, expenses, vehicleKm, quantity: +(form.quantity || 0), loadAmount: +(form.loadAmount || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
     if (saved?._id) {
       setMessage("Report submitted successfully");
       setForm({ ...emptyForm, date: today() });
@@ -6566,6 +6567,11 @@ function DriverSubmitReport({ user }) {
           <Input label="Item Details" value={form.itemDetails || ""} onChange={e => setForm({ ...form, itemDetails: e.target.value })} placeholder="Color, size, remarks" />
           <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
           <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} />
+          <Input label={`Load / Material Amount (${CURRENCY})`} type="number" value={form.loadAmount} onChange={e => {
+            const loadAmount = +(e.target.value || 0);
+            const cashGiven = +(form.cashGivenToSupplier || 0);
+            setForm({ ...form, loadAmount: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : form.supplierPendingCash });
+          }} />
         </div>
       </SectionBox>
       {form.category === "Raw Material" && <SectionBox title="Supplier Details" icon="SP" color="teal">
@@ -6576,7 +6582,11 @@ function DriverSubmitReport({ user }) {
           <Input label="Supplier Mobile" value={form.supplierMobile} onChange={e => setForm({ ...form, supplierMobile: e.target.value })} />
           <Textarea label="Supplier Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
           <label className="flex items-center gap-2 text-xs font-bold text-slate-600 pt-7"><input type="checkbox" checked={form.saveToSupplierMaster} onChange={e => setForm({ ...form, saveToSupplierMaster: e.target.checked })} /> Save supplier to master</label>
-          <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={form.cashGivenToSupplier} onChange={e => setForm({ ...form, cashGivenToSupplier: e.target.value })} />
+          <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={form.cashGivenToSupplier} onChange={e => {
+            const cashGiven = +(e.target.value || 0);
+            const loadAmount = +(form.loadAmount || 0);
+            setForm({ ...form, cashGivenToSupplier: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : form.supplierPendingCash });
+          }} />
           <Input label={`Pending Cash (${CURRENCY})`} type="number" value={form.supplierPendingCash} onChange={e => setForm({ ...form, supplierPendingCash: e.target.value })} />
         </div>
       </SectionBox>}
@@ -6712,7 +6722,7 @@ function DriverReports({ user }) {
       return `<tr>
         <td>${i + 1}</td><td>${escapePrint(r.date || "")}</td><td>${escapePrint(r.driverName || "")}</td><td>${escapePrint([r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / "))}</td>
         <td>${escapePrint([r.category, r.itemName].filter(Boolean).join(" / ") || "-")}</td><td>${escapePrint([r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-")}</td>
-        <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
+        <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}<br>${+(r.loadAmount || 0) > 0 ? CURRENCY + fmt(r.loadAmount) : ""}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
         <td class="right">${CURRENCY}${fmt(r.driverWageEarned || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePaid || 0)}</td><td class="right">${CURRENCY}${fmt(r.driverWagePending || 0)}</td>
       </tr>`;
     }).join("");
@@ -6759,7 +6769,7 @@ function DriverReports({ user }) {
         <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
         <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
         <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
-        <StatCard label="Expenses" value={`${CURRENCY}${fmt(summary.totalExpenses)}`} icon="EX" color="amber" />
+        <StatCard label="Expenses" value={`${CURRENCY}${fmt(summary.totalExpenses)}`} icon="EX" color="amber" sub={+(summary.totalLoadAmount || 0) > 0 ? `Load ${CURRENCY}${fmt(summary.totalLoadAmount)}` : ""} />
         <StatCard label="Fuel Liters" value={fmt(summary.totalLiters || 0)} icon="L" color="blue" />
         <StatCard label="KM Run" value={fmt(summary.totalKm || 0)} icon="KM" color="purple" />
       </div>
@@ -6823,7 +6833,7 @@ function DriverReports({ user }) {
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
             <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Material / Item</div><div className="font-bold text-gray-900">{r.itemName || "-"}</div>{r.itemDetails && <div className="text-gray-500 mt-0.5">{r.itemDetails}</div>}</div>
-            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Quantity</div><div className="font-bold text-gray-900">{fmt(r.quantity || 0)} {r.unit || "piece"}</div></div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Quantity</div><div className="font-bold text-gray-900">{fmt(r.quantity || 0)} {r.unit || "piece"}</div>{+(r.loadAmount || 0) > 0 && <div className="text-green-700 font-black mt-0.5">Load Amount: {CURRENCY}{fmt(r.loadAmount)}</div>}</div>
             <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Vehicle</div><div className="font-bold text-gray-900">{r.vehicleName || "-"} {r.vehicleNumber ? `(${r.vehicleNumber})` : ""}</div></div>
             <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Charge Type</div><div className="font-bold text-gray-900 capitalize">{r.driverChargeType || "-"}</div><div className="text-gray-500">{CURRENCY}{fmt(r.driverCharge || 0)}</div></div>
           </div>
@@ -6840,8 +6850,9 @@ function DriverReports({ user }) {
             </div>
           )}
           {r.category === "Raw Material" && (
-            <div className="grid sm:grid-cols-3 gap-2 text-xs">
+            <div className="grid sm:grid-cols-4 gap-2 text-xs">
               <div className="bg-teal-50 rounded-lg p-2"><div className="text-teal-500">Supplier</div><div className="font-bold text-teal-900">{r.supplierName || "-"}</div>{r.supplierMobile && <div className="text-teal-700">{r.supplierMobile}</div>}</div>
+              <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="text-blue-600">Material Amount</div><div className="font-black text-blue-700">{CURRENCY}{fmt(r.loadAmount || ((+(r.cashGivenToSupplier)||0)+ (+(r.supplierPendingCash)||0)))}</div></div>
               <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-600">Cash Given to Supplier</div><div className="font-black text-green-700">{CURRENCY}{fmt(r.cashGivenToSupplier || 0)}</div></div>
               <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
             </div>
@@ -6877,6 +6888,24 @@ function DriverReports({ user }) {
       {editReport && <Modal title="Edit Driver Report" onClose={() => setEditReport(null)}>
         <div className="space-y-3">
           <Input label="Driver" value={editReport.driverName} readOnly />
+          <SectionBox title="Load Details" icon="LD" color="amber">
+            <div className="grid sm:grid-cols-2 gap-2">
+              <Input label="Item Name" value={editReport.itemName || ""} onChange={e => setEditReport({ ...editReport, itemName: e.target.value })} />
+              <Input label="Quantity" type="number" value={editReport.quantity || ""} onChange={e => setEditReport({ ...editReport, quantity: e.target.value })} />
+              <Input label="Unit" value={editReport.unit || ""} onChange={e => setEditReport({ ...editReport, unit: e.target.value })} />
+              <Input label={`Load / Material Amount (${CURRENCY})`} type="number" value={editReport.loadAmount || ""} onChange={e => {
+                const loadAmount = +(e.target.value || 0);
+                const cashGiven = +(editReport.cashGivenToSupplier || 0);
+                setEditReport({ ...editReport, loadAmount: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : editReport.supplierPendingCash });
+              }} />
+              <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={editReport.cashGivenToSupplier || ""} onChange={e => {
+                const cashGiven = +(e.target.value || 0);
+                const loadAmount = +(editReport.loadAmount || 0);
+                setEditReport({ ...editReport, cashGivenToSupplier: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : editReport.supplierPendingCash });
+              }} />
+              <Input label={`Supplier Pending (${CURRENCY})`} type="number" value={editReport.supplierPendingCash || ""} onChange={e => setEditReport({ ...editReport, supplierPendingCash: e.target.value })} />
+            </div>
+          </SectionBox>
           <Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} />
           <Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} />
           <SectionBox title="Vehicle KM Run" icon="KM" color="blue">
