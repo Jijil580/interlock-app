@@ -1625,13 +1625,13 @@ function DailyReport({ user }) {
     materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"",
     extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"",
     complaints:"", actionTaken:"",
-    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks, workCategory, workArea, unit, rate, paymentMode}]
+    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks, workCategory, workArea, unit, rate, loadingCharge, unloadingCharge, paymentMode}]
     payments:[], // [{type, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
   };
   const [form, setForm] = useState(emptyForm);
   const [workerEntry, setWorkerEntry] = useState({
     workerName:"", attendance:"present", dutyArea:"", workDone:"",
-    workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+    workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
     paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
   });
   const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""};
@@ -1667,6 +1667,8 @@ function DailyReport({ user }) {
           ...existing,
           workArea: String(existing.workArea || ""),
           rate: String(existing.rate || ""),
+          loadingCharge: String(existing.loadingCharge || ""),
+          unloadingCharge: String(existing.unloadingCharge || ""),
           salary: String(existing.salary || existing.amountEarned || ""),
           paymentGiven: String(existing.paymentGiven || ""),
           pending: String(existing.pending || "")
@@ -1677,7 +1679,9 @@ function DailyReport({ user }) {
     }
     const area = parseFloat(workerEntry.workArea) || 0;
     const rate = parseFloat(workerEntry.rate) || 0;
-    const totalAmount = area * rate;
+    const loadingCharge = parseFloat(workerEntry.loadingCharge) || 0;
+    const unloadingCharge = parseFloat(workerEntry.unloadingCharge) || 0;
+    const totalAmount = (area * rate) + loadingCharge + unloadingCharge;
     const paid = parseFloat(workerEntry.paymentGiven) || 0;
     const pending = Math.max(0, totalAmount - paid);
 
@@ -1692,14 +1696,16 @@ function DailyReport({ user }) {
           paymentGiven: paid,
           pending,
           workArea: area,
-          rate
+          rate,
+          loadingCharge,
+          unloadingCharge
         }
       ]
     }));
 
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
-      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
   };
@@ -1743,7 +1749,7 @@ function DailyReport({ user }) {
     setSiteSearch(site.customerName);
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
-      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
     setSelectedSite(null);
@@ -1773,7 +1779,7 @@ function DailyReport({ user }) {
     setPayForm(emptyPayForm);
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
-      workCategory:"", workArea:"", unit:"Sqft", rate:"", salary:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
     setAddModal(true);
@@ -2047,37 +2053,51 @@ function DailyReport({ user }) {
                 <div className="grid grid-cols-3 gap-2">
                   <Input label="Work Area" type="number" value={workerEntry.workArea} onChange={e=>{
                     const area = e.target.value;
-                    const tot = (parseFloat(area) || 0) * (parseFloat(workerEntry.rate) || 0);
+                    const tot = ((parseFloat(area) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
                     const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
                     setWorkerEntry({...workerEntry,workArea:area,salary:String(tot),pending:String(pend)});
                   }} placeholder="0" />
                   <Select label="Unit" value={workerEntry.unit} options={["Sqft","Sqm","Piece","Meter"]} onChange={e=>setWorkerEntry({...workerEntry,unit:e.target.value})} />
                   <Input label="Rate" type="number" value={workerEntry.rate} onChange={e=>{
                     const rate = e.target.value;
-                    const tot = (parseFloat(workerEntry.workArea) || 0) * (parseFloat(rate) || 0);
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
                     const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
                     setWorkerEntry({...workerEntry,rate:rate,salary:String(tot),pending:String(pend)});
                   }} placeholder="₹" />
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label={`Loading Charge (${CURRENCY})`} type="number" value={workerEntry.loadingCharge} onChange={e=>{
+                    const loadingCharge = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,loadingCharge,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                  <Input label={`Unloading Charge (${CURRENCY})`} type="number" value={workerEntry.unloadingCharge} onChange={e=>{
+                    const unloadingCharge = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,unloadingCharge,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                </div>
 
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-center text-sm font-bold text-amber-800">
-                  Total Amount: {CURRENCY}{fmt((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0))}
+                  Total Amount: {CURRENCY}{fmt(((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0))}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Payment Given Today" type="number" value={workerEntry.paymentGiven} onChange={e=>{
                     const paid = e.target.value;
-                    const tot = (parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0);
+                    const tot = ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0);
                     const pend = Math.max(0, tot - (parseFloat(paid) || 0));
                     setWorkerEntry({...workerEntry,paymentGiven:paid,pending:String(pend)});
                   }} placeholder="0" />
                   <Select label="Payment Mode" value={workerEntry.paymentMode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setWorkerEntry({...workerEntry,paymentMode:e.target.value})} />
                 </div>
 
-                {Math.max(0, ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) - (parseFloat(workerEntry.paymentGiven)||0)) > 0 && (
+                {Math.max(0, (((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0)) - (parseFloat(workerEntry.paymentGiven)||0)) > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-2 flex justify-between text-xs font-bold text-red-700">
                     <span>Pending Amount:</span>
-                    <span>{CURRENCY}{fmt(Math.max(0, ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) - (parseFloat(workerEntry.paymentGiven)||0)))}</span>
+                    <span>{CURRENCY}{fmt(Math.max(0, (((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0)) - (parseFloat(workerEntry.paymentGiven)||0)))}</span>
                   </div>
                 )}
 
@@ -2097,6 +2117,8 @@ function DailyReport({ user }) {
                     <div>Category: <span className="font-semibold text-gray-900">{w.workCategory || "—"}</span></div>
                     <div>Area: <span className="font-semibold text-gray-900">{w.workArea} {w.unit}</span></div>
                     <div>Rate: <span className="font-semibold text-gray-900">{CURRENCY}{w.rate}</span></div>
+                    <div>Loading: <span className="font-semibold text-gray-900">{CURRENCY}{w.loadingCharge || 0}</span></div>
+                    <div>Unloading: <span className="font-semibold text-gray-900">{CURRENCY}{w.unloadingCharge || 0}</span></div>
                     <div>Earned: <span className="font-semibold text-green-700">{CURRENCY}{w.salary}</span></div>
                     <div>Paid: <span className="font-semibold text-blue-700">{CURRENCY}{w.paymentGiven || 0} ({w.paymentMode})</span></div>
                     <div>Pending: <span className="font-semibold text-red-600">{CURRENCY}{w.pending}</span></div>
@@ -3432,7 +3454,7 @@ function ProductionSite({ user, setStock }) {
     date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
     productType: "interlock", category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", unitType: "piece", producedQty: "", unit: "piece",
     productionUnit: "unit", boxQty: "", boxCount: "",
-    productionRate: "", paymentGiven: "", remarks: "",
+    productionRate: "", loadingCharge: "", unloadingCharge: "", paymentGiven: "", remarks: "",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -3468,7 +3490,7 @@ function ProductionSite({ user, setStock }) {
   const isHollowProduction = () => form.productType === "hollowbrick";
   const calcProducedQty = () => isHollowProduction() && form.productionUnit === "box" ? ((+(form.boxQty || 0)) * (+(form.boxCount || 0))) : +(form.producedQty || 0);
   const calcRateQty = () => isHollowProduction() && form.productionUnit === "box" ? +(form.boxQty || 0) : calcProducedQty();
-  const calcTotal = () => calcRateQty() * +(form.productionRate || 0);
+  const calcTotal = () => (calcRateQty() * +(form.productionRate || 0)) + +(form.loadingCharge || 0) + +(form.unloadingCharge || 0);
   const calcProductionSqft = () => isHollowProduction() ? 0 : (+(form.sqftQty || 0) || ((+(form.producedQty || 0)) * (+(form.sqftPerPiece || 0))));
   const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
   const productionQtyText = (entry) => entry?.productType === "hollowbrick" && entry?.productionUnit === "box"
@@ -3517,6 +3539,8 @@ function ProductionSite({ user, setStock }) {
         sqftPerPiece: +(form.sqftPerPiece || 0),
         sqftQty: isHollowProduction() ? 0 : calcProductionSqft(),
         productionRate: +form.productionRate,
+        loadingCharge: +(form.loadingCharge || 0),
+        unloadingCharge: +(form.unloadingCharge || 0),
         paymentGiven: +(form.paymentGiven || 0),
         addedBy: user.name,
       });
@@ -3601,6 +3625,7 @@ function ProductionSite({ user, setStock }) {
                     <div className="font-black">{e.workerName} · {e.itemName}</div>
                     <div className="text-xs text-gray-400">📅 {e.date}{e.shift ? ` · ${e.shift}` : ""}{e.color ? ` · ${e.color}` : ""}</div>
                     <div className="text-sm text-gray-600">{productionQtyText(e)} x {productionRateLabel(e)}</div>
+                    {((+(e.loadingCharge)||0) > 0 || (+(e.unloadingCharge)||0) > 0) && <div className="text-xs text-gray-500">Loading {CURRENCY}{fmt(e.loadingCharge || 0)} | Unloading {CURRENCY}{fmt(e.unloadingCharge || 0)}</div>}
                   </div>
                   <div className="text-right">
                     <div className="font-black text-green-700">{CURRENCY}{fmt(+(e.totalAmount) || 0)}</div>
@@ -3777,11 +3802,16 @@ function ProductionSite({ user, setStock }) {
                 }} placeholder="0" />}
                 {!isHollowProduction()&&<Input label="Total Sqft" type="number" value={calcProductionSqft()} readOnly />}
                 <Input label={`Rate per ${isHollowProduction() && form.productionUnit === "box" ? "Box" : "Unit"} (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder={isHollowProduction() && form.productionUnit === "box" ? "Rate per box" : "Rate per unit"} />
+                <Input label={`Loading Charge (${CURRENCY})`} type="number" step="any" value={form.loadingCharge} onChange={e => setForm({ ...form, loadingCharge: e.target.value })} placeholder="0" />
+                <Input label={`Unloading Charge (${CURRENCY})`} type="number" step="any" value={form.unloadingCharge} onChange={e => setForm({ ...form, unloadingCharge: e.target.value })} placeholder="0" />
                 <Input label={`Payment Given (${CURRENCY})`} type="number" step="any" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
               </div>
               {+(form.producedQty) > 0 && +(form.productionRate) > 0 && (
                 <div className="bg-gray-50 rounded-xl p-2 text-xs text-gray-600 text-center">
-                  {isHollowProduction() && form.productionUnit === "box" ? `${fmt(form.boxQty)} box x ${fmt(form.boxCount)} = ${fmt(calcProducedQty())} pieces` : `${form.producedQty} ${form.unit} / ${fmt(calcProductionSqft())} sqft`} x {CURRENCY}{form.productionRate} = <b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
+                  {isHollowProduction() && form.productionUnit === "box" ? `${fmt(form.boxQty)} box x ${fmt(form.boxCount)} = ${fmt(calcProducedQty())} pieces` : `${form.producedQty} ${form.unit} / ${fmt(calcProductionSqft())} sqft`} x {CURRENCY}{form.productionRate}
+                  {+(form.loadingCharge || 0) > 0 ? ` + Loading ${CURRENCY}${fmt(form.loadingCharge)}` : ""}
+                  {+(form.unloadingCharge || 0) > 0 ? ` + Unloading ${CURRENCY}${fmt(form.unloadingCharge)}` : ""}
+                  {" = "}<b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -6138,7 +6168,7 @@ function SupervisorSiteReport({ user }) {
 
 function OfficeDailyReport({ user }) {
   const [selectedDate, setSelectedDate] = useState(today());
-  const emptyOfficeReport = { totals: {}, sales: [], purchases: [], driverReports: [], driverExpenses: [], productionEntries: [], productionItemSummary: [], productionPayments: [] };
+  const emptyOfficeReport = { totals: {}, sales: [], purchases: [], supervisorCashReceipts: [], driverReports: [], driverExpenses: [], productionEntries: [], productionItemSummary: [], productionPayments: [] };
   const [report, setReport] = useState(emptyOfficeReport);
   const [loading, setLoading] = useState(true);
 
@@ -6184,6 +6214,7 @@ function OfficeDailyReport({ user }) {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} bills`} />
             <StatCard label="Cash Received" value={money(total.cashReceived)} icon="R" color="green" sub={`Pending ${money(total.salesPending)}`} />
+            <StatCard label="Supervisor Cash" value={money(total.supervisorCashReceived)} icon="SC" color="teal" sub={`${(report.supervisorCashReceipts||[]).length} receipts`} />
             <StatCard label="Purchase Paid" value={money(total.purchasePaid)} icon="P" color="amber" sub={`Total ${money(total.purchaseAmount)}`} />
             <StatCard label="Production Paid" value={money(total.productionPayments)} icon="W" color="purple" sub={`Pending ${money(total.productionPending)}`} />
             <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft || 0)} sqft | ${total.productionCount||0} entries`} />
@@ -6194,6 +6225,25 @@ function OfficeDailyReport({ user }) {
             <StatCard label="Total Cash Paid" value={money(total.cashPaid)} icon="-" color="red" />
             <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
           </div>
+
+          <SectionBox title="Cash Received From Supervisors" icon="SC" color="teal">
+            {(report.supervisorCashReceipts||[]).length===0 ? <div className="text-xs text-gray-400">No supervisor cash received for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Supervisor</th><th>Received By</th><th>Mode</th><th>Note</th><th className="text-right">Amount</th></tr></thead>
+                  <tbody>{report.supervisorCashReceipts.map(r=>(
+                    <tr key={r._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{r.supervisorName||"-"}</td>
+                      <td>{r.receivedBy||"-"}</td>
+                      <td>{r.paymentMode||"-"}</td>
+                      <td>{r.note||"-"}</td>
+                      <td className="text-right text-green-700 font-bold">{money(r.amount)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
 
           <SectionBox title="Production Item-wise Total" icon="P" color="teal">
             {(report.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production for this day</div> : (
@@ -7130,6 +7180,9 @@ function SupervisorCashFlow({ user, allUsers }) {
   const [toDate, setToDate] = useState(today());
   const [data, setData] = useState({ history: [], total: {} });
   const [loading, setLoading] = useState(true);
+  const [receiptForm, setReceiptForm] = useState({ date: today(), supervisorName: "", amount: "", paymentMode: "Cash", note: "" });
+  const [receiptMessage, setReceiptMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   const money = value => `${CURRENCY}${fmt(value)}`;
   const dateLabel = value => {
@@ -7168,7 +7221,25 @@ function SupervisorCashFlow({ user, allUsers }) {
       setLoading(false);
     });
     return () => { active = false; };
-  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate]);
+  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate, reloadKey]);
+
+  const saveSupervisorReceipt = async () => {
+    setReceiptMessage("");
+    const supervisorName = receiptForm.supervisorName || selectedSupervisor;
+    if (!supervisorName || +(receiptForm.amount || 0) <= 0) return setReceiptMessage("Select supervisor and enter amount");
+    const saved = await api("POST", "/supervisor-cash-receipts", {
+      ...receiptForm,
+      supervisorName,
+      amount: +(receiptForm.amount || 0),
+      receivedBy: user.name,
+      receivedByRole: user.role,
+    });
+    if (saved?._id) {
+      setReceiptMessage("Cash received from supervisor saved successfully");
+      setReceiptForm({ date: today(), supervisorName: selectedSupervisor || "", amount: "", paymentMode: "Cash", note: "" });
+      setReloadKey(k => k + 1);
+    } else setReceiptMessage(saved?.message || "Failed to save cash receipt");
+  };
 
   const total = data.total || {};
   const rows = Array.isArray(data.history) ? data.history : [];
@@ -7210,6 +7281,19 @@ function SupervisorCashFlow({ user, allUsers }) {
         {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />}
         {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e => setToDate(e.target.value)} />}
       </div>
+      {isAdminLike(user.role) && (
+        <SectionBox title="Receive Cash From Supervisor" icon="RC" color="green">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
+            <Input label="Date" type="date" value={receiptForm.date} onChange={e=>setReceiptForm({...receiptForm,date:e.target.value})} />
+            <Select label="Supervisor" value={receiptForm.supervisorName || selectedSupervisor} options={[{ value:"", label:"Select Supervisor" }, ...supervisors.map(s => ({ value:s.name, label:s.name }))]} onChange={e=>setReceiptForm({...receiptForm,supervisorName:e.target.value})} />
+            <Input label={`Amount (${CURRENCY})`} type="number" value={receiptForm.amount} onChange={e=>setReceiptForm({...receiptForm,amount:e.target.value})} />
+            <Select label="Mode" value={receiptForm.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setReceiptForm({...receiptForm,paymentMode:e.target.value})} />
+            <Input label="Note" value={receiptForm.note} onChange={e=>setReceiptForm({...receiptForm,note:e.target.value})} />
+          </div>
+          {receiptMessage && <div className={`mt-2 text-xs font-bold ${receiptMessage.includes("success") ? "text-green-700" : "text-red-600"}`}>{receiptMessage}</div>}
+          <button onClick={saveSupervisorReceipt} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-bold">Save Cash Received</button>
+        </SectionBox>
+      )}
       {loading ? <Loader /> : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
