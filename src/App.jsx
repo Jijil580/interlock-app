@@ -3441,6 +3441,7 @@ function ProductionSite({ user, setStock }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("entry");
   const [modal, setModal] = useState(false);
+  const [editingProductionId, setEditingProductionId] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const [ledger, setLedger] = useState(null);
@@ -3529,9 +3530,11 @@ function ProductionSite({ user, setStock }) {
     const producedQty = calcProducedQty();
     if (!producedQty) { setSaveError(isHollowProduction() && form.productionUnit === "box" ? "Enter no. of boxes. If total is still 0, set 1 box count in Hollow Brick master." : "Enter produced quantity"); return; }
     if (!+(form.productionRate)) { setSaveError("Enter rate per box/unit manually"); return; }
+    const audit = editingProductionId ? requestAuditReason("edit", "production entry", user) : null;
+    if (editingProductionId && !audit) return;
     setSaving(true);
     try {
-      const item = await api("POST", "/productionsite", {
+      const item = await api(editingProductionId ? "PUT" : "POST", editingProductionId ? `/productionsite/${editingProductionId}` : "/productionsite", {
         ...form,
         producedQty,
         boxQty: +(form.boxQty || 0),
@@ -3542,22 +3545,64 @@ function ProductionSite({ user, setStock }) {
         loadingCharge: +(form.loadingCharge || 0),
         unloadingCharge: +(form.unloadingCharge || 0),
         paymentGiven: +(form.paymentGiven || 0),
-        addedBy: user.name,
+        addedBy: form.addedBy || user.name,
+        ...(audit || {}),
       });
       if (item.duplicateIgnored) {
         setSaveError(item.message || "Duplicate production entry ignored.");
         api("GET", "/productionsite").then(e => setEntries(Array.isArray(e) ? e : []));
         api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
       } else if (item._id) {
-        setEntries(p => [item, ...p]);
+        setEntries(p => editingProductionId ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
         setModal(false);
         setForm(emptyForm);
+        setEditingProductionId("");
         api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
         api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
       } else setSaveError(item.message || "Failed to save");
     } finally {
       setSaving(false);
     }
+  };
+
+  const openProductionEdit = (entry) => {
+    setSaveError("");
+    setEditingProductionId(entry._id);
+    setForm({
+      ...emptyForm,
+      ...entry,
+      date: entry.date || today(),
+      shift: entry.shift || "",
+      workerId: entry.workerId || "",
+      workerName: entry.workerName || "",
+      itemId: entry.itemId || "",
+      itemName: entry.itemName || "",
+      productType: entry.productType || "interlock",
+      productionUnit: entry.productionUnit || "unit",
+      boxQty: String(entry.boxQty || ""),
+      boxCount: String(entry.boxCount || ""),
+      producedQty: String(entry.producedQty || ""),
+      sqftPerPiece: String(entry.sqftPerPiece || ""),
+      sqftQty: String(entry.sqftQty || ""),
+      productionRate: String(entry.productionRate || ""),
+      loadingCharge: String(entry.loadingCharge || ""),
+      unloadingCharge: String(entry.unloadingCharge || ""),
+      paymentGiven: String(entry.paymentGiven || ""),
+      remarks: entry.remarks || "",
+    });
+    setModal(true);
+  };
+
+  const deleteProductionEntry = async (entry) => {
+    const audit = requestAuditReason("delete", "production entry", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/productionsite/${entry._id}`, audit);
+    if (deleted?.ok) {
+      setEntries(p => p.filter(x => x._id !== entry._id));
+      api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      if (reports) loadReports();
+    } else if (deleted?.message) window.alert(deleted.message);
   };
 
   const openLedger = async (name) => {
@@ -3599,7 +3644,7 @@ function ProductionSite({ user, setStock }) {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
         {canEdit && tab === "entry" && (
-          <button onClick={() => { setModal(true); setSaveError(""); setForm(emptyForm); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Production</button>
+          <button onClick={() => { setModal(true); setEditingProductionId(""); setSaveError(""); setForm(emptyForm); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Production</button>
         )}
       </div>
 
@@ -3633,7 +3678,11 @@ function ProductionSite({ user, setStock }) {
                     {(+(e.amountPending) || 0) > 0 && <div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(e.amountPending) || 0)}</div>}
                   </div>
                 </div>
-                <button onClick={() => openLedger(e.workerName)} className="mt-2 text-xs text-amber-600 font-bold hover:underline">View Worker Ledger →</button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => openLedger(e.workerName)} className="text-xs text-amber-600 font-bold hover:underline">View Worker Ledger →</button>
+                  {isAdminLike(user.role) && <button onClick={() => openProductionEdit(e)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-bold">Edit</button>}
+                  {isAdminLike(user.role) && <button onClick={() => deleteProductionEntry(e)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg text-xs font-bold">Delete</button>}
+                </div>
               </div>
             ))}
           </div>
@@ -3738,7 +3787,7 @@ function ProductionSite({ user, setStock }) {
       )}
 
       {modal && (
-        <Modal title="Production Entry" onClose={() => { setModal(false); setSaveError(""); }} wide>
+        <Modal title={editingProductionId ? "Edit Production Entry" : "Production Entry"} onClose={() => { setModal(false); setEditingProductionId(""); setSaveError(""); }} wide>
           <div className="space-y-3">
             <SectionBox title="Worker Details" icon="👷" color="purple">
               <div className="grid grid-cols-2 gap-2">
@@ -3831,7 +3880,7 @@ function ProductionSite({ user, setStock }) {
               ✅ On submit: Stock increases automatically · Worker earnings update · Payment reduces pending
             </div>
             {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
-            <button onClick={save} disabled={saving} className={`w-full py-3 rounded-xl font-bold text-white ${saving ? "bg-amber-300 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-600"}`}>{saving ? "Saving..." : "Submit Production"}</button>
+            <button onClick={save} disabled={saving} className={`w-full py-3 rounded-xl font-bold text-white ${saving ? "bg-amber-300 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-600"}`}>{saving ? "Saving..." : editingProductionId ? "Update Production" : "Submit Production"}</button>
           </div>
         </Modal>
       )}
@@ -7367,6 +7416,7 @@ function AdminCashFlow({ user, allUsers }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  const [editingId, setEditingId] = useState("");
   const [form, setForm] = useState({
     date: today(),
     direction: "office_to_admin",
@@ -7408,12 +7458,40 @@ function AdminCashFlow({ user, allUsers }) {
     setMessage("");
     const payload = { ...form, officeName: user.role === "user" ? user.name : form.officeName, amount: +(form.amount || 0), addedBy: user.name, addedByRole: user.role };
     if (!payload.adminName || !payload.officeName || payload.amount <= 0) return setMessage("Select admin, office user and amount");
-    const saved = await api("POST", "/admin-cash-transfers", payload);
+    const audit = editingId ? requestAuditReason("edit", "admin cash flow", user) : null;
+    if (editingId && !audit) return;
+    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/admin-cash-transfers/${editingId}` : "/admin-cash-transfers", { ...payload, ...(audit || {}) });
     if (saved?._id) {
-      setMessage("Admin cash flow saved successfully");
+      setMessage(editingId ? "Admin cash flow updated successfully" : "Admin cash flow saved successfully");
       setForm(f => ({ ...f, amount: "", note: "" }));
+      setEditingId("");
       setReloadKey(k => k + 1);
     } else setMessage(saved?.message || "Failed to save admin cash flow");
+  };
+
+  const editRow = (row) => {
+    setEditingId(row._id);
+    setMessage("");
+    setForm({
+      date: row.date || today(),
+      direction: row.direction || "office_to_admin",
+      adminName: row.adminName || "",
+      officeName: user.role === "user" ? user.name : (row.officeName || ""),
+      amount: String(row.amount || ""),
+      paymentMode: row.paymentMode || "Cash",
+      note: row.note || "",
+    });
+  };
+
+  const deleteRow = async (row) => {
+    const audit = requestAuditReason("delete", "admin cash flow", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/admin-cash-transfers/${row._id}`, audit);
+    if (deleted?.ok) {
+      setRows(p => p.filter(x => x._id !== row._id));
+      if (editingId === row._id) setEditingId("");
+      setReloadKey(k => k + 1);
+    } else if (deleted?.message) window.alert(deleted.message);
   };
 
   const givenToAdmin = rows.filter(r => r.direction === "office_to_admin").reduce((a,r)=>a+(+(r.amount)||0),0);
@@ -7438,7 +7516,10 @@ function AdminCashFlow({ user, allUsers }) {
           <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
         </div>
         {message && <div className={`mt-2 text-xs font-bold ${message.includes("success") ? "text-green-700" : "text-red-600"}`}>{message}</div>}
-        <button onClick={save} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-bold">Submit</button>
+        <div className="mt-3 flex gap-2">
+          <button onClick={save} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-bold">{editingId ? "Update" : "Submit"}</button>
+          {editingId && <button onClick={()=>{setEditingId("");setForm(f=>({...f,amount:"",note:""}));setMessage("");}} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold">Cancel Edit</button>}
+        </div>
       </SectionBox>
 
       <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -7461,7 +7542,7 @@ function AdminCashFlow({ user, allUsers }) {
           {rows.length === 0 ? <EmptyState icon="AC" text="No admin cash flow records" /> : (
             <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
               <table className="w-full text-xs">
-                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Admin</th><th className="p-2 text-left">Office User</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th></tr></thead>
+                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Admin</th><th className="p-2 text-left">Office User</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
                 <tbody>{rows.map(r=>(
                   <tr key={r._id} className="border-t">
                     <td className="p-2">{r.date}</td>
@@ -7471,6 +7552,10 @@ function AdminCashFlow({ user, allUsers }) {
                     <td className="p-2">{r.paymentMode||"-"}</td>
                     <td className="p-2">{r.note||"-"}</td>
                     <td className="p-2 text-right font-black">{money(r.amount)}</td>
+                    <td className="p-2 text-right">
+                      <button onClick={()=>editRow(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button>
+                      <button onClick={()=>deleteRow(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -7545,7 +7630,7 @@ function ReportAuditLog({ user }) {
         <div className="text-xs text-gray-400">Admin view of report changes with submitted reasons</div>
       </div>
       <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <Select label="Report Type" value={filters.recordType} options={["", "Supervisor Daily Report", "Driver Report", "Sale", "Purchase"]} onChange={e=>setFilters({...filters,recordType:e.target.value})} />
+        <Select label="Report Type" value={filters.recordType} options={["", "Supervisor Daily Report", "Driver Report", "Sale", "Purchase", "Production Site", "Admin Cash Flow"]} onChange={e=>setFilters({...filters,recordType:e.target.value})} />
         <Select label="Action" value={filters.action} options={["", "edit", "delete"]} onChange={e=>setFilters({...filters,action:e.target.value})} />
         <Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})} />
         <Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})} />
