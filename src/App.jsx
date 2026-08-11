@@ -7803,6 +7803,8 @@ function AdminCashFlow({ user, allUsers }) {
 function CashFlowHub({ user, setPage }) {
   const tiles = [
     { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"CF", color:"green", show:true },
+    { id:"companyexpense", title:"Company Expense", sub:"Salary payments and all company expense history", icon:"CE", color:"red", show:isAdminLike(user.role) },
+    { id:"companypurchase", title:"Company Purchase", sub:"Record materials and purchases made for the company", icon:"CP", color:"amber", show:isAdminLike(user.role) },
     { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
     { id:"admincashflow", title:"Admin Cashflow", sub:"Cash given to admin or received from admin", icon:"AC", color:"blue", show:isAdminLike(user.role) },
     { id:"officedaily", title:"Office Daily Report", sub:"Sales, purchase, production and cash received report", icon:"DR", color:"purple", show:isAdminLike(user.role) },
@@ -7833,6 +7835,22 @@ function CashFlowHub({ user, setPage }) {
             </div>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminControlHub({ setPage }) {
+  const tiles = [
+    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
+    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
+    { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Admin Control</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -8019,6 +8037,7 @@ function CompanyExpense({ user }) {
 const NAV = {
   admin: [
     { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
+    { id:"admincontrol", label:"Admin Control", icon:"AC" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -8177,9 +8196,11 @@ export default function App() {
   }
 
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
+  const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
-    (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id))
+    (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
+    !nestedNavPages.includes(item.id)
   );
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
@@ -8214,6 +8235,7 @@ export default function App() {
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={setPage} />;
+      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={setPage} />:null;
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "admincashflow": return isAdminLike(currentUser.role)?<AdminCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
