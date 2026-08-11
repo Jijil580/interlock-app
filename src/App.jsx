@@ -949,7 +949,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-gray-900">🏗️ Site Work</h2>
+        <h2 className="text-xl font-black text-gray-900">🏗️ Create New Site Work</h2>
         {(isAdminLike(user.role)||user.role==="supervisor")&&(
           <button onClick={()=>setShowAdd(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
         )}
@@ -8022,7 +8022,7 @@ const NAV = {
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
-    { id:"sitework", label:"Site Work", icon:"🏗️" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
     { id:"masterdata", label:"Master Data", icon:"⚙️" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
@@ -8046,7 +8046,7 @@ const NAV = {
     { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
-    { id:"sitework", label:"Site Work", icon:"🏗️" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
     { id:"dailyreport", label:"Daily Report", icon:"📋" },
     { id:"mysitereports", label:"My Site Reports", icon:"📊" },
     { id:"workerreport2", label:"Worker Ledger", icon:"W" },
@@ -8062,7 +8062,7 @@ const NAV = {
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
-    { id:"sitework", label:"Site Work", icon:"🏗️" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
     { id:"productionsite", label:"Production Site", icon:"🏭" },
     { id:"masterdata", label:"Master Data", icon:"⚙️" },
     { id:"suppliers", label:"Suppliers", icon:"🏪" },
