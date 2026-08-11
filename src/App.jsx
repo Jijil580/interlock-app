@@ -4,7 +4,7 @@ const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = {
   companyName: "P. K. INTERLOCKS & HOLLOW BRICKS",
   shortName: "PK Interlock",
-  logo: "🏭",
+  logo: "/icons/interlock-logo.png",
   address: "HAJ ROAD, VILAKKODE, IRITTY",
   state: "Kerala",
   stateCode: "32",
@@ -480,7 +480,7 @@ function Login({ onLogin, branding = COMPANY }) {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-3xl">{branding.logo || COMPANY.logo}</div>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm"><img src={branding.logo || COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-1" /></div>
           <h1 className="text-2xl font-black text-gray-900">{branding.shortName || branding.companyName || COMPANY.shortName}</h1>
           <p className="text-slate-500 text-sm mt-1">Management System</p>
         </div>
@@ -8308,7 +8308,7 @@ export default function App() {
       <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
         <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">{COMPANY.logo}</div>
+            <div className="w-10 h-10 rounded-xl bg-white border border-white/20 flex items-center justify-center overflow-hidden"><img src={COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-0.5" /></div>
             <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">Management System</div></div>
           </div>
         </div>
