@@ -1754,8 +1754,8 @@ function DailyReport({ user }) {
 
   const save = async () => {
     if (!form.date) return;
-    if (!form.siteName) {
-      window.alert(entrySection === "site" ? "Please select or type site name." : "Please open this entry from a site row.");
+    if (entrySection === "site" && !form.siteName) {
+      window.alert("Please select or type site name.");
       return;
     }
 
@@ -1784,9 +1784,9 @@ function DailyReport({ user }) {
     else if (item.message) window.alert(item.message);
   };;
 
-  const openAdd = (site, section = "site") => {
-    setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"});
-    setSiteSearch(site.customerName);
+  const openAdd = (site = null, section = "site") => {
+    setForm(site ? {...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"} : emptyForm);
+    setSiteSearch(site?.customerName || "");
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
       workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
@@ -1797,7 +1797,7 @@ function DailyReport({ user }) {
     setAddModal(true);
   };
 
-  const entryButtons = (site, compact = false) => (
+  const entryButtons = (compact = false) => (
     <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-1`}>
       {[
         { id:"site", label:"Site" },
@@ -1808,7 +1808,7 @@ function DailyReport({ user }) {
         <button
           key={s.id}
           type="button"
-          onClick={(e)=>{e.stopPropagation(); openAdd(site, s.id);}}
+          onClick={(e)=>{e.stopPropagation(); openAdd(null, s.id);}}
           className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1.5 rounded-lg text-xs font-black hover:bg-amber-100"
         >
           + {s.label}
@@ -1816,6 +1816,12 @@ function DailyReport({ user }) {
       ))}
     </div>
   );
+
+  const workersForCurrentEntry = () => {
+    const site = mySites.find(s=>s._id===form.siteId);
+    const selectedNames = site?.selectedWorkers || [];
+    return workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(!form.siteId || selectedNames.includes(w.name)));
+  };
 
   const normalizeDailyReport = (report = {}) => ({
     ...emptyForm,
@@ -1877,7 +1883,6 @@ function DailyReport({ user }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          <div className="w-[360px] max-w-full">{entryButtons(selectedSite, true)}</div>
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
@@ -2045,7 +2050,10 @@ function DailyReport({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
-        <button onClick={()=>{setForm(emptyForm);setSiteSearch("");setEntrySection("site");setAddModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Site Entry</button>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+        <div className="text-xs font-black text-gray-500 uppercase mb-2">New Daily Entry</div>
+        {entryButtons(false)}
       </div>
       <div className="flex gap-1">
         {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
@@ -2062,7 +2070,6 @@ function DailyReport({ user }) {
                   <div className="font-black">{s.customerName}</div>
                   <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"-"} sqft</div>
                 </div>
-                <div className="w-full sm:w-[360px] shrink-0">{entryButtons(s, true)}</div>
               </div>
             </div>
           );
@@ -2091,15 +2098,10 @@ function DailyReport({ user }) {
               }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
               <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
               {form.siteId&&<div className="text-xs text-green-600 font-semibold mt-1">✓ Linked to existing site</div>}
-            </div>:(
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                <div className="text-[10px] uppercase font-black text-amber-700">Selected Site</div>
-                <div className="text-sm font-black text-gray-900">{form.siteName || "Open this entry from a site row"}</div>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-2">
+            </div>:null}
+            <div className={entrySection==="site"?"grid grid-cols-2 gap-2":"grid grid-cols-1 gap-2"}>
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-              <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
+              {entrySection==="site"&&<Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />}
             </div>
             <div className="grid grid-cols-4 gap-1 bg-gray-100 rounded-xl p-1">
               {[
@@ -2126,10 +2128,10 @@ function DailyReport({ user }) {
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
                   <select value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
-                    <option value="">Select assigned worker</option>
-                    {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(mySites.find(s=>s._id===form.siteId)?.selectedWorkers||[]).includes(w.name)).map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+                    <option value="">Select worker</option>
+                    {workersForCurrentEntry().map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
                   </select>
-                  {form.siteId&&workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(mySites.find(s=>s._id===form.siteId)?.selectedWorkers||[]).includes(w.name)).length===0&&<div className="text-xs text-red-500 mt-1">No site workers assigned to this site.</div>}
+                  {form.siteId&&workersForCurrentEntry().length===0&&<div className="text-xs text-red-500 mt-1">No site workers assigned to this site.</div>}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Select label="Work Category" value={workerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setWorkerEntry({...workerEntry,workCategory:e.target.value})} />
