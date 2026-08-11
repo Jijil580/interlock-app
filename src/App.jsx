@@ -7856,6 +7856,23 @@ function AdminControlHub({ setPage }) {
   );
 }
 
+function ReportsHub({ setPage }) {
+  const tiles = [
+    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:"🏗️", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
+    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:"👷", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
+    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:"🚚", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
+    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:"📋", color:"border-violet-200 bg-violet-50 hover:border-violet-400" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Reports</h2><div className="text-xs text-gray-400">Open detailed operational reports</div></div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
+      </div>
+    </div>
+  );
+}
+
 function ReportAuditLog({ user }) {
   const [audits, setAudits] = useState([]);
   const [filters, setFilters] = useState({ recordType: "", action: "", fromDate: "", toDate: "" });
@@ -8197,10 +8214,12 @@ export default function App() {
 
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
+  const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
-    !nestedNavPages.includes(item.id)
+    !nestedNavPages.includes(item.id) &&
+    (!isAdminLike(currentUser.role) || !reportNestedPages.includes(item.id))
   );
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
@@ -8245,7 +8264,7 @@ export default function App() {
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
-      case "reports": return <Reports production={production} sales={sales} stock={stock} raw={raw} siteWorks={siteWorks} />;
+      case "reports": return <ReportsHub setPage={setPage} />;
       default: return null;
     }
   };
