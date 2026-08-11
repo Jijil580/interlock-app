@@ -7841,16 +7841,16 @@ function CashFlowHub({ user, setPage }) {
 
 function AdminControlHub({ setPage }) {
   const tiles = [
-    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
-    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
-    { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
-    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:"🔎", color:"border-red-200 bg-red-50 hover:border-red-400" },
+    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-600 bg-amber-500 hover:bg-amber-600" },
+    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
+    { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:"🔎", color:"border-red-700 bg-red-600 hover:bg-red-700" },
   ];
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -7875,22 +7875,23 @@ function ReportsHub({ setPage }) {
 
 function OfficeHub({ setPage }) {
   const tiles = [
-    { id:"cashflowhub", title:"Cash Flow", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-200 bg-green-50 hover:border-green-400" },
-    { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
-    { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-green-200 bg-green-50 hover:border-green-400" },
-    { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
-    { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:"💰", color:"border-emerald-200 bg-emerald-50 hover:border-emerald-400" },
-    { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:"🛒", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
-    { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:"🏪", color:"border-orange-200 bg-orange-50 hover:border-orange-400" },
-    { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:"🧱", color:"border-red-200 bg-red-50 hover:border-red-400" },
-    { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:"🧾", color:"border-violet-200 bg-violet-50 hover:border-violet-400" },
-    { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:"🏭", color:"border-slate-200 bg-slate-50 hover:border-slate-400" },
+    { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
+    { id:"cashflowhub", title:"Cash Flow", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
+    { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+    { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
+    { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
+    { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:"💰", color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700" },
+    { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:"🛒", color:"border-amber-600 bg-amber-500 hover:bg-amber-600" },
+    { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:"🏪", color:"border-orange-700 bg-orange-600 hover:bg-orange-700" },
+    { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:"🧱", color:"border-red-700 bg-red-600 hover:bg-red-700" },
+    { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:"🧾", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
+    { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:"🏭", color:"border-slate-700 bg-slate-600 hover:bg-slate-700" },
   ];
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -8240,7 +8241,7 @@ export default function App() {
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
-  const officeNestedPages = ["cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
+  const officeNestedPages = ["sitework", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
