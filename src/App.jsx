@@ -8186,11 +8186,18 @@ export default function App() {
     />;
   }
 
-  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item => currentUser.role !== "user" || !["devices", "users"].includes(item.id));
+  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
+  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
+    (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
+    (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id))
+  );
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
   const renderPage = () => {
     if (loading) return <Loader />;
+    if (currentUser.role === "supervisor" && supervisorHiddenPages.includes(page)) {
+      return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
+    }
     switch (page) {
       case "dashboard": return <Dashboard stock={stock} raw={raw} production={production} sales={sales} siteWorks={siteWorks} user={currentUser} />;
       case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
