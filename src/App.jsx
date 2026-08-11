@@ -1619,6 +1619,8 @@ function DailyReport({ user }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [siteSearch, setSiteSearch] = useState("");
   const [entrySection, setEntrySection] = useState("site");
+  const [reportSection, setReportSection] = useState("site");
+  const [reportFilters, setReportFilters] = useState({date:"",siteName:"",workerName:"",type:""});
 
   const emptyForm = {
     siteName:"", siteId:"", date:today(), siteStatus:"running",
@@ -1652,6 +1654,32 @@ function DailyReport({ user }) {
   const running = mySites.filter(s=>s.status==="running");
   const completed = mySites.filter(s=>s.status==="completed");
   const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id).sort((a,b)=>b.date.localeCompare(a.date));
+  const visibleReports = reports.filter(r=>{
+    if (isAdminLike(user.role)) return true;
+    const allowedSite = mySites.some(s=>r.siteName===s.customerName||r.siteId===s._id);
+    return r.addedBy===user.name || allowedSite;
+  });
+  const filterText = (value, needle) => !needle || String(value||"").toLowerCase().includes(String(needle).toLowerCase());
+  const filteredReports = visibleReports.filter(r=>
+    (!reportFilters.date || r.date===reportFilters.date) &&
+    filterText(r.siteName, reportFilters.siteName)
+  );
+  const sectionRows = {
+    site: filteredReports
+      .filter(r=>r.siteName || r.completedToday || r.materialsUnloaded || r.extraWorkDesc || r.dayNotes)
+      .filter(r=>filterText(r.siteName, reportFilters.siteName))
+      .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
+    workers: filteredReports.flatMap(r=>(r.workerEntries||[]).map((w,i)=>({...w,report:r,rowId:`${r._id}-w-${i}`})))
+      .filter(w=>filterText(w.workerName, reportFilters.workerName)&&filterText(w.report.siteName, reportFilters.siteName)&&filterText(w.workCategory, reportFilters.type))
+      .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
+    expenses: filteredReports.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>({...p,report:r,rowId:`${r._id}-p-${i}`})))
+      .filter(p=>filterText(p.report.siteName||p.siteName, reportFilters.siteName)&&filterText(p.type, reportFilters.type))
+      .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
+    office: filteredReports
+      .filter(r=>r.complaints || r.actionTaken || (r.dayNotes && !r.completedToday && !(r.workerEntries||[]).length && !(r.payments||[]).length))
+      .filter(r=>filterText(r.siteName, reportFilters.siteName))
+      .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
+  };
 
   const addWorkerEntry = () => {
     if (!workerEntry.workerName) return;
@@ -2054,6 +2082,98 @@ function DailyReport({ user }) {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
         <div className="text-xs font-black text-gray-500 uppercase mb-2">New Daily Entry</div>
         {entryButtons(false)}
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-black text-gray-500 uppercase">Submitted Daily Reports</div>
+            <div className="text-[11px] text-gray-400">Search section-wise report entries</div>
+          </div>
+          <button type="button" onClick={()=>setReportFilters({date:"",siteName:"",workerName:"",type:""})} className="bg-gray-50 text-gray-600 border border-gray-200 px-2 py-1 rounded-lg text-xs font-bold">Clear</button>
+        </div>
+        <div className="grid grid-cols-4 gap-1 bg-gray-100 rounded-xl p-1">
+          {[
+            {id:"site",label:"Site",count:sectionRows.site.length},
+            {id:"workers",label:"Workers",count:sectionRows.workers.length},
+            {id:"expenses",label:"Expenses",count:sectionRows.expenses.length},
+            {id:"office",label:"Office",count:sectionRows.office.length},
+          ].map(s=>(
+            <button key={s.id} type="button" onClick={()=>setReportSection(s.id)} className={`py-2 rounded-lg text-xs font-black ${reportSection===s.id?"bg-amber-500 text-white shadow-sm":"text-gray-600 hover:bg-white"}`}>{s.label} ({s.count})</button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Input label="Date" type="date" value={reportFilters.date} onChange={e=>setReportFilters(f=>({...f,date:e.target.value}))} />
+          <Input label="Site Name" value={reportFilters.siteName} onChange={e=>setReportFilters(f=>({...f,siteName:e.target.value}))} placeholder="Search site" />
+          {reportSection==="workers"&&<Input label="Worker Name" value={reportFilters.workerName} onChange={e=>setReportFilters(f=>({...f,workerName:e.target.value}))} placeholder="Search worker" />}
+          {(reportSection==="workers"||reportSection==="expenses")&&<Input label={reportSection==="workers"?"Work Category":"Expense Type"} value={reportFilters.type} onChange={e=>setReportFilters(f=>({...f,type:e.target.value}))} placeholder="Search type" />}
+        </div>
+        <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
+          {reportSection==="site"&&sectionRows.site.map(r=>(
+            <div key={r._id} className="bg-gray-50 rounded-xl border border-gray-100 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{r.siteName||"Site Entry"}</div>
+                  <div className="text-gray-400">{r.date||"-"} · {r.addedBy||"-"}</div>
+                  <div className="mt-1 text-gray-600">{r.completedToday||0} sqft done {r.materialsUnloaded?`· ${r.materialsUnloaded} ${r.materialQty||""}`:""} {r.extraWorkDesc?`· Extra: ${r.extraWorkDesc}`:""}</div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button type="button" onClick={()=>openDailyReportView(r)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                  <button type="button" onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                  <button type="button" onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {reportSection==="workers"&&sectionRows.workers.map(w=>(
+            <div key={w.rowId} className="bg-teal-50 rounded-xl border border-teal-100 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{w.workerName||"Worker"}</div>
+                  <div className="text-gray-500">{w.report.date||"-"} · {w.report.siteName||"No site"} · {w.workCategory||"-"}</div>
+                  <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-1">
+                    <span>Area: <b>{w.workArea||0} {w.unit||""}</b></span>
+                    <span>Earned: <b>{CURRENCY}{fmt(w.salary||w.amountEarned||0)}</b></span>
+                    <span>Paid: <b>{CURRENCY}{fmt(w.paymentGiven||0)}</b></span>
+                    <span>Pending: <b>{CURRENCY}{fmt(w.pending||0)}</b></span>
+                  </div>
+                </div>
+                <button type="button" onClick={()=>openDailyReportView(w.report)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold shrink-0">View</button>
+              </div>
+            </div>
+          ))}
+          {reportSection==="expenses"&&sectionRows.expenses.map(p=>(
+            <div key={p.rowId} className="bg-green-50 rounded-xl border border-green-100 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{p.type||"Expense"}</div>
+                  <div className="text-gray-500">{p.report.date||"-"} · {p.report.siteName||p.siteName||"No site"} · {p.mode||"-"}</div>
+                  <div className="mt-1 text-gray-600">{p.receivedFrom?`From: ${p.receivedFrom} · `:""}{p.supplierName?`Supplier: ${p.supplierName} · `:""}{p.remarks||""}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount||0)}</div>
+                  <button type="button" onClick={()=>openDailyReportView(p.report)} className="mt-1 bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {reportSection==="office"&&sectionRows.office.map(r=>(
+            <div key={r._id} className="bg-red-50 rounded-xl border border-red-100 p-3 text-xs">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{r.date||"-"} · {r.siteName||"Office Entry"}</div>
+                  {r.dayNotes&&<div className="text-gray-600 mt-1">Notes: {r.dayNotes}</div>}
+                  {r.complaints&&<div className="text-red-700 mt-1">Complaint: {r.complaints}</div>}
+                  {r.actionTaken&&<div className="text-gray-500 mt-1">Action: {r.actionTaken}</div>}
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button type="button" onClick={()=>openDailyReportView(r)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                  <button type="button" onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {sectionRows[reportSection].length===0&&<EmptyState icon="Report" text="No reports found" />}
+        </div>
       </div>
       <div className="flex gap-1">
         {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
