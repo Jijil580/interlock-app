@@ -213,7 +213,7 @@ function StatCard({ label, value, sub, icon, color }) {
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-start gap-3">
       <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <div className="text-lg sm:text-xl font-black text-slate-950 leading-tight break-words whitespace-normal">{value}</div>
+        <div className="text-base sm:text-xl font-black text-slate-950 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={String(value??"")}>{value}</div>
         <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</div>
         {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
       </div>
@@ -5318,6 +5318,14 @@ function Users({ currentUser, allUsers, setAllUsers }) {
     setAllUsers(p=>p.map(x=>x._id===u._id?{...x,active:!x.active}:x));
   };
 
+  const deleteUser = async (u) => {
+    if (u._id===currentUser._id) return;
+    if (!window.confirm(`Delete user ${u.name}? This login will be removed permanently.`)) return;
+    const result = await api("DELETE",`/users/${u._id}`);
+    if (result?.ok) setAllUsers(p=>p.filter(x=>x._id!==u._id));
+    else if (result?.message) window.alert(result.message);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -5328,7 +5336,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
         {allUsers.map(u=>(
           <div key={u._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
             <div><div className="flex items-center gap-2"><span className="font-black">{u.name}</span><Badge color={u.role==="admin"?"purple":u.role==="supervisor"?"green":u.role==="driver"?"amber":"blue"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}{u.role==="driver"&&` | ${u.mobile || "-"} | ${u.vehicleNumber || "-"}`}</div></div>
-            {u._id!==currentUser._id&&<button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${u.active?"bg-red-50 text-red-600 border-red-200":"bg-green-50 text-green-600 border-green-200"}`}>{u.active?"Deactivate":"Activate"}</button>}
+            {u._id!==currentUser._id&&<div className="flex gap-2"><button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${u.active?"bg-amber-50 text-amber-700 border-amber-200":"bg-green-50 text-green-600 border-green-200"}`}>{u.active?"Deactivate":"Activate"}</button><button onClick={()=>deleteUser(u)} className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-red-50 text-red-600 border-red-200">Delete</button></div>}
           </div>
         ))}
       </div>
@@ -7105,7 +7113,7 @@ function DriverReports({ user }) {
         {filters.datePreset === "range" && <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />}
         <Select label="Category" value={filters.category} options={["", "Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setFilters({ ...filters, category: e.target.value })} />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-9 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
         <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
         <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
