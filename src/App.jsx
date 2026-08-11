@@ -7873,6 +7873,28 @@ function ReportsHub({ setPage }) {
   );
 }
 
+function OfficeHub({ setPage }) {
+  const tiles = [
+    { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
+    { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-green-200 bg-green-50 hover:border-green-400" },
+    { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
+    { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:"💰", color:"border-emerald-200 bg-emerald-50 hover:border-emerald-400" },
+    { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:"🛒", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
+    { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:"🏪", color:"border-orange-200 bg-orange-50 hover:border-orange-400" },
+    { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:"🧱", color:"border-red-200 bg-red-50 hover:border-red-400" },
+    { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:"🧾", color:"border-violet-200 bg-violet-50 hover:border-violet-400" },
+    { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:"🏭", color:"border-slate-200 bg-slate-50 hover:border-slate-400" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
+      </div>
+    </div>
+  );
+}
+
 function ReportAuditLog({ user }) {
   const [audits, setAudits] = useState([]);
   const [filters, setFilters] = useState({ recordType: "", action: "", fromDate: "", toDate: "" });
@@ -8055,6 +8077,7 @@ const NAV = {
   admin: [
     { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
     { id:"admincontrol", label:"Admin Control", icon:"AC" },
+    { id:"officehub", label:"Office", icon:"OF" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -8095,6 +8118,7 @@ const NAV = {
   ],
   user: [
     { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
+    { id:"officehub", label:"Office", icon:"OF" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -8215,11 +8239,12 @@ export default function App() {
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
+  const officeNestedPages = ["workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
     !nestedNavPages.includes(item.id) &&
-    (!isAdminLike(currentUser.role) || !reportNestedPages.includes(item.id))
+    (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
   );
   const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
 
@@ -8255,6 +8280,7 @@ export default function App() {
       case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={setPage} />;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={setPage} />:null;
+      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={setPage} />:null;
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "admincashflow": return isAdminLike(currentUser.role)?<AdminCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
