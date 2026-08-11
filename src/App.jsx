@@ -7939,7 +7939,7 @@ function SalaryHub({ user, setPage }) {
       setSummary({
         production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
         site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
-        driver:+(drivers?.summary?.totalPending)||0,
+        driver:(drivers?.reports||[]).reduce((sum,r)=>sum+(+(r.driverWagePending)||0),0),
         supervisor:salaryList.filter(r=>r.role==="supervisor").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
         user:salaryList.filter(r=>r.role==="user").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
       });
