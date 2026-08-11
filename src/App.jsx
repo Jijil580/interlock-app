@@ -5591,13 +5591,14 @@ function AdminSiteReport() {
 }
 
 // ─── WORKER REPORTS (Production / Site / Overall) ───────────────────────────
-function AdminWorkerReport({ user }) {
+function AdminWorkerReport({ user, initialTab }) {
   const [workers, setWorkers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const isSupervisorLedger = user?.role === "supervisor";
-  const [tab, setTab] = useState(isSupervisorLedger ? "site" : "production");
+  const [tab, setTab] = useState(isSupervisorLedger ? "site" : (initialTab || "production"));
+  useEffect(()=>{ if (!isSupervisorLedger && initialTab) setTab(initialTab); },[initialTab,isSupervisorLedger]);
   const [siteSubTab, setSiteSubTab] = useState("daily");
   const [report, setReport] = useState(null);
   const [overall, setOverall] = useState(null);
@@ -7874,9 +7875,35 @@ function ReportsHub({ setPage }) {
   );
 }
 
+function SalaryHub({ user, setPage }) {
+  const [summary, setSummary] = useState({ production:0, site:0, driver:0 });
+  const [loading, setLoading] = useState(true);
+  useEffect(()=>{
+    Promise.all([
+      api("GET", "/workers"),
+      api("GET", `/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name || "")}`),
+    ]).then(([workers, drivers])=>{
+      const list = Array.isArray(workers) ? workers : [];
+      setSummary({
+        production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
+        site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
+        driver:+(drivers?.summary?.totalPending)||0,
+      });
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  },[user.role,user.name]);
+  const tiles = [
+    { id:"salaryproduction", title:"Production Workers", pending:summary.production, icon:"🏭", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
+    { id:"salarydriver", title:"Drivers", pending:summary.driver, icon:"🚚", color:"border-orange-700 bg-orange-600 hover:bg-orange-700" },
+    { id:"salarysite", title:"Site Workers", pending:summary.site, icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+  ];
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages and total ledger payments</div></div><div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-3xl">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">Total Pending</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.pending)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">View Ledger & Pay</span></div></button>)}</div></div>;
+}
+
 function OfficeHub({ setPage }) {
   const tiles = [
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
+    { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
     { id:"cashflowhub", title:"Cash Flow", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
     { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
     { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
@@ -8284,6 +8311,10 @@ export default function App() {
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={setPage} />;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={setPage} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={setPage} />:null;
+      case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={setPage} />:null;
+      case "salaryproduction": return isAdminLike(currentUser.role)?<AdminWorkerReport user={currentUser} initialTab="production" />:null;
+      case "salarysite": return isAdminLike(currentUser.role)?<AdminWorkerReport user={currentUser} initialTab="site" />:null;
+      case "salarydriver": return isAdminLike(currentUser.role)?<DriverReports user={currentUser} />:null;
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "admincashflow": return isAdminLike(currentUser.role)?<AdminCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
