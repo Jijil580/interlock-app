@@ -7824,8 +7824,9 @@ function CashFlowHub({ user, setPage }) {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {tiles.map(tile => (
-          <button key={tile.id} onClick={()=>setPage(tile.id)} className={`text-left bg-white rounded-2xl border shadow-sm p-4 transition-all ${colorClass[tile.color]}`}>
-            <div className="flex items-start gap-3">
+          <button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden text-left bg-white rounded-2xl border shadow-sm p-4 transition-all ${colorClass[tile.color]}`}>
+            <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-3 -bottom-4 w-28 h-28 object-contain opacity-[0.09] drop-shadow-md pointer-events-none" />
+            <div className="relative z-[1] flex items-start gap-3">
               <div className="w-11 h-11 rounded-xl bg-white border flex items-center justify-center text-xs font-black text-slate-700">{tile.icon}</div>
               <div>
                 <div className="font-black text-gray-900">{tile.title}</div>
@@ -7850,7 +7851,7 @@ function AdminControlHub({ setPage }) {
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -7867,7 +7868,7 @@ function ReportsHub({ setPage }) {
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Reports</h2><div className="text-xs text-gray-400">Open detailed operational reports</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -7891,7 +7892,7 @@ function OfficeHub({ setPage }) {
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -8340,7 +8341,7 @@ export default function App() {
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
         </header>
-        <main className="flex-1 p-4 lg:p-6 overflow-y-auto max-w-6xl w-full mx-auto">{renderPage()}</main>
+        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-6xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.035] drop-shadow-2xl pointer-events-none" /><div className="relative z-[1]">{renderPage()}</div></main>
       </div>
     </div>
   );
