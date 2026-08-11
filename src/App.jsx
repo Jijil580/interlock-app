@@ -7848,7 +7848,7 @@ function AdminControlHub({ setPage }) {
   ];
   return (
     <div className="space-y-4">
-      <div><h2 className="text-xl font-black text-gray-900">Admin Control</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
+      <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
       </div>
@@ -8077,7 +8077,7 @@ function CompanyExpense({ user }) {
 const NAV = {
   admin: [
     { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
-    { id:"admincontrol", label:"Admin Control", icon:"🛡️" },
+    { id:"admincontrol", label:"Admin Panel", icon:"🛡️" },
     { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
