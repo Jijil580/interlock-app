@@ -7858,16 +7858,16 @@ function AdminControlHub({ setPage }) {
 
 function ReportsHub({ setPage }) {
   const tiles = [
-    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:"🏗️", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
-    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:"👷", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
-    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:"🚚", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
-    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:"📋", color:"border-violet-200 bg-violet-50 hover:border-violet-400" },
+    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:"🏗️", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
+    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:"👷", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
+    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:"🚚", color:"border-orange-600 bg-orange-500 hover:bg-orange-600" },
+    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:"📋", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
   ];
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Reports</h2><div className="text-xs text-gray-400">Open detailed operational reports</div></div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 transition-colors ${tile.color}`}><span className="text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-gray-900">{tile.title}</span><span className="text-xs text-gray-500">{tile.sub}</span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><span className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="font-black text-white">{tile.title}</span><span className="text-xs text-white/85">{tile.sub}</span></button>)}
       </div>
     </div>
   );
