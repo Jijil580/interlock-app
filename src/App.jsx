@@ -1753,7 +1753,11 @@ function DailyReport({ user }) {
   };
 
   const save = async () => {
-    if (!form.siteName||!form.date) return;
+    if (!form.date) return;
+    if (!form.siteName) {
+      window.alert(entrySection === "site" ? "Please select or type site name." : "Please open this entry from a site row.");
+      return;
+    }
 
     const reportPayload = sectionReportPayload(form, entrySection);
     const cleanPayments = (reportPayload.payments||[]).filter(p=>p.type!=="Worker Payment");
@@ -1780,7 +1784,7 @@ function DailyReport({ user }) {
     else if (item.message) window.alert(item.message);
   };;
 
-  const openAdd = (site) => {
+  const openAdd = (site, section = "site") => {
     setForm({...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"});
     setSiteSearch(site.customerName);
     setWorkerEntry({
@@ -1788,10 +1792,30 @@ function DailyReport({ user }) {
       workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
-    setEntrySection("site");
+    setEntrySection(section);
     setSelectedSite(null);
     setAddModal(true);
   };
+
+  const entryButtons = (site, compact = false) => (
+    <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-1`}>
+      {[
+        { id:"site", label:"Site" },
+        { id:"workers", label:"Workers" },
+        { id:"expenses", label:"Expenses" },
+        { id:"office", label:"Office" },
+      ].map(s=>(
+        <button
+          key={s.id}
+          type="button"
+          onClick={(e)=>{e.stopPropagation(); openAdd(site, s.id);}}
+          className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1.5 rounded-lg text-xs font-black hover:bg-amber-100"
+        >
+          + {s.label}
+        </button>
+      ))}
+    </div>
+  );
 
   const normalizeDailyReport = (report = {}) => ({
     ...emptyForm,
@@ -1853,7 +1877,7 @@ function DailyReport({ user }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          <button onClick={()=>openAdd(selectedSite)} className="bg-amber-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">+ Daily Entry</button>
+          <div className="w-[360px] max-w-full">{entryButtons(selectedSite, true)}</div>
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
@@ -2021,7 +2045,7 @@ function DailyReport({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
-        <button onClick={()=>{setForm(emptyForm);setSiteSearch("");setEntrySection("site");setAddModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
+        <button onClick={()=>{setForm(emptyForm);setSiteSearch("");setEntrySection("site");setAddModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Site Entry</button>
       </div>
       <div className="flex gap-1">
         {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
@@ -2031,7 +2055,17 @@ function DailyReport({ user }) {
       <div className="space-y-3">
         {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
           const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
-          return (<div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"><div className="flex items-start justify-between"><div className="flex-1 cursor-pointer" onClick={()=>setSelectedSite(s)}><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"-"} sqft</div></div><button onClick={()=>openAdd(s)} className="bg-amber-500 text-white px-2 py-1.5 rounded-lg text-xs font-bold shrink-0 ml-2">+ Entry</button></div></div>);
+          return (
+            <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="flex-1 cursor-pointer min-w-0" onClick={()=>setSelectedSite(s)}>
+                  <div className="font-black">{s.customerName}</div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"-"} sqft</div>
+                </div>
+                <div className="w-full sm:w-[360px] shrink-0">{entryButtons(s, true)}</div>
+              </div>
+            </div>
+          );
         }))}
         {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
           <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
@@ -2042,9 +2076,9 @@ function DailyReport({ user }) {
       </div>
 
       {addModal&&(
-        <Modal title={`Daily Entry — ${form.siteName||"Select Site"}`} onClose={()=>setAddModal(false)} wide>
+        <Modal title={`${entrySection==="site"?"Site":entrySection==="workers"?"Worker":entrySection==="expenses"?"Expense":"Office"} Entry${form.siteName?` — ${form.siteName}`:""}`} onClose={()=>setAddModal(false)} wide>
           <div className="space-y-3">
-            <div>
+            {entrySection==="site"?<div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name * (search or type)</label>
               <input list="site-list" value={siteSearch} onChange={e=>{
                 setSiteSearch(e.target.value);
@@ -2057,7 +2091,12 @@ function DailyReport({ user }) {
               }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
               <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
               {form.siteId&&<div className="text-xs text-green-600 font-semibold mt-1">✓ Linked to existing site</div>}
-            </div>
+            </div>:(
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <div className="text-[10px] uppercase font-black text-amber-700">Selected Site</div>
+                <div className="text-sm font-black text-gray-900">{form.siteName || "Open this entry from a site row"}</div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
               <Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />
