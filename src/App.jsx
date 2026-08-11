@@ -7802,7 +7802,7 @@ function AdminCashFlow({ user, allUsers }) {
 
 function CashFlowHub({ user, setPage }) {
   const tiles = [
-    { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"CF", color:"green", show:true },
+    { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"💵", color:"green", show:true },
     { id:"companyexpense", title:"Company Expense", sub:"Salary payments and all company expense history", icon:"CE", color:"red", show:isAdminLike(user.role) },
     { id:"companypurchase", title:"Company Purchase", sub:"Record materials and purchases made for the company", icon:"CP", color:"amber", show:isAdminLike(user.role) },
     { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
@@ -7875,6 +7875,7 @@ function ReportsHub({ setPage }) {
 
 function OfficeHub({ setPage }) {
   const tiles = [
+    { id:"cashflowhub", title:"Cash Flow", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-200 bg-green-50 hover:border-green-400" },
     { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
     { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-green-200 bg-green-50 hover:border-green-400" },
     { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
@@ -8075,9 +8076,9 @@ function CompanyExpense({ user }) {
 
 const NAV = {
   admin: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
-    { id:"admincontrol", label:"Admin Control", icon:"AC" },
-    { id:"officehub", label:"Office", icon:"OF" },
+    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
+    { id:"admincontrol", label:"Admin Control", icon:"🛡️" },
+    { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -8102,7 +8103,7 @@ const NAV = {
     { id:"reports", label:"Reports", icon:"📈" },
   ],
   supervisor: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
+    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
@@ -8117,8 +8118,8 @@ const NAV = {
     { id:"quotations", label:"Quotations", icon:"QT" },
   ],
   user: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"CF" },
-    { id:"officehub", label:"Office", icon:"OF" },
+    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
+    { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -8239,7 +8240,7 @@ export default function App() {
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
-  const officeNestedPages = ["workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
+  const officeNestedPages = ["cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
