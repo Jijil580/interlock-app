@@ -7846,6 +7846,7 @@ function AdminControlHub({ setPage }) {
     { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-600 bg-amber-500 hover:bg-amber-600" },
     { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
     { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+    { id:"salarymanagement", title:"Salary Management", sub:"Set monthly salary, incentive and absent days", icon:"💼", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
     { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:"🔎", color:"border-red-700 bg-red-600 hover:bg-red-700" },
   ];
   return (
@@ -7875,19 +7876,55 @@ function ReportsHub({ setPage }) {
   );
 }
 
+function SalaryManagement({ user }) {
+  const currentMonth = today().slice(0,7);
+  const empty = { role:"supervisor", employeeId:"", month:currentMonth, monthlySalary:"", incentive:"", absentDays:"", manualSalary:"" };
+  const [users, setUsers] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [form, setForm] = useState(empty);
+  const [message, setMessage] = useState("");
+  const load = ()=>Promise.all([api("GET","/users"),api("GET","/salary-records")]).then(([u,r])=>{setUsers(Array.isArray(u)?u:[]);setRecords(Array.isArray(r)?r:[]);});
+  useEffect(()=>{load();},[]);
+  const present = Math.max(0,30-(+(form.absentDays)||0));
+  const calculated = (((+(form.monthlySalary)||0)/30)*present)+ (+(form.incentive)||0);
+  const payable = +(form.manualSalary)||calculated;
+  const save = async()=>{
+    setMessage("");
+    if(!form.employeeId||!form.month||+(form.monthlySalary)<=0) return setMessage("Employee, month and monthly salary are required");
+    const saved=await api("POST","/salary-records",{...form,addedBy:user.name,updatedBy:user.name});
+    if(saved?._id){setMessage("Monthly salary saved successfully");setForm({...empty,role:form.role,month:form.month});load();} else setMessage(saved?.message||"Unable to save salary");
+  };
+  const people=users.filter(u=>u.role===form.role&&u.active!==false);
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary Management</h2><div className="text-xs text-gray-400">Set monthly salary for supervisors and office users</div></div><SectionBox title="Monthly Salary Setup" icon="💳" color="violet"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"><Select label="Employee Type" value={form.role} options={[{value:"supervisor",label:"Supervisor"},{value:"user",label:"Office User"}]} onChange={e=>setForm({...form,role:e.target.value,employeeId:""})}/><Select label="Employee Name" value={form.employeeId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,employeeId:e.target.value})}/><Input label="Salary Month" type="month" value={form.month} onChange={e=>setForm({...form,month:e.target.value})}/><Input label={`Monthly Salary (${CURRENCY})`} type="number" value={form.monthlySalary} onChange={e=>setForm({...form,monthlySalary:e.target.value})}/><Input label={`Incentive - Optional (${CURRENCY})`} type="number" value={form.incentive} onChange={e=>setForm({...form,incentive:e.target.value})}/><Input label="Absent Days" type="number" value={form.absentDays} onChange={e=>setForm({...form,absentDays:e.target.value})}/><Input label={`Manual Final Salary - Optional (${CURRENCY})`} type="number" value={form.manualSalary} onChange={e=>setForm({...form,manualSalary:e.target.value})}/></div><div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs"><div className="bg-blue-50 rounded-lg p-2"><b className="block text-blue-700 text-lg">{present}</b>Present Days</div><div className="bg-amber-50 rounded-lg p-2"><b className="block text-amber-700 text-lg">{CURRENCY}{fmt(calculated)}</b>Auto Calculated</div><div className="bg-green-50 rounded-lg p-2"><b className="block text-green-700 text-lg">{CURRENCY}{fmt(payable)}</b>Final Salary</div></div><button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Save Monthly Salary</button></SectionBox>{message&&<div className="bg-green-50 text-green-700 rounded-lg p-3 text-sm font-bold">{message}</div>}<div className="space-y-2">{records.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName} <Badge color="blue">{r.role}</Badge></div><div className="text-xs text-gray-500">{r.month} · Present {r.presentDays}/30 · Absent {r.absentDays} · Incentive {CURRENCY}{fmt(r.incentive)}</div></div><div className="text-right"><div className="font-black">{CURRENCY}{fmt(r.payableAmount)}</div><div className="text-xs text-red-600">Pending {CURRENCY}{fmt(r.pendingAmount)}</div></div></div>)}</div></div>;
+}
+
+function OfficeSalaryLedger({ user, role }) {
+  const [people,setPeople]=useState([]); const [records,setRecords]=useState([]); const [selected,setSelected]=useState(""); const [payRecord,setPayRecord]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
+  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`)]).then(([u,r])=>{setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));setRecords(Array.isArray(r)?r:[]);});
+  useEffect(()=>{load();},[role]);
+  const visible=records.filter(r=>!selected||r.employeeId===selected); const totals=visible.reduce((a,r)=>({payable:a.payable+(+r.payableAmount||0),paid:a.paid+(+r.paidAmount||0),pending:a.pending+(+r.pendingAmount||0),present:a.present+(+r.presentDays||0)}),{payable:0,paid:0,pending:0,present:0});
+  const makePayment=async()=>{if(!payRecord||+(pay.amount)<=0)return;const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,paidBy:user.name});if(saved?._id){setPayRecord(null);setPay({amount:"",date:today(),mode:"Cash",note:""});load();}else if(saved?.message)window.alert(saved.message);};
+  const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">{title}</h2><div className="text-xs text-gray-400">Monthly attendance calculation, pending and payments</div></div><div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div><div className="grid grid-cols-2 lg:grid-cols-4 gap-2"><StatCard label="Present Days" value={fmt(totals.present)} icon="✅" color="blue"/><StatCard label="Total Salary" value={`${CURRENCY}${fmt(totals.payable)}`} icon="💳" color="green"/><StatCard label="Paid" value={`${CURRENCY}${fmt(totals.paid)}`} icon="✓" color="teal"/><StatCard label="Pending" value={`${CURRENCY}${fmt(totals.pending)}`} icon="!" color="red"/></div><div className="space-y-2">{visible.map(r=><div key={r._id} className="bg-white border rounded-lg p-3"><div className="flex items-start justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month} · Present {r.presentDays}/30 · Absent {r.absentDays}</div><div className="text-xs text-gray-500">Monthly {CURRENCY}{fmt(r.monthlySalary)} + Incentive {CURRENCY}{fmt(r.incentive)}{r.manualSalary>0?` · Manual ${CURRENCY}${fmt(r.manualSalary)}`:""}</div></div><div className="text-right"><div className="font-black text-red-600">Pending {CURRENCY}{fmt(r.pendingAmount)}</div><div className="text-xs text-gray-500">Paid {CURRENCY}{fmt(r.paidAmount)} / {CURRENCY}{fmt(r.payableAmount)}</div>{r.pendingAmount>0&&<button onClick={()=>{setPayRecord(r);setPay({amount:String(r.pendingAmount),date:today(),mode:"Cash",note:`${r.month} salary payment`});}} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button>} {r.pendingAmount<=0&&<Badge color="green">Payment Done</Badge>}</div></div></div>)}</div>{payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Payment Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
+}
+
 function SalaryHub({ user, setPage }) {
-  const [summary, setSummary] = useState({ production:0, site:0, driver:0 });
+  const [summary, setSummary] = useState({ production:0, site:0, driver:0, supervisor:0, user:0 });
   const [loading, setLoading] = useState(true);
   useEffect(()=>{
     Promise.all([
       api("GET", "/workers"),
       api("GET", `/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name || "")}`),
-    ]).then(([workers, drivers])=>{
+      api("GET", "/salary-records"),
+    ]).then(([workers, drivers, salaries])=>{
       const list = Array.isArray(workers) ? workers : [];
+      const salaryList = Array.isArray(salaries) ? salaries : [];
       setSummary({
         production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
         site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
         driver:+(drivers?.summary?.totalPending)||0,
+        supervisor:salaryList.filter(r=>r.role==="supervisor").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
+        user:salaryList.filter(r=>r.role==="user").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
       });
       setLoading(false);
     }).catch(()=>setLoading(false));
@@ -7896,8 +7933,10 @@ function SalaryHub({ user, setPage }) {
     { id:"salaryproduction", title:"Production Workers", pending:summary.production, icon:"🏭", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
     { id:"salarydriver", title:"Drivers", pending:summary.driver, icon:"🚚", color:"border-orange-700 bg-orange-600 hover:bg-orange-700" },
     { id:"salarysite", title:"Site Workers", pending:summary.site, icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+    { id:"salarysupervisor", title:"Supervisors", pending:summary.supervisor, icon:"🧑‍💼", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
+    { id:"salaryuser", title:"Office Users", pending:summary.user, icon:"🧑‍💻", color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700" },
   ];
-  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages and total ledger payments</div></div><div className="grid grid-cols-1 sm:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-3xl">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">Total Pending</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.pending)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">View Ledger & Pay</span></div></button>)}</div></div>;
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages and total ledger payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-3xl">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">Total Pending</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.pending)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">View Ledger & Pay</span></div></button>)}</div></div>;
 }
 
 function OfficeHub({ setPage }) {
@@ -8310,11 +8349,14 @@ export default function App() {
       case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={setPage} />;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={setPage} />:null;
+      case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={setPage} />:null;
       case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={setPage} />:null;
       case "salaryproduction": return isAdminLike(currentUser.role)?<AdminWorkerReport user={currentUser} initialTab="production" />:null;
       case "salarysite": return isAdminLike(currentUser.role)?<AdminWorkerReport user={currentUser} initialTab="site" />:null;
       case "salarydriver": return isAdminLike(currentUser.role)?<DriverReports user={currentUser} />:null;
+      case "salarysupervisor": return isAdminLike(currentUser.role)?<OfficeSalaryLedger user={currentUser} role="supervisor" />:null;
+      case "salaryuser": return isAdminLike(currentUser.role)?<OfficeSalaryLedger user={currentUser} role="user" />:null;
       case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "admincashflow": return isAdminLike(currentUser.role)?<AdminCashFlow user={currentUser} allUsers={allUsers} />:null;
       case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
