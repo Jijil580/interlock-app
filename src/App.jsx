@@ -7354,13 +7354,13 @@ function DailyCashFlow({ user, allUsers }) {
           <h2 className="text-xl font-black text-gray-900">Daily Cash Flow</h2>
           <div className="text-xs text-gray-400">Read-only totals from reports, sales, purchases and payments</div>
         </div>
-        <div className="flex bg-white border rounded-xl p-1">
+        {user.role!=="user"&&<div className="flex bg-white border rounded-xl p-1">
           <button onClick={()=>setView("daily")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="daily"?"bg-amber-500 text-white":"text-gray-500"}`}>Daily View</button>
           <button onClick={()=>setView("total")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="total"?"bg-amber-500 text-white":"text-gray-500"}`}>Total View</button>
-        </div>
+        </div>}
       </div>
 
-      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {user.role==="user"?<div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm font-bold text-blue-800">Today · {user.name}</div>:<div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {user.role==="admin"&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
         {view==="daily" ? (
           <Input label="Select Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
@@ -7374,7 +7374,7 @@ function DailyCashFlow({ user, allUsers }) {
             {dateMode==="range"&&<Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
           </>
         )}
-      </div>
+      </div>}
 
       {loading ? <Loader /> : (
         <>
@@ -8306,7 +8306,7 @@ export default function App() {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
       setCurrentUser(u);
-      setPage(u.role==="driver"?"driversubmit":u.role==="supervisor"?"sitework":"dashboard");
+      setPage(u.role==="driver"?"driversubmit":u.role==="supervisor"?"sitework":u.role==="user"?"officehub":"dashboard");
     }
   }} />;
   
@@ -8317,7 +8317,7 @@ export default function App() {
       deviceInfo={currentUser.deviceInfo}
       onRetry={()=>{
         setCurrentUser({...currentUser, _pendingDevice: false});
-        setPage(currentUser.role==="driver"?"driversubmit":currentUser.role==="supervisor"?"sitework":"dashboard");
+        setPage(currentUser.role==="driver"?"driversubmit":currentUser.role==="supervisor"?"sitework":currentUser.role==="user"?"officehub":"dashboard");
       }}
     />;
   }
@@ -8327,7 +8327,7 @@ export default function App() {
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
   const officeNestedPages = ["sitework", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
-    (currentUser.role !== "user" || !["devices", "users"].includes(item.id)) &&
+    (currentUser.role !== "user" || !["devices", "users", "dashboard"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
     !nestedNavPages.includes(item.id) &&
     (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
