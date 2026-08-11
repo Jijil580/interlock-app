@@ -7808,7 +7808,6 @@ function CashFlowHub({ user, setPage }) {
     { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
     { id:"admincashflow", title:"Admin Cashflow", sub:"Cash given to admin or received from admin", icon:"AC", color:"blue", show:isAdminLike(user.role) },
     { id:"officedaily", title:"Office Daily Report", sub:"Sales, purchase, production and cash received report", icon:"DR", color:"purple", show:isAdminLike(user.role) },
-    { id:"reportaudit", title:"Report Audit", sub:"Edit and delete reason history", icon:"AUD", color:"red", show:user.role === "admin" },
   ].filter(t => t.show);
   const colorClass = {
     green:"border-green-200 hover:border-green-400 bg-green-50/40",
@@ -7845,6 +7844,7 @@ function AdminControlHub({ setPage }) {
     { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-200 bg-amber-50 hover:border-amber-400" },
     { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-200 bg-blue-50 hover:border-blue-400" },
     { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-200 bg-teal-50 hover:border-teal-400" },
+    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:"🔎", color:"border-red-200 bg-red-50 hover:border-red-400" },
   ];
   return (
     <div className="space-y-4">
