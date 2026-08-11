@@ -1654,6 +1654,15 @@ function DailyReport({ user }) {
   const running = mySites.filter(s=>s.status==="running");
   const completed = mySites.filter(s=>s.status==="completed");
   const getSiteReports = (site) => reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id).sort((a,b)=>b.date.localeCompare(a.date));
+  const paymentType = (payment) => String(payment?.type || "").trim().toLowerCase();
+  const isSiteReceipt = (payment) => paymentType(payment) === "site payment received";
+  const isOfficeCash = (payment) => ["cash received from office", "cash given to office"].includes(paymentType(payment));
+  const isOfficeCashReceived = (payment) => paymentType(payment) === "cash received from office";
+  const isExpensePayment = (payment) => paymentType(payment) !== "worker payment" && !isSiteReceipt(payment) && !isOfficeCash(payment);
+  const paymentFormForSection = (section) => ({
+    ...emptyPayForm,
+    type: section === "site" ? "Site Payment Received" : section === "office" ? "Cash Received from Office" : "Material Payment"
+  });
   const visibleReports = reports.filter(r=>{
     if (isAdminLike(user.role)) return true;
     const allowedSite = mySites.some(s=>r.siteName===s.customerName||r.siteId===s._id);
@@ -1666,17 +1675,17 @@ function DailyReport({ user }) {
   );
   const sectionRows = {
     site: filteredReports
-      .filter(r=>r.siteName || r.completedToday || r.materialsUnloaded || r.extraWorkDesc || r.dayNotes)
+      .filter(r=>r.siteName || r.completedToday || r.materialsUnloaded || r.extraWorkDesc || r.dayNotes || (r.payments||[]).some(isSiteReceipt))
       .filter(r=>filterText(r.siteName, reportFilters.siteName))
       .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
     workers: filteredReports.flatMap(r=>(r.workerEntries||[]).map((w,i)=>({...w,report:r,rowId:`${r._id}-w-${i}`})))
       .filter(w=>filterText(w.workerName, reportFilters.workerName)&&filterText(w.report.siteName, reportFilters.siteName)&&filterText(w.workCategory, reportFilters.type))
       .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
-    expenses: filteredReports.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>({...p,report:r,rowId:`${r._id}-p-${i}`})))
+    expenses: filteredReports.flatMap(r=>(r.payments||[]).filter(isExpensePayment).map((p,i)=>({...p,report:r,rowId:`${r._id}-p-${i}`})))
       .filter(p=>filterText(p.report.siteName||p.siteName, reportFilters.siteName)&&filterText(p.type, reportFilters.type))
       .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
     office: filteredReports
-      .filter(r=>r.complaints || r.actionTaken || (r.dayNotes && !r.completedToday && !(r.workerEntries||[]).length && !(r.payments||[]).length))
+      .filter(r=>r.complaints || r.actionTaken || (r.payments||[]).some(isOfficeCash) || (r.dayNotes && !r.completedToday && !(r.workerEntries||[]).length && !(r.payments||[]).some(p=>!isOfficeCash(p))))
       .filter(r=>filterText(r.siteName, reportFilters.siteName))
       .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
   };
@@ -1743,7 +1752,7 @@ function DailyReport({ user }) {
     if (!payForm.amount) return;
     if (payForm.type === "Worker Payment") return;
     setForm(f=>({...f, payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount,pending:+payForm.pending||0,siteName:payForm.siteName||f.siteName}]}));
-    setPayForm(emptyPayForm);
+    setPayForm(paymentFormForSection(entrySection));
   };
 
   const sectionReportPayload = (source, section) => {
@@ -1768,14 +1777,16 @@ function DailyReport({ user }) {
       extraWorkDesc: source.extraWorkDesc,
       extraWorkQty: source.extraWorkQty,
       extraWorkCost: source.extraWorkCost,
+      payments: (source.payments || []).filter(isSiteReceipt),
     };
     if (section === "workers") return { ...base, workerEntries: source.workerEntries || [] };
-    if (section === "expenses") return { ...base, payments: source.payments || [] };
+    if (section === "expenses") return { ...base, payments: (source.payments || []).filter(isExpensePayment) };
     if (section === "office") return {
       ...base,
       dayNotes: source.dayNotes,
       complaints: source.complaints,
       actionTaken: source.actionTaken,
+      payments: (source.payments || []).filter(isOfficeCash),
     };
     return source;
   };
@@ -1790,10 +1801,10 @@ function DailyReport({ user }) {
     const reportPayload = sectionReportPayload(form, entrySection);
     const cleanPayments = (reportPayload.payments||[]).filter(p=>p.type!=="Worker Payment");
     const workerPaidTotal = (reportPayload.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven)||0),0);
-    const totalPayments = cleanPayments.reduce((a,p)=>a+(+(p.amount)||0),0) + workerPaidTotal;
+    const totalPayments = cleanPayments.filter(p=>!isSiteReceipt(p)&&!isOfficeCashReceived(p)).reduce((a,p)=>a+(+(p.amount)||0),0) + workerPaidTotal;
 
     // 3. Calculate site payment received & AUTO-UPDATE sitework
-    const sitePayments = cleanPayments.filter(p=>p.type==="Site Payment Received");
+    const sitePayments = cleanPayments.filter(isSiteReceipt);
     const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     let item;
     if (reportPayload._id) {
@@ -1820,6 +1831,7 @@ function DailyReport({ user }) {
       workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
+    setPayForm(paymentFormForSection(section));
     setEntrySection(section);
     setSelectedSite(null);
     setAddModal(true);
@@ -1871,13 +1883,14 @@ function DailyReport({ user }) {
     setViewModal(null);
     setForm(normalizeDailyReport(report));
     setSiteSearch(report.siteName || "");
-    setPayForm(emptyPayForm);
+    const editSection = (report.workerEntries||[]).length ? "workers" : (report.payments||[]).some(isSiteReceipt) ? "site" : (report.payments||[]).some(isOfficeCash) || report.complaints || report.actionTaken ? "office" : (report.payments||[]).length ? "expenses" : "site";
+    setPayForm(paymentFormForSection(editSection));
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
       workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
       paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
     });
-    setEntrySection((report.workerEntries||[]).length ? "workers" : (report.payments||[]).length ? "expenses" : (report.complaints || report.actionTaken) ? "office" : "site");
+    setEntrySection(editSection);
     setAddModal(true);
   };
 
@@ -2113,6 +2126,7 @@ function DailyReport({ user }) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{r.siteName||"Site Entry"}</div>
+                  {(r.payments||[]).filter(isSiteReceipt).length>0&&<div className="font-black text-blue-700">Site received: {CURRENCY}{fmt((r.payments||[]).filter(isSiteReceipt).reduce((sum,p)=>sum+(+(p.amount)||0),0))}</div>}
                   <div className="text-gray-400">{r.date||"-"} · {r.addedBy||"-"}</div>
                   <div className="mt-1 text-gray-600">{r.completedToday||0} sqft done {r.materialsUnloaded?`· ${r.materialsUnloaded} ${r.materialQty||""}`:""} {r.extraWorkDesc?`· Extra: ${r.extraWorkDesc}`:""}</div>
                 </div>
@@ -2164,6 +2178,7 @@ function DailyReport({ user }) {
                   {r.dayNotes&&<div className="text-gray-600 mt-1">Notes: {r.dayNotes}</div>}
                   {r.complaints&&<div className="text-red-700 mt-1">Complaint: {r.complaints}</div>}
                   {r.actionTaken&&<div className="text-gray-500 mt-1">Action: {r.actionTaken}</div>}
+                  {(r.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className={`mt-1 font-bold ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{p.type}: {CURRENCY}{fmt(p.amount||0)}</div>)}
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button type="button" onClick={()=>openDailyReportView(r)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
@@ -2230,7 +2245,7 @@ function DailyReport({ user }) {
                 {id:"expenses",label:"Expenses"},
                 {id:"office",label:"Office"},
               ].map(s=>(
-                <button key={s.id} type="button" onClick={()=>setEntrySection(s.id)} className={`py-2 rounded-lg text-xs font-black ${entrySection===s.id?"bg-amber-500 text-white shadow-sm":"text-gray-600 hover:bg-white"}`}>{s.label}</button>
+                <button key={s.id} type="button" onClick={()=>{setEntrySection(s.id);setPayForm(paymentFormForSection(s.id));}} className={`py-2 rounded-lg text-xs font-black ${entrySection===s.id?"bg-amber-500 text-white shadow-sm":"text-gray-600 hover:bg-white"}`}>{s.label}</button>
               ))}
             </div>
 
@@ -2241,6 +2256,18 @@ function DailyReport({ user }) {
               </div>
               <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} />
               <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
+            </SectionBox>}
+
+            {entrySection==="site"&&<SectionBox title="Site Payment Received" icon="Cash" color="blue">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Received From" value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",receivedFrom:e.target.value})} placeholder="Client name" />
+                <Input label="Pending Amount" type="number" value={payForm.pending||""} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",pending:e.target.value})} placeholder="0" />
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-blue-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-blue-700">+ Add Site Payment</button>
+              {(form.payments||[]).filter(isSiteReceipt).map((p,i)=><div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-blue-200 text-xs mt-1"><div><span className="font-bold">{p.receivedFrom||"Site payment"}</span><div className="text-gray-400">{p.mode}{p.remarks?` - ${p.remarks}`:""}</div></div><div className="flex items-center gap-2"><span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(item=>item!==p)}))} className="text-red-400 font-black">x</button></div></div>)}
             </SectionBox>}
 
             {entrySection==="workers"&&<SectionBox title="Worker Details" icon="👷" color="teal">
@@ -2338,7 +2365,7 @@ function DailyReport({ user }) {
             </SectionBox>}
 
             {entrySection==="expenses"&&<SectionBox title="Payments & Expenses" icon="💰" color="green">
-              <Select label="Payment Type" value={payForm.type} options={["Site Payment Received","Vehicle Charge","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
+              <Select label="Payment Type" value={payForm.type} options={["Vehicle Charge","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
               {payForm.type==="Material Payment"&&(
                 <div className="grid grid-cols-2 gap-2">
                   <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
@@ -2360,19 +2387,13 @@ function DailyReport({ user }) {
                   </datalist>
                 </div>
               )}
-              {payForm.type==="Site Payment Received"&&(
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Received From" value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,receivedFrom:e.target.value})} placeholder="Client name" />
-                  <Input label="Pending Amount" type="number" value={payForm.pending||""} onChange={e=>setPayForm({...payForm,pending:e.target.value})} placeholder="0" />
-                </div>
-              )}
               <div className="grid grid-cols-2 gap-2">
                 <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
                 <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
               </div>
               <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
               <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
-              {(form.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+              {(form.payments||[]).filter(isExpensePayment).map((p,i)=>(
                 <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs mt-1">
                   <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}</div></div>
                   <div className="flex items-center gap-1">
@@ -2410,6 +2431,18 @@ function DailyReport({ user }) {
               <Textarea label="Office / Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="Office notes for this date..." />
               <Textarea label="Complaint" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues..." />
               <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
+            </SectionBox>}
+
+            {entrySection==="office"&&<SectionBox title="Office Cash" icon="Cash" color="blue">
+              <Select label="Cash Entry" value={payForm.type} options={["Cash Received from Office","Cash Given to Office"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
+              <div className="grid grid-cols-2 gap-2">
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label={isOfficeCashReceived(payForm)?"Received From":"Given To"} value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,receivedFrom:e.target.value})} placeholder="Office / person name" />
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-blue-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-blue-700">+ Add Office Cash Entry</button>
+              {(form.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-blue-200 text-xs mt-1"><div><span className="font-bold">{p.type}</span><div className="text-gray-400">{p.receivedFrom||"Office"} - {p.mode}</div></div><div className="flex items-center gap-2"><span className={`font-black ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{CURRENCY}{fmt(p.amount)}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(item=>item!==p)}))} className="text-red-400 font-black">x</button></div></div>)}
             </SectionBox>}
 
             <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{form._id?"Resubmit Daily Report":`Submit ${entrySection==="site"?"Site":entrySection==="workers"?"Workers":entrySection==="expenses"?"Expenses":"Office"} Entry`}</button>
