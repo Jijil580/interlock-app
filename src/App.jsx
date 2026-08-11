@@ -1838,20 +1838,21 @@ function DailyReport({ user }) {
   };
 
   const entryButtons = (compact = false) => (
-    <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-1`}>
+    <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-2`}>
       {[
-        { id:"site", label:"Site" },
-        { id:"workers", label:"Workers" },
-        { id:"expenses", label:"Expenses" },
-        { id:"office", label:"Office" },
+        { id:"site", label:"Site", icon:"🏗️", color:"border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" },
+        { id:"workers", label:"Workers", icon:"👷", color:"border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100" },
+        { id:"expenses", label:"Expenses", icon:"💸", color:"border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
+        { id:"office", label:"Office", icon:"🏢", color:"border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100" },
       ].map(s=>(
         <button
           key={s.id}
           type="button"
           onClick={(e)=>{e.stopPropagation(); openAdd(null, s.id);}}
-          className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1.5 rounded-lg text-xs font-black hover:bg-amber-100"
+          className={`${s.color} border rounded-lg aspect-square sm:aspect-[4/3] min-h-[92px] p-2 flex flex-col items-center justify-center gap-2 text-xs font-black transition-colors`}
         >
-          + {s.label}
+          <span className="text-2xl" aria-hidden="true">{s.icon}</span>
+          <span>+ {s.label}</span>
         </button>
       ))}
     </div>
@@ -2104,14 +2105,14 @@ function DailyReport({ user }) {
           </div>
           <button type="button" onClick={()=>setReportFilters({date:"",siteName:"",workerName:"",type:""})} className="bg-gray-50 text-gray-600 border border-gray-200 px-2 py-1 rounded-lg text-xs font-bold">Clear</button>
         </div>
-        <div className="grid grid-cols-4 gap-1 bg-gray-100 rounded-xl p-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            {id:"site",label:"Site",count:sectionRows.site.length},
-            {id:"workers",label:"Workers",count:sectionRows.workers.length},
-            {id:"expenses",label:"Expenses",count:sectionRows.expenses.length},
-            {id:"office",label:"Office",count:sectionRows.office.length},
+            {id:"site",label:"Site",icon:"🏗️",count:sectionRows.site.length},
+            {id:"workers",label:"Workers",icon:"👷",count:sectionRows.workers.length},
+            {id:"expenses",label:"Expenses",icon:"💸",count:sectionRows.expenses.length},
+            {id:"office",label:"Office",icon:"🏢",count:sectionRows.office.length},
           ].map(s=>(
-            <button key={s.id} type="button" onClick={()=>setReportSection(s.id)} className={`py-2 rounded-lg text-xs font-black ${reportSection===s.id?"bg-amber-500 text-white shadow-sm":"text-gray-600 hover:bg-white"}`}>{s.label} ({s.count})</button>
+            <button key={s.id} type="button" onClick={()=>setReportSection(s.id)} className={`min-h-[78px] rounded-lg border p-2 text-xs font-black flex flex-col items-center justify-center gap-1 ${reportSection===s.id?"bg-amber-500 border-amber-500 text-white shadow-sm":"bg-white border-gray-200 text-gray-600 hover:border-amber-300"}`}><span className="text-xl" aria-hidden="true">{s.icon}</span><span>{s.label} ({s.count})</span></button>
           ))}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -2238,17 +2239,6 @@ function DailyReport({ user }) {
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
               {entrySection==="site"&&<Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />}
             </div>
-            <div className="grid grid-cols-4 gap-1 bg-gray-100 rounded-xl p-1">
-              {[
-                {id:"site",label:"Site"},
-                {id:"workers",label:"Workers"},
-                {id:"expenses",label:"Expenses"},
-                {id:"office",label:"Office"},
-              ].map(s=>(
-                <button key={s.id} type="button" onClick={()=>{setEntrySection(s.id);setPayForm(paymentFormForSection(s.id));}} className={`py-2 rounded-lg text-xs font-black ${entrySection===s.id?"bg-amber-500 text-white shadow-sm":"text-gray-600 hover:bg-white"}`}>{s.label}</button>
-              ))}
-            </div>
-
             {entrySection==="site"&&<SectionBox title="Work Progress" icon="📐" color="blue">
               <div className="grid grid-cols-2 gap-2">
                 <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
