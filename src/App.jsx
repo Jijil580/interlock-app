@@ -1840,16 +1840,16 @@ function DailyReport({ user }) {
   const entryButtons = (compact = false) => (
     <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-2`}>
       {[
-        { id:"site", label:"Site", icon:"🏗️", color:"border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100" },
-        { id:"workers", label:"Workers", icon:"👷", color:"border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100" },
-        { id:"expenses", label:"Expenses", icon:"💸", color:"border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
-        { id:"office", label:"Office", icon:"🏢", color:"border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100" },
+        { id:"site", label:"Site", icon:"🏗️", color:"border-blue-700 bg-blue-600 text-white hover:bg-blue-700" },
+        { id:"workers", label:"Workers", icon:"👷", color:"border-teal-700 bg-teal-600 text-white hover:bg-teal-700" },
+        { id:"expenses", label:"Expenses", icon:"💸", color:"border-red-700 bg-red-600 text-white hover:bg-red-700" },
+        { id:"office", label:"Office", icon:"🏢", color:"border-violet-700 bg-violet-600 text-white hover:bg-violet-700" },
       ].map(s=>(
         <button
           key={s.id}
           type="button"
           onClick={(e)=>{e.stopPropagation(); openAdd(null, s.id);}}
-          className={`${s.color} border rounded-lg aspect-square sm:aspect-[4/3] min-h-[92px] p-2 flex flex-col items-center justify-center gap-2 text-xs font-black transition-colors`}
+          className={`${s.color} border rounded-lg aspect-square sm:aspect-[4/3] min-h-[92px] p-2 flex flex-col items-center justify-center gap-2 text-xs font-black shadow-sm hover:shadow-md transition-all`}
         >
           <span className="text-2xl" aria-hidden="true">{s.icon}</span>
           <span>+ {s.label}</span>
@@ -2107,12 +2107,12 @@ function DailyReport({ user }) {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            {id:"site",label:"Site",icon:"🏗️",count:sectionRows.site.length},
-            {id:"workers",label:"Workers",icon:"👷",count:sectionRows.workers.length},
-            {id:"expenses",label:"Expenses",icon:"💸",count:sectionRows.expenses.length},
-            {id:"office",label:"Office",icon:"🏢",count:sectionRows.office.length},
+            {id:"site",label:"Site",icon:"🏗️",count:sectionRows.site.length,color:"border-blue-700 bg-blue-600 hover:bg-blue-700",ring:"ring-blue-300"},
+            {id:"workers",label:"Workers",icon:"👷",count:sectionRows.workers.length,color:"border-teal-700 bg-teal-600 hover:bg-teal-700",ring:"ring-teal-300"},
+            {id:"expenses",label:"Expenses",icon:"💸",count:sectionRows.expenses.length,color:"border-red-700 bg-red-600 hover:bg-red-700",ring:"ring-red-300"},
+            {id:"office",label:"Office",icon:"🏢",count:sectionRows.office.length,color:"border-violet-700 bg-violet-600 hover:bg-violet-700",ring:"ring-violet-300"},
           ].map(s=>(
-            <button key={s.id} type="button" onClick={()=>setReportSection(s.id)} className={`min-h-[78px] rounded-lg border p-2 text-xs font-black flex flex-col items-center justify-center gap-1 ${reportSection===s.id?"bg-amber-500 border-amber-500 text-white shadow-sm":"bg-white border-gray-200 text-gray-600 hover:border-amber-300"}`}><span className="text-xl" aria-hidden="true">{s.icon}</span><span>{s.label} ({s.count})</span></button>
+            <button key={s.id} type="button" onClick={()=>setReportSection(s.id)} className={`min-h-[82px] rounded-lg border p-2 text-xs font-black text-white flex flex-col items-center justify-center gap-1 shadow-sm hover:shadow-md transition-all ${s.color} ${reportSection===s.id?`ring-2 ring-offset-2 ${s.ring}`:"opacity-90"}`}><span className="text-xl" aria-hidden="true">{s.icon}</span><span>{s.label}</span><span className="min-w-6 rounded-full bg-white/20 px-2 py-0.5">{s.count}</span></button>
           ))}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
