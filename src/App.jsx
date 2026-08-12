@@ -120,10 +120,10 @@ function Badge({ children, color = "gray" }) {
 function Modal({ title, onClose, children, wide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-0 sm:p-3">
-      <div className={`app-modal bg-white rounded-t-2xl sm:rounded-xl shadow-xl border border-slate-200 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
-          <h3 className="font-black text-gray-900 text-base leading-tight">{title}</h3>
-          <button onClick={onClose} className="w-10 h-10 rounded-full bg-slate-100 text-gray-500 hover:text-gray-700 text-2xl leading-none flex items-center justify-center">×</button>
+      <div className={`app-modal bg-white rounded-t-2xl sm:rounded-lg shadow-xl border border-slate-300 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto`}>
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 sticky top-0 bg-slate-900 z-10">
+          <h3 className="font-black text-white text-base leading-tight">{title}</h3>
+          <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white text-2xl leading-none flex items-center justify-center">×</button>
         </div>
         <div className="app-modal-body px-4 sm:px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">{children}</div>
       </div>
@@ -135,7 +135,7 @@ function Input({ label, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <input className="w-full min-h-11 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props} />
+      <input className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...props} />
     </div>
   );
 }
@@ -144,7 +144,7 @@ function Textarea({ label, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <textarea className="w-full min-h-24 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm resize-none" rows={3} {...props} />
+      <textarea className="w-full min-h-24 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white resize-none" rows={3} {...props} />
     </div>
   );
 }
@@ -153,7 +153,7 @@ function Select({ label, options, ...props }) {
   return (
     <div>
       {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <select className="w-full min-h-11 border border-slate-200 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 bg-white shadow-sm" {...props}>
+      <select className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...props}>
         {options.map((o) => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
       </select>
     </div>
@@ -235,16 +235,26 @@ function Loader() {
 }
 
 function EmptyState({ icon, text }) {
-  return <div className="bg-white rounded-xl border border-slate-200 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-400 font-semibold">{text}</div></div>;
+  return <div className="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-500 font-semibold">{text}</div></div>;
 }
 
 function SectionBox({ title, icon, color = "gray", children }) {
-  const c = { gray:"border-slate-300 text-slate-700", blue:"border-blue-400 text-blue-700", green:"border-emerald-400 text-emerald-700", amber:"border-amber-400 text-amber-700", red:"border-red-400 text-red-700", purple:"border-violet-400 text-violet-700", teal:"border-teal-400 text-teal-700", orange:"border-orange-400 text-orange-700" };
+  const c = {
+    gray:{ border:"border-slate-300", header:"bg-slate-700" },
+    blue:{ border:"border-blue-300", header:"bg-blue-600" },
+    green:{ border:"border-emerald-300", header:"bg-emerald-600" },
+    amber:{ border:"border-amber-300", header:"bg-amber-500" },
+    red:{ border:"border-red-300", header:"bg-red-600" },
+    purple:{ border:"border-violet-300", header:"bg-violet-600" },
+    teal:{ border:"border-teal-300", header:"bg-teal-600" },
+    orange:{ border:"border-orange-300", header:"bg-orange-600" }
+  };
+  const theme = c[color] || c.gray;
   return (
-    <div className={`bg-white border border-slate-200 border-l-4 ${c[color]} rounded-xl p-4 space-y-3 shadow-sm`}>
-      <div className={`text-xs font-black uppercase tracking-wider ${c[color].split(" ")[1]}`}>{icon} {title}</div>
-      {children}
-    </div>
+    <section className={`bg-white border ${theme.border} rounded-lg overflow-hidden shadow-sm`}>
+      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase text-white`}>{icon} {title}</div>
+      <div className="p-4 space-y-3">{children}</div>
+    </section>
   );
 }
 
@@ -3501,7 +3511,7 @@ function Purchases({ user }) {
 
       {ledger?.supplier && (
         <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-r from-teal-500 to-cyan-600 px-4 py-3 flex items-center justify-between">
+          <div className="bg-teal-700 px-4 py-3 flex items-center justify-between">
             <div className="text-white font-black">📒 Supplier Ledger</div>
             <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl">×</button>
           </div>
@@ -3959,7 +3969,7 @@ function ProductionSite({ user, setStock }) {
           {ledgerLoading && <div className="text-xs text-amber-600">Loading...</div>}
           {ledger?.worker && (
             <div className="bg-white rounded-2xl border-2 border-amber-200 overflow-hidden">
-              <div className="bg-gradient-to-r from-violet-500 to-purple-600 px-4 py-3 text-white font-black">🏭 {ledger.worker.name} <span className="text-xs font-normal opacity-80">· Production Only</span></div>
+              <div className="bg-violet-700 px-4 py-3 text-white font-black">🏭 {ledger.worker.name} <span className="text-xs font-normal opacity-80">· Production Only</span></div>
               <div className="p-4 space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <StatCard label="Total Production Qty" value={fmt(ledger.worker.totalQuantity)} icon="📦" color="blue" sub={`${fmt(ledger.worker.totalSqft || (ledger.history || []).reduce((a,h)=>a+itemSqft(h, interlockTypes),0))} sqft`} />
@@ -4937,7 +4947,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       {/* Customer Ledger */}
       {ledger?.customer && (
         <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 flex items-center justify-between">
+          <div className="bg-amber-600 px-4 py-3 flex items-center justify-between">
             <div className="text-white font-black">📒 Customer Ledger</div>
             <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl leading-none">×</button>
           </div>
@@ -7863,11 +7873,11 @@ function CashFlowHub({ user, setPage }) {
     { id:"officedaily", title:"Office Daily Report", sub:"Sales, purchase, production and cash received report", icon:"DR", color:"purple", show:isAdminLike(user.role) },
   ].filter(t => t.show);
   const colorClass = {
-    green:"border-green-200 hover:border-green-400 bg-green-50/40",
-    amber:"border-amber-200 hover:border-amber-400 bg-amber-50/40",
-    blue:"border-blue-200 hover:border-blue-400 bg-blue-50/40",
-    purple:"border-purple-200 hover:border-purple-400 bg-purple-50/40",
-    red:"border-red-200 hover:border-red-400 bg-red-50/40",
+    green:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700",
+    amber:"border-amber-600 bg-amber-500 hover:bg-amber-600",
+    blue:"border-blue-700 bg-blue-600 hover:bg-blue-700",
+    purple:"border-violet-700 bg-violet-600 hover:bg-violet-700",
+    red:"border-red-700 bg-red-600 hover:bg-red-700",
   };
   return (
     <div className="space-y-4">
@@ -7877,13 +7887,13 @@ function CashFlowHub({ user, setPage }) {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {tiles.map(tile => (
-          <button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden text-left bg-white rounded-2xl border shadow-sm p-4 transition-all ${colorClass[tile.color]}`}>
-            <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-3 -bottom-4 w-28 h-28 object-contain opacity-[0.09] drop-shadow-md pointer-events-none" />
+          <button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden text-left min-h-[132px] rounded-lg border shadow-sm hover:shadow-md p-4 text-white transition-all ${colorClass[tile.color]}`}>
+            <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-3 -bottom-4 w-28 h-28 object-contain opacity-[0.12] pointer-events-none" />
             <div className="relative z-[1] flex items-start gap-3">
-              <div className="w-11 h-11 rounded-xl bg-white border flex items-center justify-center text-xs font-black text-slate-700">{tile.icon}</div>
+              <div className="w-11 h-11 rounded-lg bg-white/20 border border-white/20 flex items-center justify-center text-xs font-black text-white">{tile.icon}</div>
               <div>
-                <div className="font-black text-gray-900">{tile.title}</div>
-                <div className="text-xs text-gray-500 mt-1">{tile.sub}</div>
+                <div className="font-black text-white">{tile.title}</div>
+                <div className="text-xs text-white/80 mt-1">{tile.sub}</div>
               </div>
             </div>
           </button>
@@ -8409,7 +8419,7 @@ export default function App() {
     !nestedNavPages.includes(item.id) &&
     (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
   );
-  const roleColors = { admin:"from-slate-700 to-slate-800", supervisor:"from-emerald-600 to-emerald-700", user:"from-blue-600 to-blue-700", driver:"from-amber-600 to-orange-700" };
+  const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
 
   const renderPage = () => {
     if (loading) return <Loader />;
@@ -8466,7 +8476,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="app-shell min-h-screen bg-slate-100 flex">
       {successToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[80] bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-black border border-green-500">
           {successToast}
@@ -8494,7 +8504,7 @@ export default function App() {
             <div className="text-[9px] text-slate-500 mt-0.5">{COPYRIGHT_TEXT}</div>
           </div>
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
-            <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
+            <div className={`w-9 h-9 rounded-full ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{currentUser.role}</div></div>
             <button onClick={logout} className="text-stone-500 hover:text-red-400 text-xs font-bold" title="Logout">⏻</button>
           </div>
@@ -8504,11 +8514,11 @@ export default function App() {
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
           <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
-          <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
+          <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
         </header>
-        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-6xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.035] drop-shadow-2xl pointer-events-none" /><div className="relative z-[1]">{renderPage()}</div></main>
+        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]">{renderPage()}</div></main>
       </div>
     </div>
   );
