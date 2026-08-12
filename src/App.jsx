@@ -5894,6 +5894,7 @@ function AdminWorkerReport({ user, initialTab }) {
       if (filters.item && !(h.workCategory || "").toLowerCase().includes(filters.item.toLowerCase())) return false;
       return true;
     });
+    const workerPaymentHistory = (report?.history || []).filter(h => +(h.paid ?? h.paymentGiven ?? 0) > 0);
     const dailyAreaSum = filteredDailyHistory.reduce((sum, h) => sum + (+(h.workArea) || 0), 0);
     const dailyEarnedSum = filteredDailyHistory.reduce((sum, h) => sum + (h.amountEarned || 0), 0);
     const dailyPaidSum = filteredDailyHistory.reduce((sum, h) => sum + (h.paymentGiven || 0), 0);
@@ -5935,8 +5936,8 @@ function AdminWorkerReport({ user, initialTab }) {
               <table className="w-full text-xs">
                 <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty / Sqft</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
                 <tbody>
-                  {(report.history || []).map((h, i) => (
-                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
+                  {(report.history || []).filter(h => !h.isExtraPayment).map((h, i) => (
+                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}{+(h.paid || 0) > 0 && <div className="text-[10px] text-gray-400">By {h.paymentGivenBy || "-"}</div>}</td></tr>
                   ))}
                 </tbody>
               </table>
@@ -6022,7 +6023,7 @@ function AdminWorkerReport({ user, initialTab }) {
                             <td className="p-2">{h.unit || "—"}</td>
                             <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
                             <td className="p-2 text-right text-green-700 font-semibold">{CURRENCY}{fmt(h.amountEarned)}</td>
-                            <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                            <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}{+(h.paymentGiven || 0) > 0 && <div className="text-[10px] text-gray-400">By {h.paymentGivenBy || "-"}</div>}</td>
                             <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
                           </tr>
                         ))}
@@ -6167,6 +6168,28 @@ function AdminWorkerReport({ user, initialTab }) {
               </div>
             )}
           </>
+        )}
+
+        {report && workerPaymentHistory.length > 0 && (
+          <SectionBox title="Salary Received / Payment History" icon="PAY" color="green">
+            <div className="space-y-2">
+              {workerPaymentHistory.map((payment, index) => {
+                const amount = payment.paid ?? payment.paymentGiven ?? 0;
+                const source = payment.isExtraPayment
+                  ? "Office salary payment"
+                  : [payment.siteName, payment.item || payment.workCategory].filter(Boolean).join(" / ") || "Work entry payment";
+                return (
+                  <div key={payment._id || `${payment.date}-${index}`} className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-green-50 border border-green-100 rounded-lg p-3 text-xs">
+                    <div><div className="text-gray-400">Date</div><div className="font-bold">{payment.date || "-"}</div></div>
+                    <div><div className="text-gray-400">Amount Received</div><div className="font-black text-green-700">{CURRENCY}{fmt(amount)}</div></div>
+                    <div><div className="text-gray-400">Payment Mode</div><div className="font-bold">{payment.paymentMode || "Cash"}</div></div>
+                    <div><div className="text-gray-400">Given By</div><div className="font-black text-blue-700">{payment.paymentGivenBy || payment.addedBy || "-"}</div></div>
+                    <div className="col-span-2 sm:col-span-1"><div className="text-gray-400">Details</div><div className="font-semibold">{payment.note || payment.remarks || source}</div></div>
+                  </div>
+                );
+              })}
+            </div>
+          </SectionBox>
         )}
 
         {tab === "overall" && overall && (
@@ -7065,6 +7088,11 @@ function DriverReports({ user }) {
     if (!items.length) return "-";
     return items.map(e => `${e.category || "Other"}${+(e.liters || 0) > 0 ? ` (${fmt(e.liters)} L)` : ""}: ${CURRENCY}${fmt(e.amount || 0)}${e.note ? ` - ${e.note}` : ""}`).join("; ");
   };
+  const driverPaymentText = (report) => {
+    const payments = Array.isArray(report.payments) ? report.payments : [];
+    if (!payments.length) return "-";
+    return payments.map(p => `${p.date || "-"}: ${CURRENCY}${fmt(p.amount || 0)} (${p.mode || "Cash"}) - Given by ${p.addedBy || "-"}`).join("; ");
+  };
   const printDriverLedger = () => {
     const title = filters.driver || filters.mobile || (canOfficeEdit ? "All Drivers" : user.name);
     const rows = reports.map((r, i) => {
@@ -7073,7 +7101,7 @@ function DriverReports({ user }) {
         <td>${i + 1}</td><td>${escapePrint(r.date || "")}</td><td>${escapePrint(r.driverName || "")}</td><td>${escapePrint([r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / "))}</td>
         <td>${escapePrint([r.category, r.itemName].filter(Boolean).join(" / ") || "-")}</td><td>${escapePrint([r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-")}</td>
         <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}<br>${+(r.loadAmount || 0) > 0 ? CURRENCY + fmt(r.loadAmount) : ""}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
-        <td class="right">${CURRENCY}${fmt(driverPayableAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPaidAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPendingAmount(r))}${driverCreditAmount(r) > 0 ? `<br>Credit ${CURRENCY}${fmt(driverCreditAmount(r))}` : ""}</td>
+        <td class="right">${CURRENCY}${fmt(driverPayableAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPaidAmount(r))}</td><td>${escapePrint(driverPaymentText(r))}</td><td class="right">${CURRENCY}${fmt(driverPendingAmount(r))}${driverCreditAmount(r) > 0 ? `<br>Credit ${CURRENCY}${fmt(driverCreditAmount(r))}` : ""}</td>
       </tr>`;
     }).join("");
     const html = `<!doctype html><html><head><title>Driver Ledger</title><style>
@@ -7081,7 +7109,7 @@ function DriverReports({ user }) {
     </style></head><body><button class="printbtn" onclick="window.print()">Print</button>
       <div class="top"><div><div class="company">${escapePrint(COMPANY.companyName)}</div><div class="muted">${escapePrint(COMPANY.address)} | ${escapePrint(COMPANY.phone1 || "")}</div></div><div class="title">DRIVER LEDGER<div class="muted">${escapePrint(title)}</div></div></div>
       <div class="summary"><div class="box">Trips<b>${fmt(summary.totalTrips || 0)}</b></div><div class="box">Total Earned<b>${CURRENCY}${fmt(summary.totalEarned || 0)}</b></div><div class="box">Total Paid<b>${CURRENCY}${fmt(summary.totalPaid || 0)}</b></div><div class="box">Total Pending<b>${CURRENCY}${fmt(summary.totalPending || 0)}</b></div><div class="box">Expenses<b>${CURRENCY}${fmt(summary.totalExpenses || 0)}</b></div><div class="box">KM Run<b>${fmt(summary.totalKm || 0)}</b></div></div>
-      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Earned</th><th>Paid</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="12">No driver ledger entries found</td></tr>`}</tbody></table>
+      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Earned</th><th>Paid</th><th>Payment Receipt</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="13">No driver ledger entries found</td></tr>`}</tbody></table>
     <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
     const w = window.open("", "_blank");
     w.document.write(html);
@@ -7157,7 +7185,7 @@ function DriverReports({ user }) {
                   <td>{driverExpenseText(r)}</td>
                   <td className="text-right font-bold">{fmt(km.totalKm || 0)}</td>
                   <td className="text-right text-green-700 font-black">{CURRENCY}{fmt(driverPayableAmount(r))}</td>
-                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(driverPaidAmount(r))}</td>
+                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(driverPaidAmount(r))}{(r.payments || []).length > 0 && <div className="text-[10px] text-gray-400 font-semibold">By {[...new Set((r.payments || []).map(p => p.addedBy).filter(Boolean))].join(", ") || "-"}</div>}</td>
                   <td className="text-right text-red-600 font-black">{CURRENCY}{fmt(driverPendingAmount(r))}{driverCreditAmount(r) > 0 && <div className="text-green-700">Credit {CURRENCY}{fmt(driverCreditAmount(r))}</div>}</td>
                 </tr>;
               })}</tbody>
@@ -7224,7 +7252,7 @@ function DriverReports({ user }) {
               <div className="font-bold text-green-700 mb-1">Driver Payment History</div>
               {payments.map((p, i) => (
                 <div key={i} className="flex justify-between border-t border-green-100 py-1 first:border-t-0">
-                  <span>{p.date || "-"} | {p.mode || "Cash"}{p.note ? ` | ${p.note}` : ""}</span>
+                  <span>{p.date || "-"} | {p.mode || "Cash"} | Given by: <b>{p.addedBy || "-"}</b>{p.note ? ` | ${p.note}` : ""}</span>
                   <span className="font-black">{CURRENCY}{fmt(p.amount || 0)}</span>
                 </div>
               ))}
@@ -7903,7 +7931,32 @@ function SalaryManagement({ user }) {
     if(saved?._id){setMessage("Monthly salary saved successfully");setForm({...empty,role:form.role,month:form.month});load();} else setMessage(saved?.message||"Unable to save salary");
   };
   const people=users.filter(u=>u.role===form.role&&u.active!==false);
-  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary Management</h2><div className="text-xs text-gray-400">Set monthly salary for supervisors and office users</div></div><SectionBox title="Monthly Salary Setup" icon="💳" color="violet"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"><Select label="Employee Type" value={form.role} options={[{value:"supervisor",label:"Supervisor"},{value:"user",label:"Office User"}]} onChange={e=>setForm({...form,role:e.target.value,employeeId:""})}/><Select label="Employee Name" value={form.employeeId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,employeeId:e.target.value})}/><Input label="Salary Month" type="month" value={form.month} onChange={e=>setForm({...form,month:e.target.value})}/><Input label={`Monthly Salary (${CURRENCY})`} type="number" value={form.monthlySalary} onChange={e=>setForm({...form,monthlySalary:e.target.value})}/><Input label={`Incentive - Optional (${CURRENCY})`} type="number" value={form.incentive} onChange={e=>setForm({...form,incentive:e.target.value})}/><Input label="Absent Days" type="number" value={form.absentDays} onChange={e=>setForm({...form,absentDays:e.target.value})}/><Input label={`Manual Final Salary - Optional (${CURRENCY})`} type="number" value={form.manualSalary} onChange={e=>setForm({...form,manualSalary:e.target.value})}/></div><div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs"><div className="bg-blue-50 rounded-lg p-2"><b className="block text-blue-700 text-lg">{present}</b>Present Days</div><div className="bg-amber-50 rounded-lg p-2"><b className="block text-amber-700 text-lg">{CURRENCY}{fmt(calculated)}</b>Auto Calculated</div><div className="bg-green-50 rounded-lg p-2"><b className="block text-green-700 text-lg">{CURRENCY}{fmt(payable)}</b>Final Salary</div></div><button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Save Monthly Salary</button></SectionBox>{message&&<div className="bg-green-50 text-green-700 rounded-lg p-3 text-sm font-bold">{message}</div>}<div className="space-y-2">{records.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName} <Badge color="blue">{r.role}</Badge></div><div className="text-xs text-gray-500">{r.month} · Present {r.presentDays}/30 · Absent {r.absentDays} · Incentive {CURRENCY}{fmt(r.incentive)}</div></div><div className="text-right"><div className="font-black">{CURRENCY}{fmt(r.payableAmount)}</div><div className="text-xs text-red-600">Pending {CURRENCY}{fmt(r.pendingAmount)}</div></div></div>)}</div></div>;
+  const salaryReceipts = records.flatMap(record => (record.payments || []).map((payment, index) => ({
+    ...payment,
+    key: payment._id || `${record._id}-${index}`,
+    employeeName: record.employeeName,
+    role: record.role,
+    month: record.month,
+  }))).sort((a,b)=>(b.date || "").localeCompare(a.date || ""));
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Salary Management</h2><div className="text-xs text-gray-400">Set monthly salary for supervisors and office users</div></div>
+    <SectionBox title="Monthly Salary Setup" icon="PAY" color="violet">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Select label="Employee Type" value={form.role} options={[{value:"supervisor",label:"Supervisor"},{value:"user",label:"Office User"}]} onChange={e=>setForm({...form,role:e.target.value,employeeId:""})}/>
+        <Select label="Employee Name" value={form.employeeId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,employeeId:e.target.value})}/>
+        <Input label="Salary Month" type="month" value={form.month} onChange={e=>setForm({...form,month:e.target.value})}/>
+        <Input label={`Monthly Salary (${CURRENCY})`} type="number" value={form.monthlySalary} onChange={e=>setForm({...form,monthlySalary:e.target.value})}/>
+        <Input label={`Incentive - Optional (${CURRENCY})`} type="number" value={form.incentive} onChange={e=>setForm({...form,incentive:e.target.value})}/>
+        <Input label="Absent Days" type="number" value={form.absentDays} onChange={e=>setForm({...form,absentDays:e.target.value})}/>
+        <Input label={`Manual Final Salary - Optional (${CURRENCY})`} type="number" value={form.manualSalary} onChange={e=>setForm({...form,manualSalary:e.target.value})}/>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs"><div className="bg-blue-50 rounded-lg p-2"><b className="block text-blue-700 text-lg">{present}</b>Present Days</div><div className="bg-amber-50 rounded-lg p-2"><b className="block text-amber-700 text-lg">{CURRENCY}{fmt(calculated)}</b>Auto Calculated</div><div className="bg-green-50 rounded-lg p-2"><b className="block text-green-700 text-lg">{CURRENCY}{fmt(payable)}</b>Final Salary</div></div>
+      <button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Save Monthly Salary</button>
+    </SectionBox>
+    {message&&<div className="bg-green-50 text-green-700 rounded-lg p-3 text-sm font-bold">{message}</div>}
+    <div className="space-y-2">{records.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName} <Badge color="blue">{r.role}</Badge></div><div className="text-xs text-gray-500">{r.month} · Present {r.presentDays}/30 · Absent {r.absentDays} · Incentive {CURRENCY}{fmt(r.incentive)}</div></div><div className="text-right"><div className="font-black">{CURRENCY}{fmt(r.payableAmount)}</div><div className="text-xs text-teal-700">Received {CURRENCY}{fmt(r.paidAmount)}</div><div className="text-xs text-red-600">Pending {CURRENCY}{fmt(r.pendingAmount)}</div></div></div>)}</div>
+    {salaryReceipts.length > 0 && <SectionBox title="Salary Received / Payment History" icon="PAY" color="green"><div className="space-y-2">{salaryReceipts.map(p=><div key={p.key} className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-green-50 border border-green-100 rounded-lg p-3 text-xs"><div><div className="text-gray-400">Employee</div><div className="font-black">{p.employeeName}</div></div><div><div className="text-gray-400">Type</div><div className="font-bold capitalize">{p.role}</div></div><div><div className="text-gray-400">Salary Month</div><div className="font-bold">{p.month}</div></div><div><div className="text-gray-400">Received Date</div><div className="font-bold">{p.date || "-"}</div></div><div><div className="text-gray-400">Amount / Mode</div><div className="font-black text-green-700">{CURRENCY}{fmt(p.amount)} · {p.mode || "Cash"}</div></div><div><div className="text-gray-400">Given By</div><div className="font-black text-blue-700">{p.paidBy || "-"}</div></div></div>)}</div></SectionBox>}
+  </div>;
 }
 
 function OfficeSalaryLedger({ user, role }) {
@@ -7913,7 +7966,7 @@ function OfficeSalaryLedger({ user, role }) {
   const visible=records.filter(r=>(+r.pendingAmount||0)>0&&(!selected||r.employeeId===selected)); const totals=visible.reduce((a,r)=>({pending:a.pending+(+r.pendingAmount||0)}),{pending:0});
   const makePayment=async()=>{if(!payRecord||+(pay.amount)<=0)return;const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,paidBy:user.name});if(saved?._id){setPayRecord(null);setPay({amount:"",date:today(),mode:"Cash",note:""});load();}else if(saved?.message)window.alert(saved.message);};
   const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
-  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Only unpaid salary records are shown</div></div><div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(totals.pending)}`} icon="!" color="red"/><div className="space-y-2">{visible.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>{setPayRecord(r);setPay({amount:String(r.pendingAmount),date:today(),mode:"Cash",note:`${r.month} salary payment`});}} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{visible.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Payment Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Only unpaid salary records are shown</div></div><div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(totals.pending)}`} icon="!" color="red"/><div className="space-y-2">{visible.map(r=>{const lastPayment=(r.payments||[]).slice(-1)[0];return <div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div>{lastPayment&&<div className="text-xs text-green-700 mt-1">Last received {CURRENCY}{fmt(lastPayment.amount)} on {lastPayment.date||"-"} · Given by <b>{lastPayment.paidBy||"-"}</b></div>}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>{setPayRecord(r);setPay({amount:String(r.pendingAmount),date:today(),mode:"Cash",note:`${r.month} salary payment`});}} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>})}{visible.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Payment Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
 }
 
 function PendingWorkerSalary({ user, workerType }) {
