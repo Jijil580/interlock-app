@@ -3442,7 +3442,8 @@ function Purchases({ user }) {
   };
 
   const deletePurchase = async (purchase) => {
-    if (!isAdminLike(user.role) || !purchase?._id) return;
+    const canModifyPurchase = isAdminLike(user.role) || (user.role === "supervisor" && purchase?.addedBy === user.name);
+    if (!canModifyPurchase || !purchase?._id) return;
     if (!window.confirm("Delete this purchase? Supplier pending will be updated.")) return;
     const audit = requestAuditReason("delete", "purchase report", user);
     if (!audit) return;
@@ -3458,7 +3459,7 @@ function Purchases({ user }) {
   };
 
   const filtered = filterPurchases();
-  const canAdd = isAdminLike(user.role);
+  const canAdd = isAdminLike(user.role) || user.role === "supervisor";
   const openEditPurchase = (purchase) => {
     setEditItem(purchase);
     setForm({ ...emptyForm, ...purchase, supplierPhone: purchase.supplierPhone || purchase.supplierMobile || "" });
@@ -3583,7 +3584,7 @@ function Purchases({ user }) {
             {(p.supplierMobile || p.supplierPhone) && (
               <button onClick={() => openSupplierLedger(p.supplierMobile || p.supplierPhone)} className="mt-2 text-xs text-teal-600 font-bold hover:underline">View Supplier Ledger →</button>
             )}
-            {isAdminLike(user.role) && (
+            {(isAdminLike(user.role) || (user.role === "supervisor" && p.addedBy === user.name)) && (
               <>
                 <button onClick={() => openEditPurchase(p)} className="mt-2 ml-3 text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Edit</button>
                 <button onClick={() => deletePurchase(p)} className="mt-2 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>
