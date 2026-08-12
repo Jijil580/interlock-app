@@ -871,7 +871,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   };
 
   const emptyForm = {
-    customerName:"", phone:"", siteLocation:"", interlockType:"", interlockColor:"",
+    customerName:"", phone:"", siteLocation:"", interlockItemId:"", interlockType:"", interlockColor:"",
     selectedWorkers:[], startDate:today(), endDate:"", status:"running",
     workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
     extraWork:[], extraMaterials:[],
@@ -1161,16 +1161,24 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
         <SectionBox title="Work Details" icon="🧱" color="amber">
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type</label>
-            <input list="il-list" value={f.interlockType||""} onChange={e=>{
-              const it=interlockTypes.find(x=>x.name===e.target.value);
-              const rate=f.workUnit==="sqm"?(it?.pricePerSqm||""):(it?.pricePerSqft||"");
-              updateCalc({interlockType:e.target.value, ratePerUnit:rate?String(rate):f.ratePerUnit});
-            }} placeholder="Select or type interlock type..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
-            <datalist id="il-list">{interlockTypes.map(i=><option key={i._id} value={i.name}/>)}</datalist>
+            <select value={f.interlockItemId || interlockTypes.find(i=>i.name===f.interlockType&&(!f.interlockColor||i.color===f.interlockColor))?._id || ""} onChange={e=>{
+              const it=interlockTypes.find(x=>x._id===e.target.value);
+              if (!it) return updateCalc({interlockItemId:"",interlockType:"",interlockColor:""});
+              const rate=f.workUnit==="sqm"?(it.pricePerSqm||""):(it.pricePerSqft||"");
+              updateCalc({interlockItemId:it._id,interlockType:it.name||"",interlockColor:it.color||"",ratePerUnit:rate?String(rate):f.ratePerUnit});
+            }} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50">
+              <option value="">-- Select Interlock Type --</option>
+              {interlockTypes.map(i=><option key={i._id} value={i._id}>{[i.name,i.category,i.color,i.shape,i.size&&`${i.size} inch`,i.thickness&&`${i.thickness} inch thick`].filter(Boolean).join(" / ")}</option>)}
+            </select>
+            {interlockTypes.length===0&&<div className="mt-1 text-xs font-semibold text-red-600">No interlock types found in Master Data.</div>}
           </div>
           <Input label="Color / Specification" value={f.interlockColor||""} onChange={e=>setF({...f,interlockColor:e.target.value})} placeholder="e.g. Grey, Natural" />
           <div className="grid grid-cols-3 gap-2">
-            <Select label="Unit" value={f.workUnit||"sqft"} options={["sqft","sqm"]} onChange={e=>updateCalc({workUnit:e.target.value})} />
+            <Select label="Unit" value={f.workUnit||"sqft"} options={["sqft","sqm"]} onChange={e=>{
+              const it=interlockTypes.find(x=>x._id===f.interlockItemId);
+              const rate=e.target.value==="sqm"?(it?.pricePerSqm||""):(it?.pricePerSqft||"");
+              updateCalc({workUnit:e.target.value,ratePerUnit:rate?String(rate):f.ratePerUnit});
+            }} />
             <Input label="Work Size" type="number" value={f.workSize||""} onChange={e=>updateCalc({workSize:e.target.value})} placeholder="0" />
             <Input label={`Rate(${CURRENCY})`} type="number" value={f.ratePerUnit||""} onChange={e=>updateCalc({ratePerUnit:e.target.value})} placeholder="0" />
           </div>
