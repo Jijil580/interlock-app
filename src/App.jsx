@@ -3354,7 +3354,6 @@ function Purchases({ user }) {
   const [viewModal, setViewModal] = useState(null);
   const [supplierMode, setSupplierMode] = useState("existing");
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
-  const [saveToMaster, setSaveToMaster] = useState(true);
   const [quickSearch, setQuickSearch] = useState("");
   const [ledger, setLedger] = useState(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -3426,7 +3425,7 @@ function Purchases({ user }) {
     const payload = {
       ...form, totalAmount: total, amountPaid, amountPending: calcPending(),
       supplierMobile: (form.supplierMobile || form.supplierPhone || "").replace(/\D/g, "").slice(-10),
-      addedBy: user.name, saveToSupplierMaster: supplierMode === "new" ? saveToMaster : true,
+      addedBy: user.name, saveToSupplierMaster: true,
     };
     const audit = editItem ? requestAuditReason("edit", "purchase report", user) : null;
     if (editItem && !audit) return;
@@ -3472,7 +3471,7 @@ function Purchases({ user }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
-        {canAdd && <button onClick={() => { setEditItem(null); setForm(emptyForm); setSupplierMode("existing"); setSaveToMaster(true); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+        {canAdd && <button onClick={() => { setEditItem(null); setForm(emptyForm); setSupplierMode("existing"); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm p-3">
@@ -3614,10 +3613,9 @@ function Purchases({ user }) {
                   <Input label="Mobile" type="tel" value={form.supplierPhone} onChange={e => setForm({ ...form, supplierPhone: e.target.value, supplierMobile: e.target.value })} />
                   <Input label="Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
                 </div>
-                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-                  <input type="checkbox" checked={saveToMaster} onChange={e => setSaveToMaster(e.target.checked)} className="rounded" />
-                  Save to Supplier Master
-                </label>
+                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700">
+                  This supplier will be saved automatically to Supplier Master.
+                </div>
               </>
             )}
             {supplierMode === "existing" && selectedSupplierId && (
