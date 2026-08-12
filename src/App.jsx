@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = {
@@ -8326,6 +8326,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [successToast, setSuccessToast] = useState("");
   const [page, setPage] = useState("dashboard");
+  const pageHistory = useRef([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stock, setStock] = useState([]);
   const [raw, setRaw] = useState([]);
@@ -8373,6 +8374,7 @@ export default function App() {
 
   const logout = () => {
     setCurrentUser(null);
+    pageHistory.current = [];
     setPage("dashboard");
     setSidebarOpen(false);
     setLoading(false);
@@ -8388,11 +8390,22 @@ export default function App() {
     }
   };
 
+  const navigateTo = (nextPage) => {
+    if (!nextPage) return;
+    setPage(currentPage => {
+      if (currentPage === nextPage) return currentPage;
+      pageHistory.current.push(currentPage);
+      return nextPage;
+    });
+    setSidebarOpen(false);
+  };
+
   if (!currentUser) return <Login branding={COMPANY} onLogin={(u)=>{
     if (u.devicePending) {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
       setCurrentUser(u);
+      pageHistory.current = [];
       setPage(u.role==="driver"?"driversubmit":u.role==="supervisor"?"sitework":u.role==="user"?"officehub":"dashboard");
     }
   }} />;
@@ -8404,6 +8417,7 @@ export default function App() {
       deviceInfo={currentUser.deviceInfo}
       onRetry={()=>{
         setCurrentUser({...currentUser, _pendingDevice: false});
+        pageHistory.current = [];
         setPage(currentUser.role==="driver"?"driversubmit":currentUser.role==="supervisor"?"sitework":currentUser.role==="user"?"officehub":"dashboard");
       }}
     />;
@@ -8420,6 +8434,22 @@ export default function App() {
     (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
   );
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
+  const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
+  const pageMeta = {
+    cashflowhub:{label:"Cash Flow",icon:"CF"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    salaryhub:{label:"Salary",icon:"SAL"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
+    salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
+    supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
+    companyexpense:{label:"Company Expense",icon:"CE"}, companypurchase:{label:"Company Purchase",icon:"CP"}, officedaily:{label:"Office Daily Report",icon:"OD"},
+  };
+  const navPage = nav.find(item=>item.id===page) || (NAV[effectiveRoleOf(currentUser.role)]||[]).find(item=>item.id===page) || Object.values(NAV).flat().find(item=>item.id===page);
+  const currentPageMeta = pageMeta[page] || navPage || {label:"Management",icon:""};
+  const goBack = () => {
+    let previous = pageHistory.current.pop();
+    while (previous === page && pageHistory.current.length) previous = pageHistory.current.pop();
+    setPage(previous || roleHome);
+    setSidebarOpen(false);
+  };
 
   const renderPage = () => {
     if (loading) return <Loader />;
@@ -8451,11 +8481,11 @@ export default function App() {
       case "quotations": return <QuotationModule user={currentUser} />;
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
-      case "cashflowhub": return <CashFlowHub user={currentUser} setPage={setPage} />;
-      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={setPage} />:null;
+      case "cashflowhub": return <CashFlowHub user={currentUser} setPage={navigateTo} />;
+      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
-      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={setPage} />:null;
-      case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={setPage} />:null;
+      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
+      case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={navigateTo} />:null;
       case "salaryproduction": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Production Worker" />:null;
       case "salarysite": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Site Worker" />:null;
       case "salarydriver": return isAdminLike(currentUser.role)?<PendingDriverSalary user={currentUser} />:null;
@@ -8470,7 +8500,7 @@ export default function App() {
       case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
       case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
       case "devices": return <DeviceManagement user={currentUser} />;
-      case "reports": return <ReportsHub setPage={setPage} />;
+      case "reports": return <ReportsHub setPage={navigateTo} />;
       default: return null;
     }
   };
@@ -8492,7 +8522,7 @@ export default function App() {
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {nav.map(item=>(
-            <button key={item.id} onClick={()=>{setPage(item.id);setSidebarOpen(false);}}
+            <button key={item.id} onClick={()=>navigateTo(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${page===item.id?"bg-amber-500 text-white shadow-sm":"text-slate-400 hover:bg-slate-900 hover:text-white"}`}>
               <span className="text-base">{item.icon}</span>{item.label}
             </button>
@@ -8513,7 +8543,8 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          <h1 className="font-black text-slate-950 flex-1 text-base">{nav.find(n=>n.id===page)?.icon} {nav.find(n=>n.id===page)?.label}</h1>
+          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title="Back to previous page" aria-label="Back to previous page"><span className="text-base" aria-hidden="true">←</span><span className="hidden sm:inline">Back</span></button>}
+          <h1 className="font-black text-slate-950 flex-1 text-base">{currentPageMeta.icon} {currentPageMeta.label}</h1>
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
           </div>
