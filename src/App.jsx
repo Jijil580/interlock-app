@@ -199,7 +199,7 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
   );
 }
 
-function StatCard({ label, value, sub, icon, color }) {
+function StatCard({ label, value, sub, icon, color, solid = false }) {
   const c = {
     amber:"bg-amber-50 text-amber-700 border-amber-200",
     blue:"bg-blue-50 text-blue-700 border-blue-200",
@@ -209,13 +209,22 @@ function StatCard({ label, value, sub, icon, color }) {
     teal:"bg-teal-50 text-teal-700 border-teal-200",
     gray:"bg-slate-50 text-slate-600 border-slate-200"
   };
+  const solidColors = {
+    amber:"bg-amber-500 border-amber-600",
+    blue:"bg-blue-600 border-blue-700",
+    green:"bg-emerald-600 border-emerald-700",
+    red:"bg-red-600 border-red-700",
+    purple:"bg-violet-600 border-violet-700",
+    teal:"bg-teal-600 border-teal-700",
+    gray:"bg-slate-600 border-slate-700"
+  };
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-start gap-3">
-      <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
+    <div className={`${solid ? `${solidColors[color]||solidColors.amber} text-white min-h-[118px] shadow-sm hover:shadow-md` : "bg-white border-slate-200 shadow-sm"} rounded-xl border p-4 flex items-start gap-3 transition-shadow`}>
+      <div className={`w-10 h-10 rounded-lg border ${solid ? "bg-white/20 border-white/25 text-white" : c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <div className="text-base sm:text-xl font-black text-slate-950 leading-tight whitespace-nowrap overflow-hidden text-ellipsis" title={String(value??"")}>{value}</div>
-        <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</div>
-        {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
+        <div className={`text-base sm:text-xl font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${solid ? "text-white" : "text-slate-950"}`} title={String(value??"")}>{value}</div>
+        <div className={`text-[11px] font-black uppercase tracking-wide ${solid ? "text-white/90" : "text-slate-500"}`}>{label}</div>
+        {sub && <div className={`text-xs mt-0.5 ${solid ? "text-white/75" : "text-slate-400"}`}>{sub}</div>}
       </div>
     </div>
   );
@@ -562,14 +571,14 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
       {loading ? <Loader /> : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard label="Cash In" value={money(total.cashIn)} icon="IN" color="green" sub={`Sales ${money(total.salesReceived)} | Site ${money(total.siteReceived)}`} />
-            <StatCard label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchasePaid)} | Worker ${money(total.productionPaid)}`} />
-            <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
-            <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
-            <StatCard label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
-            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft)} sqft | Value ${money(total.productionValue)}`} />
-            <StatCard label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
-            <StatCard label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
+            <StatCard solid label="Cash In" value={money(total.cashIn)} icon="IN" color="green" sub={`Sales ${money(total.salesReceived)} | Site ${money(total.siteReceived)}`} />
+            <StatCard solid label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchasePaid)} | Worker ${money(total.productionPaid)}`} />
+            <StatCard solid label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
+            <StatCard solid label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
+            <StatCard solid label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
+            <StatCard solid label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft)} sqft | Value ${money(total.productionValue)}`} />
+            <StatCard solid label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
+            <StatCard solid label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
           </div>
 
           <div className="grid lg:grid-cols-2 gap-4">
