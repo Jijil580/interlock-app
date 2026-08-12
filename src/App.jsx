@@ -4340,12 +4340,20 @@ function Stock({ stock, setStock, user }) {
   const [form, setForm] = useState(emptyForm);
 
   const save = async () => {
-    if (editItem) { await api("PUT",`/stock/${editItem._id}`,form); setStock(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x)); setEditItem(null); }
+    if (editItem) {
+      const ids = editItem._ids?.length ? editItem._ids : [editItem._id];
+      const payload = { ...form };
+      delete payload._ids; delete payload.duplicateCount; delete payload._editName;
+      const saved = await api("PUT",`/stock/${ids[0]}`,payload);
+      if (ids.length > 1) await Promise.all(ids.slice(1).map(id=>api("DELETE",`/stock/${id}`)));
+      if (saved?._id) setStock(p=>[...p.filter(x=>!ids.includes(x._id)),saved]);
+      setEditItem(null);
+    }
     else { const item=await api("POST","/stock",form); if(item._id) setStock(p=>[...p,item]); }
     setModal(false); setForm(emptyForm);
   };
 
-  const del = async (id) => { if(!window.confirm("Delete?")) return; await api("DELETE",`/stock/${id}`); setStock(p=>p.filter(x=>x._id!==id)); };
+  const del = async (item) => { if(!window.confirm("Delete this stock item?")) return; const ids=item._ids?.length?item._ids:[item._id]; await Promise.all(ids.map(id=>api("DELETE",`/stock/${id}`))); setStock(p=>p.filter(x=>!ids.includes(x._id))); };
 
 
   const groupedStock = Object.values((stock || []).reduce((acc, s) => {
@@ -4355,7 +4363,7 @@ function Stock({ stock, setStock, user }) {
     const sizeKey = s.productType === "hollowbrick" ? String(s.size || "").trim().toLowerCase() : "";
     const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${sizeKey}|${String(s.unit || "").trim().toLowerCase()}`;
     const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${s.size} inch` : (cleanName || s.name);
-    if (!acc[key]) acc[key] = { ...s, name: displayName, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
+    if (!acc[key]) acc[key] = { ...s, name: displayName, _editName:s.name, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
     acc[key].quantity += +(s.quantity) || 0;
     acc[key].sqftPerPiece = s.productType === "hollowbrick" ? 0 : (acc[key].sqftPerPiece || +(s.sqftPerPiece || 0));
     acc[key].sqftQuantity += s.productType === "hollowbrick" ? 0 : (+(s.sqftQuantity || 0) || ((+(s.quantity)||0) * (+(s.sqftPerPiece)||0)));
@@ -4375,7 +4383,7 @@ function Stock({ stock, setStock, user }) {
         {groupedStock.map(s=>(
           <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
             <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}{s.color?` · ${s.color}`:""}</div>}<div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` · ${fmt(s.sqftQuantity)} sqft`:""}</div>{s.sqftPerPiece>0&&<div className="text-xs text-gray-400">1 piece = {fmt(s.sqftPerPiece)} sqft</div>}{s.price>0&&<div className="text-xs text-amber-600">Rate: {CURRENCY}{fmt(s.price)}</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
-            {isAdminLike(user.role)&&s.duplicateCount===1&&<div className="flex gap-1"><button onClick={()=>{setForm({...s});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
+            {isAdminLike(user.role)&&<div className="flex gap-1"><button onClick={()=>{setForm({...s,name:s._editName||s.name});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
           </div>
         ))}
       </div>
@@ -7985,17 +7993,68 @@ function SalaryManagement({ user }) {
   </div>;
 }
 
-function OfficeSalaryLedger({ user, role }) {
-  const [people,setPeople]=useState([]); const [records,setRecords]=useState([]); const [selected,setSelected]=useState(""); const [payRecord,setPayRecord]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
-  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`)]).then(([u,r])=>{setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));setRecords(Array.isArray(r)?r:[]);});
+const salaryPersonTypes = [
+  {value:"production-worker",label:"Production Worker"},
+  {value:"site-worker",label:"Site Worker"},
+  {value:"driver",label:"Driver"},
+  {value:"supervisor",label:"Supervisor"},
+  {value:"user",label:"Office User"},
+];
+
+function availableAdvance(records, { personType, personId, personName, mobile }) {
+  const normalizedMobile = String(mobile || "").replace(/\D/g, "").slice(-10);
+  return (records || []).filter(row => {
+    if (row.personType !== personType) return false;
+    if (personId && row.personId && String(row.personId) === String(personId)) return true;
+    if (normalizedMobile && String(row.mobile || "").replace(/\D/g, "").slice(-10) === normalizedMobile) return true;
+    return personName && String(row.personName || "").toLowerCase() === String(personName).toLowerCase();
+  }).reduce((sum,row)=>sum+(+(row.balance)||0),0);
+}
+
+function AdvanceAdjustment({ available, pending, pay, setPay }) {
+  const adjusted = pay.useAdvance ? Math.min(available, Math.max(0,(+pending||0)-(+pay.amount||0))) : 0;
+  return <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+    <label className="flex items-center justify-between gap-3 cursor-pointer">
+      <span><b className="block text-violet-900">Adjust available advance</b><span className="text-xs text-violet-700">Available: {CURRENCY}{fmt(available)}</span></span>
+      <input type="checkbox" checked={!!pay.useAdvance} disabled={available<=0} onChange={e=>setPay({...pay,useAdvance:e.target.checked})} className="w-5 h-5" />
+    </label>
+    {pay.useAdvance&&available>0&&<div className="text-sm font-bold text-violet-800">Advance adjusted now: {CURRENCY}{fmt(adjusted)}</div>}
+  </div>;
+}
+
+function AdvanceSalary({ user }) {
+  const empty={personType:"production-worker",personId:"",amount:"",date:today(),mode:"Cash",note:""};
+  const [workers,setWorkers]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [form,setForm]=useState(empty);
+  const load=()=>Promise.all([api("GET","/workers"),api("GET","/users"),api("GET","/salary-advances")]).then(([w,u,a])=>{setWorkers(Array.isArray(w)?w:[]);setUsers(Array.isArray(u)?u:[]);setRecords(a?.records||[]);});
+  useEffect(()=>{load();},[]);
+  const people=form.personType==="production-worker"?workers.filter(w=>workerTypeOf(w)==="Production Worker"):form.personType==="site-worker"?workers.filter(w=>workerTypeOf(w)==="Site Worker"):users.filter(u=>u.role===form.personType&&u.active!==false);
+  const save=async()=>{const person=people.find(p=>p._id===form.personId);if(!person||+(form.amount)<=0)return window.alert("Select an employee and enter the advance amount");const saved=await api("POST","/salary-advances",{...form,personName:person.name,mobile:person.mobile||person.phone||"",amount:+form.amount,givenBy:user.name});if(saved?._id){setForm({...empty,personType:form.personType});load();}else if(saved?.message)window.alert(saved.message);};
+  const totalAvailable=records.reduce((sum,row)=>sum+(+(row.balance)||0),0);
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">Advance Salary</h2><div className="text-xs text-gray-400">Give an advance now and adjust it later during salary payment</div></div>
+    <SectionBox title="Give Salary Advance" icon="ADV" color="violet"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"><Select label="Employee Type" value={form.personType} options={salaryPersonTypes} onChange={e=>setForm({...form,personType:e.target.value,personId:""})}/><Select label="Employee Name" value={form.personId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,personId:e.target.value})}/><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label={`Advance Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><Select label="Payment Mode" value={form.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,mode:e.target.value})}/><Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></div><button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Give Advance Salary</button></SectionBox>
+    <StatCard label="Total Advance Available" value={`${CURRENCY}${fmt(totalAvailable)}`} icon="ADV" color="violet"/>
+    <div className="space-y-2">{records.map(row=><div key={row._id} className="bg-white border rounded-lg p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm"><div><span className="text-xs text-gray-400 block">Employee</span><b>{row.personName}</b></div><div><span className="text-xs text-gray-400 block">Type</span><b>{salaryPersonTypes.find(t=>t.value===row.personType)?.label||row.personType}</b></div><div><span className="text-xs text-gray-400 block">Given</span><b>{CURRENCY}{fmt(row.amount)}</b><span className="text-xs text-gray-400 block">{row.date} by {row.givenBy||"-"}</span></div><div><span className="text-xs text-gray-400 block">Adjusted</span><b className="text-blue-700">{CURRENCY}{fmt(row.adjustedAmount)}</b></div><div><span className="text-xs text-gray-400 block">Available</span><b className="text-violet-700">{CURRENCY}{fmt(row.balance)}</b></div></div>)}{records.length===0&&<EmptyState icon="ADV" text="No salary advances"/>}</div>
+  </div>;
+}
+
+function LegacyOfficeSalaryLedger({ user, role }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [people,setPeople]=useState([]); const [records,setRecords]=useState([]); const [advances,setAdvances]=useState([]); const [selected,setSelected]=useState(""); const [payRecord,setPayRecord]=useState(null); const [pay,setPay]=useState(emptyPay);
+  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));setRecords(Array.isArray(r)?r:[]);setAdvances(a?.records||[]);});
   useEffect(()=>{load();},[role]);
   const visible=records.filter(r=>(+r.pendingAmount||0)>0&&(!selected||r.employeeId===selected)); const totals=visible.reduce((a,r)=>({pending:a.pending+(+r.pendingAmount||0)}),{pending:0});
-  const makePayment=async()=>{if(!payRecord||+(pay.amount)<=0)return;const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,paidBy:user.name});if(saved?._id){setPayRecord(null);setPay({amount:"",date:today(),mode:"Cash",note:""});load();}else if(saved?.message)window.alert(saved.message);};
+  const advance=payRecord?availableAdvance(advances,{personType:role,personId:payRecord.employeeId,personName:payRecord.employeeName}):0;
+  const makePayment=async()=>{const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payRecord?.pendingAmount||0)-(+pay.amount||0))):0;if(!payRecord||(+pay.amount||0)+adjusted<=0)return;const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,paidBy:user.name});if(saved?._id){setPayRecord(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);};
+  const openPayment=r=>{const available=availableAdvance(advances,{personType:role,personId:r.employeeId,personName:r.employeeName});setPayRecord(r);setPay({amount:String(Math.max(0,(+r.pendingAmount||0)-available)),date:today(),mode:"Cash",note:`${r.month} salary payment`,useAdvance:available>0});};
   const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
   return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Only unpaid salary records are shown</div></div><div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(totals.pending)}`} icon="!" color="red"/><div className="space-y-2">{visible.map(r=>{const lastPayment=(r.payments||[]).slice(-1)[0];return <div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div>{lastPayment&&<div className="text-xs text-green-700 mt-1">Last received {CURRENCY}{fmt(lastPayment.amount)} on {lastPayment.date||"-"} · Given by <b>{lastPayment.paidBy||"-"}</b></div>}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>{setPayRecord(r);setPay({amount:String(r.pendingAmount),date:today(),mode:"Cash",note:`${r.month} salary payment`});}} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>})}{visible.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Payment Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
 }
 
-function PendingWorkerSalary({ user, workerType }) {
+function LegacyPendingWorkerSalary({ user, workerType }) {
   const [workers,setWorkers]=useState([]); const [payWorker,setPayWorker]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
   const load=()=>api("GET","/workers").then(data=>setWorkers((Array.isArray(data)?data:[]).filter(w=>workerTypeOf(w)===workerType&&+(w.totalPending||0)>0)));
   useEffect(()=>{load();},[workerType]);
@@ -8004,7 +8063,7 @@ function PendingWorkerSalary({ user, workerType }) {
   return <div className="space-y-4"><div><h2 className="text-xl font-black">{workerType} Pending</h2><div className="text-xs text-gray-400">Only workers with pending salary are shown</div></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/><div className="space-y-2">{workers.map(w=><div key={w._id} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div className="font-black">{w.name}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(w.totalPending)}</div><button onClick={()=>{setPayWorker(w);setPay({amount:String(w.totalPending),date:today(),mode:"Cash",note:`${workerType} salary payment`});}} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{workers.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payWorker&&<Modal title={`Pay - ${payWorker.name}`} onClose={()=>setPayWorker(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payWorker.totalPending)}</b></div><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
 }
 
-function PendingDriverSalary({ user }) {
+function LegacyPendingDriverSalary({ user }) {
   const [rows,setRows]=useState([]); const [payDriver,setPayDriver]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
   const load=()=>api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`).then(data=>{const grouped={};(data?.reports||[]).forEach(r=>{const key=r.driverMobile||r.driverName;if(!key)return;if(!grouped[key])grouped[key]={driverName:r.driverName,driverMobile:r.driverMobile,pending:0};grouped[key].pending+=+(r.driverWagePending)||0;});setRows(Object.values(grouped).filter(r=>r.pending>0));});
   useEffect(()=>{load();},[user.role,user.name]); const total=rows.reduce((sum,r)=>sum+r.pending,0);
@@ -8012,7 +8071,97 @@ function PendingDriverSalary({ user }) {
   return <div className="space-y-4"><div><h2 className="text-xl font-black">Driver Salary Pending</h2><div className="text-xs text-gray-400">Only drivers with pending salary are shown</div></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/><div className="space-y-2">{rows.map(r=><div key={r.driverMobile||r.driverName} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div><div className="font-black">{r.driverName}</div><div className="text-xs text-gray-400">{r.driverMobile||""}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pending)}</div><button onClick={()=>{setPayDriver(r);setPay({amount:String(r.pending),date:today(),mode:"Cash",note:"Driver salary payment"});}} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{rows.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payDriver&&<Modal title={`Pay - ${payDriver.driverName}`} onClose={()=>setPayDriver(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payDriver.pending)}</b></div><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
 }
 
-function SalaryHub({ user, setPage }) {
+function OfficeSalaryLedger({ user, role }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [people,setPeople]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [advances,setAdvances]=useState([]);
+  const [selected,setSelected]=useState("");
+  const [payRecord,setPayRecord]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{
+    setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));
+    setRecords(Array.isArray(r)?r:[]);
+    setAdvances(a?.records||[]);
+  });
+  useEffect(()=>{load();},[role]);
+  const visible=records.filter(r=>(+r.pendingAmount||0)>0&&(!selected||r.employeeId===selected));
+  const totalPending=visible.reduce((sum,r)=>sum+(+r.pendingAmount||0),0);
+  const advance=payRecord?availableAdvance(advances,{personType:role,personId:payRecord.employeeId,personName:payRecord.employeeName}):0;
+  const openPayment=r=>{
+    const available=availableAdvance(advances,{personType:role,personId:r.employeeId,personName:r.employeeName});
+    setPayRecord(r);
+    setPay({amount:String(Math.max(0,(+r.pendingAmount||0)-available)),date:today(),mode:"Cash",note:`${r.month} salary payment`,useAdvance:available>0});
+  };
+  const makePayment=async()=>{
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payRecord?.pendingAmount||0)-(+pay.amount||0))):0;
+    if(!payRecord||(+pay.amount||0)+adjusted<=0)return;
+    const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,paidBy:user.name});
+    if(saved?._id){setPayRecord(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
+    <div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div>
+    <StatCard label="Total Pending" value={`${CURRENCY}${fmt(totalPending)}`} icon="!" color="red"/>
+    <div className="space-y-2">{visible.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>openPayment(r)} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{visible.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    {payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><AdvanceAdjustment available={advance} pending={payRecord.pendingAmount} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
+  </div>;
+}
+
+function PendingWorkerSalary({ user, workerType }) {
+  const personType=workerType==="Site Worker"?"site-worker":"production-worker";
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [workers,setWorkers]=useState([]);
+  const [advances,setAdvances]=useState([]);
+  const [payWorker,setPayWorker]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const load=()=>Promise.all([api("GET","/workers"),api("GET",`/salary-advances?personType=${personType}`)]).then(([data,a])=>{setWorkers((Array.isArray(data)?data:[]).filter(w=>workerTypeOf(w)===workerType&&+(w.totalPending||0)>0));setAdvances(a?.records||[]);});
+  useEffect(()=>{load();},[workerType]);
+  const total=workers.reduce((sum,w)=>sum+(+(w.totalPending)||0),0);
+  const advance=payWorker?availableAdvance(advances,{personType,personId:payWorker._id,personName:payWorker.name,mobile:payWorker.phone}):0;
+  const openPayment=w=>{const available=availableAdvance(advances,{personType,personId:w._id,personName:w.name,mobile:w.phone});setPayWorker(w);setPay({amount:String(Math.max(0,(+w.totalPending||0)-available)),date:today(),mode:"Cash",note:`${workerType} salary payment`,useAdvance:available>0});};
+  const makePayment=async()=>{
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payWorker?.totalPending||0)-(+pay.amount||0))):0;
+    if(!payWorker||(+pay.amount||0)+adjusted<=0)return;
+    const source=workerType==="Site Worker"?"worker-ledger-site":"worker-ledger-production";
+    const saved=await api("POST","/workerpayments",{workerName:payWorker.name,workerId:payWorker._id,personType,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source});
+    if(saved?._id){setPayWorker(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">{workerType} Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
+    <StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/>
+    <div className="space-y-2">{workers.map(w=><div key={w._id} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div className="font-black">{w.name}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(w.totalPending)}</div><button onClick={()=>openPayment(w)} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{workers.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    {payWorker&&<Modal title={`Pay - ${payWorker.name}`} onClose={()=>setPayWorker(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payWorker.totalPending)}</b></div><AdvanceAdjustment available={advance} pending={payWorker.totalPending} pay={pay} setPay={setPay}/><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
+  </div>;
+}
+
+function PendingDriverSalary({ user }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [rows,setRows]=useState([]);
+  const [advances,setAdvances]=useState([]);
+  const [payDriver,setPayDriver]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const load=()=>Promise.all([api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`),api("GET","/salary-advances?personType=driver")]).then(([data,a])=>{const grouped={};(data?.reports||[]).forEach(r=>{const key=r.driverMobile||r.driverName;if(!key)return;if(!grouped[key])grouped[key]={driverName:r.driverName,driverMobile:r.driverMobile,pending:0};grouped[key].pending+=+(r.driverWagePending)||0;});setRows(Object.values(grouped).filter(r=>r.pending>0));setAdvances(a?.records||[]);});
+  useEffect(()=>{load();},[user.role,user.name]);
+  const total=rows.reduce((sum,r)=>sum+r.pending,0);
+  const advance=payDriver?availableAdvance(advances,{personType:"driver",personName:payDriver.driverName,mobile:payDriver.driverMobile}):0;
+  const openPayment=r=>{const available=availableAdvance(advances,{personType:"driver",personName:r.driverName,mobile:r.driverMobile});setPayDriver(r);setPay({amount:String(Math.max(0,r.pending-available)),date:today(),mode:"Cash",note:"Driver salary payment",useAdvance:available>0});};
+  const makePayment=async()=>{
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payDriver?.pending||0)-(+pay.amount||0))):0;
+    if(!payDriver||(+pay.amount||0)+adjusted<=0)return;
+    const saved=await api("POST","/driverreports/payment",{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,driverName:payDriver.driverName,driverMobile:payDriver.driverMobile,addedBy:user.name});
+    if(saved?.reports){setPayDriver(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">Driver Salary Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
+    <StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/>
+    <div className="space-y-2">{rows.map(r=><div key={r.driverMobile||r.driverName} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div><div className="font-black">{r.driverName}</div><div className="text-xs text-gray-400">{r.driverMobile||""}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pending)}</div><button onClick={()=>openPayment(r)} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{rows.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    {payDriver&&<Modal title={`Pay - ${payDriver.driverName}`} onClose={()=>setPayDriver(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payDriver.pending)}</b></div><AdvanceAdjustment available={advance} pending={payDriver.pending} pay={pay} setPay={setPay}/><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
+  </div>;
+}
+
+function LegacySalaryHub({ user, setPage }) {
   const [summary, setSummary] = useState({ production:0, site:0, driver:0, supervisor:0, user:0 });
   const [loading, setLoading] = useState(true);
   useEffect(()=>{
@@ -8041,6 +8190,27 @@ function SalaryHub({ user, setPage }) {
     { id:"salaryuser", title:"Office Users", pending:summary.user, icon:"🧑‍💻", color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700" },
   ];
   return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages and total ledger payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-3xl">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">Total Pending</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.pending)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">View Ledger & Pay</span></div></button>)}</div></div>;
+}
+
+function SalaryHub({ user, setPage }) {
+  const [summary,setSummary]=useState({production:0,site:0,driver:0,supervisor:0,user:0,advance:0});
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    Promise.all([api("GET","/workers"),api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`),api("GET","/salary-records"),api("GET","/salary-advances")]).then(([workers,drivers,salaries,advances])=>{
+      const list=Array.isArray(workers)?workers:[]; const salaryList=Array.isArray(salaries)?salaries:[];
+      setSummary({production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),driver:(drivers?.reports||[]).reduce((sum,r)=>sum+(+(r.driverWagePending)||0),0),supervisor:salaryList.filter(r=>r.role==="supervisor").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),user:salaryList.filter(r=>r.role==="user").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),advance:+(advances?.summary?.available)||0});
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  },[user.role,user.name]);
+  const tiles=[
+    {id:"salaryadvance",title:"Advance Salary",amount:summary.advance,label:"Advance Available",action:"Give or view advance",icon:"ADV",color:"border-fuchsia-700 bg-fuchsia-600 hover:bg-fuchsia-700"},
+    {id:"salaryproduction",title:"Production Workers",amount:summary.production,label:"Total Pending",action:"View Ledger & Pay",icon:"PW",color:"border-blue-700 bg-blue-600 hover:bg-blue-700"},
+    {id:"salarydriver",title:"Drivers",amount:summary.driver,label:"Total Pending",action:"View Ledger & Pay",icon:"DR",color:"border-orange-700 bg-orange-600 hover:bg-orange-700"},
+    {id:"salarysite",title:"Site Workers",amount:summary.site,label:"Total Pending",action:"View Ledger & Pay",icon:"SW",color:"border-teal-700 bg-teal-600 hover:bg-teal-700"},
+    {id:"salarysupervisor",title:"Supervisors",amount:summary.supervisor,label:"Total Pending",action:"View Ledger & Pay",icon:"SP",color:"border-violet-700 bg-violet-600 hover:bg-violet-700"},
+    {id:"salaryuser",title:"Office Users",amount:summary.user,label:"Total Pending",action:"View Ledger & Pay",icon:"US",color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700"},
+  ];
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages, advances and salary payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-lg font-black">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">{tile.label}</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.amount)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">{tile.action}</span></div></button>)}</div></div>;
 }
 
 function OfficeHub({ setPage }) {
@@ -8437,7 +8607,7 @@ export default function App() {
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
     cashflowhub:{label:"Cash Flow",icon:"CF"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
-    salaryhub:{label:"Salary",icon:"SAL"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
+    salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
     salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
     supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
     companyexpense:{label:"Company Expense",icon:"CE"}, companypurchase:{label:"Company Purchase",icon:"CP"}, officedaily:{label:"Office Daily Report",icon:"OD"},
@@ -8486,6 +8656,7 @@ export default function App() {
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
       case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={navigateTo} />:null;
+      case "salaryadvance": return isAdminLike(currentUser.role)?<AdvanceSalary user={currentUser} />:null;
       case "salaryproduction": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Production Worker" />:null;
       case "salarysite": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Site Worker" />:null;
       case "salarydriver": return isAdminLike(currentUser.role)?<PendingDriverSalary user={currentUser} />:null;
