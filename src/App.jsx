@@ -7874,9 +7874,6 @@ function SupervisorCashFlow({ user, allUsers }) {
   const [toDate, setToDate] = useState(today());
   const [data, setData] = useState({ history: [], total: {} });
   const [loading, setLoading] = useState(true);
-  const [receiptForm, setReceiptForm] = useState({ date: today(), supervisorName: "", amount: "", paymentMode: "Cash", note: "" });
-  const [receiptMessage, setReceiptMessage] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
 
   const money = value => `${CURRENCY}${fmt(value)}`;
   const dateLabel = value => {
@@ -7915,25 +7912,7 @@ function SupervisorCashFlow({ user, allUsers }) {
       setLoading(false);
     });
     return () => { active = false; };
-  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate, reloadKey]);
-
-  const saveSupervisorReceipt = async () => {
-    setReceiptMessage("");
-    const supervisorName = receiptForm.supervisorName || selectedSupervisor;
-    if (!supervisorName || +(receiptForm.amount || 0) <= 0) return setReceiptMessage("Select supervisor and enter amount");
-    const saved = await api("POST", "/supervisor-cash-receipts", {
-      ...receiptForm,
-      supervisorName,
-      amount: +(receiptForm.amount || 0),
-      receivedBy: user.name,
-      receivedByRole: user.role,
-    });
-    if (saved?._id) {
-      setReceiptMessage("Cash received from supervisor saved successfully");
-      setReceiptForm({ date: today(), supervisorName: selectedSupervisor || "", amount: "", paymentMode: "Cash", note: "" });
-      setReloadKey(k => k + 1);
-    } else setReceiptMessage(saved?.message || "Failed to save cash receipt");
-  };
+  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate]);
 
   const total = data.total || {};
   const rows = Array.isArray(data.history) ? data.history : [];
@@ -7975,19 +7954,6 @@ function SupervisorCashFlow({ user, allUsers }) {
         {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />}
         {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e => setToDate(e.target.value)} />}
       </div>
-      {isAdminLike(user.role) && (
-        <SectionBox title="Receive Cash From Supervisor" icon="RC" color="green">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
-            <Input label="Date" type="date" value={receiptForm.date} onChange={e=>setReceiptForm({...receiptForm,date:e.target.value})} />
-            <Select label="Supervisor" value={receiptForm.supervisorName || selectedSupervisor} options={[{ value:"", label:"Select Supervisor" }, ...supervisors.map(s => ({ value:s.name, label:s.name }))]} onChange={e=>setReceiptForm({...receiptForm,supervisorName:e.target.value})} />
-            <Input label={`Amount (${CURRENCY})`} type="number" value={receiptForm.amount} onChange={e=>setReceiptForm({...receiptForm,amount:e.target.value})} />
-            <Select label="Mode" value={receiptForm.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setReceiptForm({...receiptForm,paymentMode:e.target.value})} />
-            <Input label="Note" value={receiptForm.note} onChange={e=>setReceiptForm({...receiptForm,note:e.target.value})} />
-          </div>
-          {receiptMessage && <div className={`mt-2 text-xs font-bold ${receiptMessage.includes("success") ? "text-green-700" : "text-red-600"}`}>{receiptMessage}</div>}
-          <button onClick={saveSupervisorReceipt} className="mt-3 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-bold">Save Cash Received</button>
-        </SectionBox>
-      )}
       {loading ? <Loader /> : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -8042,6 +8008,7 @@ function SupervisorCashFlow({ user, allUsers }) {
 function AdminCashFlow({ user, allUsers }) {
   const admins = (allUsers || []).filter(u => u.role === "admin");
   const officeUsers = (allUsers || []).filter(u => u.role === "user");
+  const officeAccounts = [...admins, ...officeUsers];
   const [dateMode, setDateMode] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(today());
   const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7));
@@ -8050,18 +8017,6 @@ function AdminCashFlow({ user, allUsers }) {
   const [filters, setFilters] = useState({ adminName: "", officeName: "" });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
-  const [editingId, setEditingId] = useState("");
-  const [form, setForm] = useState({
-    date: today(),
-    direction: "office_to_admin",
-    adminName: admins[0]?.name || "",
-    officeName: user.role === "user" ? user.name : "",
-    amount: "",
-    paymentMode: "Cash",
-    note: "",
-  });
 
   const money = value => `${CURRENCY}${fmt(value)}`;
   const monthRange = (month) => {
@@ -8077,58 +8032,29 @@ function AdminCashFlow({ user, allUsers }) {
   };
   const load = () => {
     const r = range();
-    const params = new URLSearchParams({ role: user.role, name: user.name });
-    if (r.from) params.set("fromDate", r.from);
-    if (r.to) params.set("toDate", r.to);
-    if (filters.adminName) params.set("adminName", filters.adminName);
-    if (filters.officeName) params.set("officeName", filters.officeName);
+    const legacyParams = new URLSearchParams({ role: user.role, name: user.name });
+    const transactionParams = new URLSearchParams({ partyType:"admin" });
+    if (r.from) { legacyParams.set("fromDate", r.from); transactionParams.set("fromDate", r.from); }
+    if (r.to) { legacyParams.set("toDate", r.to); transactionParams.set("toDate", r.to); }
+    if (filters.adminName) { legacyParams.set("adminName", filters.adminName); transactionParams.set("partyName", filters.adminName); }
+    if (filters.officeName) { legacyParams.set("officeName", filters.officeName); transactionParams.set("addedBy", filters.officeName); }
+    if (user.role === "user") transactionParams.set("addedBy", user.name);
     setLoading(true);
-    api("GET", `/admin-cash-transfers?${params.toString()}`).then(data => {
-      setRows(Array.isArray(data) ? data : []);
+    Promise.all([
+      api("GET", `/admin-cash-transfers?${legacyParams.toString()}`),
+      api("GET", `/cash-transactions?${transactionParams.toString()}`),
+    ]).then(([legacy, transactions]) => {
+      const current = (transactions?.records || []).map(record => ({
+        ...record,
+        direction:record.direction === "give" ? "office_to_admin" : "admin_to_office",
+        adminName:record.partyName,
+        officeName:record.addedBy,
+      }));
+      setRows([...(Array.isArray(legacy) ? legacy : []), ...current].sort((a,b)=>(b.date || "").localeCompare(a.date || "") || new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
       setLoading(false);
     });
   };
-  useEffect(load, [user.role, user.name, dateMode, selectedDate, selectedMonth, fromDate, toDate, filters.adminName, filters.officeName, reloadKey]);
-
-  const save = async () => {
-    setMessage("");
-    const payload = { ...form, officeName: user.role === "user" ? user.name : form.officeName, amount: +(form.amount || 0), addedBy: user.name, addedByRole: user.role };
-    if (!payload.adminName || !payload.officeName || payload.amount <= 0) return setMessage("Select admin, office user and amount");
-    const audit = editingId ? requestAuditReason("edit", "admin cash flow", user) : null;
-    if (editingId && !audit) return;
-    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/admin-cash-transfers/${editingId}` : "/admin-cash-transfers", { ...payload, ...(audit || {}) });
-    if (saved?._id) {
-      setMessage(editingId ? "Admin cash flow updated successfully" : "Admin cash flow saved successfully");
-      setForm(f => ({ ...f, amount: "", note: "" }));
-      setEditingId("");
-      setReloadKey(k => k + 1);
-    } else setMessage(saved?.message || "Failed to save admin cash flow");
-  };
-
-  const editRow = (row) => {
-    setEditingId(row._id);
-    setMessage("");
-    setForm({
-      date: row.date || today(),
-      direction: row.direction || "office_to_admin",
-      adminName: row.adminName || "",
-      officeName: user.role === "user" ? user.name : (row.officeName || ""),
-      amount: String(row.amount || ""),
-      paymentMode: row.paymentMode || "Cash",
-      note: row.note || "",
-    });
-  };
-
-  const deleteRow = async (row) => {
-    const audit = requestAuditReason("delete", "admin cash flow", user);
-    if (!audit) return;
-    const deleted = await api("DELETE", `/admin-cash-transfers/${row._id}`, audit);
-    if (deleted?.ok) {
-      setRows(p => p.filter(x => x._id !== row._id));
-      if (editingId === row._id) setEditingId("");
-      setReloadKey(k => k + 1);
-    } else if (deleted?.message) window.alert(deleted.message);
-  };
+  useEffect(load, [user.role, user.name, dateMode, selectedDate, selectedMonth, fromDate, toDate, filters.adminName, filters.officeName]);
 
   const givenToAdmin = rows.filter(r => r.direction === "office_to_admin").reduce((a,r)=>a+(+(r.amount)||0),0);
   const receivedFromAdmin = rows.filter(r => r.direction === "admin_to_office").reduce((a,r)=>a+(+(r.amount)||0),0);
@@ -8141,30 +8067,14 @@ function AdminCashFlow({ user, allUsers }) {
         <div className="text-xs text-gray-400">Cash movement between office account and admin</div>
       </div>
 
-      <SectionBox title="Office / Admin Cash Entry" icon="AC" color="green">
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-          <Select label="Type" value={form.direction} options={[{value:"office_to_admin",label:"Office gave cash to Admin"},{value:"admin_to_office",label:"Office received cash from Admin"}]} onChange={e=>setForm({...form,direction:e.target.value})} />
-          <Select label="Admin" value={form.adminName} options={[{value:"",label:"Select Admin"}, ...admins.map(a=>({value:a.name,label:a.name}))]} onChange={e=>setForm({...form,adminName:e.target.value})} />
-          {user.role === "user" ? <Input label="Office User" value={user.name} readOnly /> : <Select label="Office User" value={form.officeName} options={[{value:"",label:"Select Office User"}, ...officeUsers.map(o=>({value:o.name,label:o.name}))]} onChange={e=>setForm({...form,officeName:e.target.value})} />}
-          <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
-          <Select label="Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
-          <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
-        </div>
-        {message && <div className={`mt-2 text-xs font-bold ${message.includes("success") ? "text-green-700" : "text-red-600"}`}>{message}</div>}
-        <div className="mt-3 flex gap-2">
-          <button onClick={save} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl text-sm font-bold">{editingId ? "Update" : "Submit"}</button>
-          {editingId && <button onClick={()=>{setEditingId("");setForm(f=>({...f,amount:"",note:""}));setMessage("");}} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-bold">Cancel Edit</button>}
-        </div>
-      </SectionBox>
-
       <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <Select label="Date Filter" value={dateMode} options={[{ value:"daily", label:"Date Wise" }, { value:"month", label:"Month Wise" }, { value:"range", label:"Date Range" }, { value:"all", label:"All Time" }]} onChange={e=>setDateMode(e.target.value)} />
         {dateMode === "daily" && <Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
         {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
         {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
         {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
-        {user.role !== "user" && <Select label="Office User" value={filters.officeName} options={[{value:"",label:"All Office Users"}, ...officeUsers.map(o=>({value:o.name,label:o.name}))]} onChange={e=>setFilters({...filters,officeName:e.target.value})} />}
+        <Select label="Admin" value={filters.adminName} options={[{value:"",label:"All Admins"}, ...admins.map(admin=>({value:admin.name,label:admin.name}))]} onChange={e=>setFilters({...filters,adminName:e.target.value})} />
+        {user.role !== "user" && <Select label="Office User" value={filters.officeName} options={[{value:"",label:"All Office Users"}, ...officeAccounts.map(o=>({value:o.name,label:o.name}))]} onChange={e=>setFilters({...filters,officeName:e.target.value})} />}
       </div>
 
       {loading ? <Loader /> : (
@@ -8178,7 +8088,7 @@ function AdminCashFlow({ user, allUsers }) {
           {rows.length === 0 ? <EmptyState icon="AC" text="No admin cash flow records" /> : (
             <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
               <table className="w-full text-xs">
-                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Admin</th><th className="p-2 text-left">Office User</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
+                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Admin</th><th className="p-2 text-left">Office User</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th></tr></thead>
                 <tbody>{rows.map(r=>(
                   <tr key={r._id} className="border-t">
                     <td className="p-2">{r.date}</td>
@@ -8188,10 +8098,6 @@ function AdminCashFlow({ user, allUsers }) {
                     <td className="p-2">{r.paymentMode||"-"}</td>
                     <td className="p-2">{r.note||"-"}</td>
                     <td className="p-2 text-right font-black">{money(r.amount)}</td>
-                    <td className="p-2 text-right">
-                      <button onClick={()=>editRow(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button>
-                      <button onClick={()=>deleteRow(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
-                    </td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -8203,9 +8109,163 @@ function AdminCashFlow({ user, allUsers }) {
   );
 }
 
+function CashTransactionsHub({ setPage }) {
+  const tiles = [
+    { id:"cashtransactiondriver", title:"Driver Cash", sub:"Cash received from or given to drivers", icon:"DR", color:"bg-orange-500 border-orange-600 hover:bg-orange-600" },
+    { id:"cashtransactionsupervisor", title:"Supervisor Cash", sub:"Cash received from or given to supervisors", icon:"SV", color:"bg-emerald-600 border-emerald-700 hover:bg-emerald-700" },
+    { id:"cashtransactionadmin", title:"Admin Cash", sub:"Cash received from or given to admins", icon:"AD", color:"bg-blue-600 border-blue-700 hover:bg-blue-700" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Cash Transactions</h2><div className="text-xs text-gray-400">Receive and give cash through one accountable ledger</div></div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[140px] rounded-lg border p-4 text-left text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}>
+          <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-4 -bottom-5 w-32 h-32 object-contain opacity-[0.12] pointer-events-none" />
+          <div className="relative z-[1] w-12 h-12 rounded-lg bg-white/20 border border-white/20 flex items-center justify-center font-black">{tile.icon}</div>
+          <div className="relative z-[1] mt-3 font-black">{tile.title}</div>
+          <div className="relative z-[1] mt-1 text-xs text-white/85">{tile.sub}</div>
+        </button>)}
+      </div>
+    </div>
+  );
+}
+
+function CashTransactionLedger({ user, allUsers, partyType }) {
+  const partyTitle = partyType === "driver" ? "Driver" : partyType === "supervisor" ? "Supervisor" : "Admin";
+  const parties = (allUsers || []).filter(person => person.role === partyType);
+  const [partyFilter, setPartyFilter] = useState("");
+  const [dateMode, setDateMode] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0,7));
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [records, setRecords] = useState([]);
+  const [summary, setSummary] = useState({ receivedFromParty:0, givenToParty:0, officeBalanceImpact:0, partyBalance:0 });
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [form, setForm] = useState({ date:today(), direction:"receive", partyName:"", amount:"", paymentMode:"Cash", note:"" });
+
+  const monthRange = month => {
+    const [year, mon] = String(month || today().slice(0,7)).split("-");
+    return { from:`${year}-${mon}-01`, to:`${year}-${mon}-${String(new Date(+year,+mon,0).getDate()).padStart(2,"0")}` };
+  };
+  const selectedRange = () => {
+    if (dateMode === "date") return { from:selectedDate, to:selectedDate };
+    if (dateMode === "month") return monthRange(selectedMonth);
+    if (dateMode === "range") return { from:fromDate, to:toDate };
+    return { from:"", to:"" };
+  };
+  const load = () => {
+    const range = selectedRange();
+    const params = new URLSearchParams({ partyType });
+    if (partyFilter) params.set("partyName", partyFilter);
+    if (range.from) params.set("fromDate", range.from);
+    if (range.to) params.set("toDate", range.to);
+    setLoading(true);
+    api("GET", `/cash-transactions?${params.toString()}`).then(data => {
+      setRecords(Array.isArray(data?.records) ? data.records : []);
+      setSummary(data?.summary || { receivedFromParty:0, givenToParty:0, officeBalanceImpact:0, partyBalance:0 });
+      setLoading(false);
+    });
+  };
+  useEffect(load, [partyType, partyFilter, dateMode, selectedDate, selectedMonth, fromDate, toDate, reloadKey]);
+
+  const resetForm = () => {
+    setEditingId("");
+    setForm({ date:today(), direction:"receive", partyName:partyFilter || "", amount:"", paymentMode:"Cash", note:"" });
+  };
+  const save = async () => {
+    setMessage("");
+    const selectedParty = parties.find(person => person.name === form.partyName);
+    const payload = { ...form, partyType, partyId:selectedParty?._id || "", amount:+(form.amount || 0), addedBy:user.name, addedByRole:user.role };
+    if (!payload.partyName || payload.amount <= 0) return setMessage(`Select ${partyTitle.toLowerCase()} and enter amount`);
+    const audit = editingId ? requestAuditReason("edit", "cash transaction", user) : null;
+    if (editingId && !audit) return;
+    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/cash-transactions/${editingId}` : "/cash-transactions", { ...payload, ...(audit || {}) });
+    if (saved?._id) {
+      setMessage(editingId ? "Cash transaction updated successfully" : "Cash transaction saved successfully");
+      resetForm();
+      setReloadKey(key=>key+1);
+    } else setMessage(saved?.message || "Failed to save cash transaction");
+  };
+  const editRecord = record => {
+    setEditingId(record._id);
+    setForm({ date:record.date || today(), direction:record.direction || "receive", partyName:record.partyName || "", amount:String(record.amount || ""), paymentMode:record.paymentMode || "Cash", note:record.note || "" });
+    window.scrollTo({ top:0, behavior:"smooth" });
+  };
+  const deleteRecord = async record => {
+    const audit = requestAuditReason("delete", "cash transaction", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/cash-transactions/${record._id}`, audit);
+    if (deleted?.ok) setReloadKey(key=>key+1);
+    else if (deleted?.message) window.alert(deleted.message);
+  };
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const printLedger = () => {
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const body = records.map(record=>`<tr><td>${esc(record.date)}</td><td>${esc(record.direction === "receive" ? "Received from" : "Given to")}</td><td>${esc(record.fromName)}</td><td>${esc(record.toName)}</td><td>${esc(record.paymentMode || "-")}</td><td>${esc(record.addedBy || "-")}</td><td class="right">${money(record.amount)}</td></tr>`).join("");
+    const html = `<!doctype html><html><head><title>${partyTitle} Cash Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.right{text-align:right}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.box{border:1px solid #222;padding:9px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}@media print{body{margin:8mm}}</style></head><body><h1>${esc(partyTitle)} Cash Transaction Ledger</h1><p>${esc(partyFilter || `All ${partyTitle}s`)}</p><div class="summary"><div class="box">Received From ${partyTitle}<b>${money(summary.receivedFromParty)}</b></div><div class="box">Given To ${partyTitle}<b>${money(summary.givenToParty)}</b></div><div class="box">${partyTitle} Balance<b>${money(summary.partyBalance)}</b></div></div><table><thead><tr><th>Date</th><th>Transaction</th><th>From</th><th>To</th><th>Mode</th><th>Entered By</th><th>Amount</th></tr></thead><tbody>${body || '<tr><td colspan="7">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup = window.open("", "_blank");
+    popup.document.write(html);
+    popup.document.close();
+  };
+
+  const partyOptions = [{ value:"", label:`Select ${partyTitle}` }, ...parties.map(person=>({ value:person.name, label:`${person.name}${person.mobile || person.phone ? ` - ${person.mobile || person.phone}` : ""}` }))];
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">{partyTitle} Cash Transactions</h2><div className="text-xs text-gray-400">Office receive, give and account balance ledger</div></div>
+        <button onClick={printLedger} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>
+      </div>
+      <SectionBox title={`${editingId ? "Edit" : "New"} ${partyTitle} Cash Transaction`} icon={partyTitle.slice(0,2).toUpperCase()} color={partyType === "driver" ? "amber" : partyType === "supervisor" ? "green" : "blue"}>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Select label={partyTitle} value={form.partyName} options={partyOptions} onChange={e=>setForm({...form,partyName:e.target.value})} />
+          <Select label="Transaction" value={form.direction} options={[{value:"receive",label:`Receive From ${partyTitle}`},{value:"give",label:`Give To ${partyTitle}`}]} onChange={e=>setForm({...form,direction:e.target.value})} />
+          <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button onClick={save} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold">{editingId ? "Update Transaction" : "Submit Transaction"}</button>
+          {editingId && <button onClick={resetForm} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">Cancel Edit</button>}
+          {message && <span className={`text-xs font-bold ${message.includes("success") ? "text-green-700" : "text-red-600"}`}>{message}</span>}
+        </div>
+      </SectionBox>
+      <div className="bg-white rounded-xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <Select label={`${partyTitle} Filter`} value={partyFilter} options={[{value:"",label:`All ${partyTitle}s`}, ...parties.map(person=>({value:person.name,label:person.name}))]} onChange={e=>setPartyFilter(e.target.value)} />
+        <Select label="Date Filter" value={dateMode} options={[{value:"all",label:"All Time"},{value:"date",label:"Date Wise"},{value:"month",label:"Month Wise"},{value:"range",label:"Date Range"}]} onChange={e=>setDateMode(e.target.value)} />
+        {dateMode === "date" && <Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
+        {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
+        {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+        {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : <>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label={`Received From ${partyTitle}`} value={money(summary.receivedFromParty)} icon="IN" color="green" />
+          <StatCard label={`Given To ${partyTitle}`} value={money(summary.givenToParty)} icon="OUT" color="red" />
+          <StatCard label="Office Balance Impact" value={money(summary.officeBalanceImpact)} icon="OF" color={summary.officeBalanceImpact >= 0 ? "green" : "red"} />
+          <StatCard label={`${partyTitle} Balance`} value={money(summary.partyBalance)} icon="=" color={summary.partyBalance >= 0 ? "blue" : "amber"} />
+        </div>
+        {records.length === 0 ? <EmptyState icon="CT" text="No cash transactions found" /> : <div className="bg-white rounded-xl border shadow-sm overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Transaction</th><th className="p-2 text-left">From</th><th className="p-2 text-left">To</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
+            <tbody>{records.map(record=><tr key={record._id} className="border-t">
+              <td className="p-2">{record.date || "-"}</td><td className={`p-2 font-bold ${record.direction === "receive" ? "text-green-700" : "text-red-600"}`}>{record.direction === "receive" ? `Received from ${partyTitle}` : `Given to ${partyTitle}`}</td><td className="p-2 font-bold">{record.fromName || "-"}</td><td className="p-2 font-bold">{record.toName || "-"}</td><td className="p-2">{record.paymentMode || "-"}</td><td className="p-2">{record.note || "-"}</td><td className="p-2">{record.addedBy || "-"}<div className="text-gray-400">{record.addedByRole || ""}</div></td><td className="p-2 text-right font-black">{money(record.amount)}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editRecord(record)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button><button onClick={()=>deleteRecord(record)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </>}
+    </div>
+  );
+}
+
 function CashFlowHub({ user, setPage }) {
   const tiles = [
     { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"💵", color:"green", show:true },
+    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive or give cash to drivers, supervisors and admins", icon:"CT", color:"blue", show:isAdminLike(user.role) },
     { id:"companyexpense", title:"Company Expense", sub:"Salary payments and all company expense history", icon:"CE", color:"red", show:isAdminLike(user.role) },
     { id:"companypurchase", title:"Company Purchase", sub:"Record materials and purchases made for the company", icon:"CP", color:"amber", show:isAdminLike(user.role) },
     { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
@@ -8549,7 +8609,7 @@ function OfficeHub({ setPage }) {
   const tiles = [
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
     { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
-    { id:"cashflowhub", title:"Cash Flow", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
+    { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
     { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
     { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
     { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
@@ -8750,7 +8810,7 @@ function CompanyExpense({ user }) {
 
 const NAV = {
   admin: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
     { id:"admincontrol", label:"Admin Panel", icon:"🛡️" },
     { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
@@ -8777,7 +8837,7 @@ const NAV = {
     { id:"reports", label:"Reports", icon:"📈" },
   ],
   supervisor: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
     { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
@@ -8792,7 +8852,7 @@ const NAV = {
     { id:"quotations", label:"Quotations", icon:"QT" },
   ],
   user: [
-    { id:"cashflowhub", label:"Cash Flow", icon:"💵" },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
     { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
@@ -8954,7 +9014,7 @@ export default function App() {
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
-    cashflowhub:{label:"Cash Flow",icon:"CF"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
     salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
     salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
     supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
@@ -9000,6 +9060,10 @@ export default function App() {
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={navigateTo} />;
+      case "cashtransactions": return isAdminLike(currentUser.role)?<CashTransactionsHub setPage={navigateTo} />:null;
+      case "cashtransactiondriver": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="driver" />:null;
+      case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="supervisor" />:null;
+      case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="admin" />:null;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
