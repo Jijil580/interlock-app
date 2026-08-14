@@ -52,6 +52,152 @@ const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "i
 const isAdminLike = (role) => role === "admin" || role === "user";
 const effectiveRoleOf = (role) => role === "user" ? "admin" : role;
 
+const LANGUAGE_OPTIONS = [
+  { value:"en", label:"English" },
+  { value:"hi", label:"हिन्दी" },
+  { value:"ta", label:"தமிழ்" },
+  { value:"te", label:"తెలుగు" },
+  { value:"kn", label:"ಕನ್ನಡ" },
+];
+const LANGUAGE_TEXT = {
+  "Language": { hi:"भाषा", ta:"மொழி", te:"భాష", kn:"ಭಾಷೆ" },
+  "Management System": { hi:"प्रबंधन प्रणाली", ta:"மேலாண்மை அமைப்பு", te:"నిర్వహణ వ్యవస్థ", kn:"ನಿರ್ವಹಣಾ ವ್ಯವಸ್ಥೆ" },
+  "Username": { hi:"उपयोगकर्ता नाम", ta:"பயனர் பெயர்", te:"వినియోగదారు పేరు", kn:"ಬಳಕೆದಾರ ಹೆಸರು" },
+  "Password": { hi:"पासवर्ड", ta:"கடவுச்சொல்", te:"పాస్‌వర్డ్", kn:"ಪಾಸ್‌ವರ್ಡ್" },
+  "Enter username": { hi:"उपयोगकर्ता नाम दर्ज करें", ta:"பயனர் பெயரை உள்ளிடவும்", te:"వినియోగదారు పేరు నమోదు చేయండి", kn:"ಬಳಕೆದಾರ ಹೆಸರನ್ನು ನಮೂದಿಸಿ" },
+  "Enter password": { hi:"पासवर्ड दर्ज करें", ta:"கடவுச்சொல்லை உள்ளிடவும்", te:"పాస్‌వర్డ్ నమోదు చేయండి", kn:"ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ" },
+  "Sign In": { hi:"साइन इन करें", ta:"உள்நுழைக", te:"సైన్ ఇన్", kn:"ಸೈನ್ ಇನ್" },
+  "Signing in...": { hi:"साइन इन हो रहा है...", ta:"உள்நுழைகிறது...", te:"సైన్ ఇన్ అవుతోంది...", kn:"ಸೈನ್ ಇನ್ ಆಗುತ್ತಿದೆ..." },
+  "Back": { hi:"वापस", ta:"பின்செல்", te:"వెనుకకు", kn:"ಹಿಂದೆ" },
+  "Logout": { hi:"लॉग आउट", ta:"வெளியேறு", te:"లాగ్ అవుట్", kn:"ಲಾಗ್ ಔಟ್" },
+  "Cash Flow": { hi:"नकद प्रवाह", ta:"பணப்புழக்கம்", te:"నగదు ప్రవాహం", kn:"ನಗದು ಹರಿವು" },
+  "Admin Panel": { hi:"एडमिन पैनल", ta:"நிர்வாகப் பலகம்", te:"అడ్మిన్ ప్యానెల్", kn:"ಅಡ್ಮಿನ್ ಪ್ಯಾನೆಲ್" },
+  "Office": { hi:"कार्यालय", ta:"அலுவலகம்", te:"కార్యాలయం", kn:"ಕಚೇರಿ" },
+  "Dashboard": { hi:"डैशबोर्ड", ta:"டாஷ்போர்டு", te:"డ్యాష్‌బోర్డ్", kn:"ಡ್ಯಾಶ್‌ಬೋರ್ಡ್" },
+  "Reports": { hi:"रिपोर्ट", ta:"அறிக்கைகள்", te:"నివేదికలు", kn:"ವರದಿಗಳು" },
+  "Company Expense": { hi:"कंपनी खर्च", ta:"நிறுவனச் செலவு", te:"కంపెనీ ఖర్చు", kn:"ಕಂಪನಿ ವೆಚ್ಚ" },
+  "Company Purchase": { hi:"कंपनी खरीद", ta:"நிறுவனக் கொள்முதல்", te:"కంపెనీ కొనుగోలు", kn:"ಕಂಪನಿ ಖರೀದಿ" },
+  "Create New Site Work": { hi:"नया साइट कार्य बनाएं", ta:"புதிய தளப் பணியை உருவாக்கு", te:"కొత్త సైట్ పనిని సృష్టించండి", kn:"ಹೊಸ ಸೈಟ್ ಕೆಲಸ ರಚಿಸಿ" },
+  "Production Site": { hi:"उत्पादन साइट", ta:"உற்பத்தித் தளம்", te:"ఉత్పత్తి సైట్", kn:"ಉತ್ಪಾದನಾ ತಾಣ" },
+  "Production Site Entry": { hi:"उत्पादन साइट प्रविष्टि", ta:"உற்பத்தித் தள பதிவு", te:"ఉత్పత్తి సైట్ నమోదు", kn:"ಉತ್ಪಾದನಾ ತಾಣ ನಮೂದು" },
+  "Master Data": { hi:"मास्टर डेटा", ta:"முதன்மைத் தரவு", te:"మాస్టర్ డేటా", kn:"ಮಾಸ್ಟರ್ ಡೇಟಾ" },
+  "Suppliers": { hi:"आपूर्तिकर्ता", ta:"விநியோகஸ்தர்கள்", te:"సరఫరాదారులు", kn:"ಪೂರೈಕೆದಾರರು" },
+  "Workers": { hi:"श्रमिक", ta:"தொழிலாளர்கள்", te:"కార్మికులు", kn:"ಕಾರ್ಮಿಕರು" },
+  "Add Worker": { hi:"श्रमिक जोड़ें", ta:"தொழிலாளரைச் சேர்", te:"కార్మికుడిని జోడించండి", kn:"ಕಾರ್ಮಿಕರನ್ನು ಸೇರಿಸಿ" },
+  "Attendance": { hi:"उपस्थिति", ta:"வருகை", te:"హాజరు", kn:"ಹಾಜರಾತಿ" },
+  "Daily Report": { hi:"दैनिक रिपोर्ट", ta:"தினசரி அறிக்கை", te:"రోజువారీ నివేదిక", kn:"ದೈನಂದಿನ ವರದಿ" },
+  "Supervisor Report": { hi:"सुपरवाइजर रिपोर्ट", ta:"மேற்பார்வையாளர் அறிக்கை", te:"సూపర్‌వైజర్ నివేదిక", kn:"ಮೇಲ್ವಿಚಾರಕರ ವರದಿ" },
+  "Site Reports": { hi:"साइट रिपोर्ट", ta:"தள அறிக்கைகள்", te:"సైట్ నివేదికలు", kn:"ಸೈಟ್ ವರದಿಗಳು" },
+  "My Site Reports": { hi:"मेरी साइट रिपोर्ट", ta:"எனது தள அறிக்கைகள்", te:"నా సైట్ నివేదికలు", kn:"ನನ್ನ ಸೈಟ್ ವರದಿಗಳು" },
+  "Site Report": { hi:"साइट रिपोर्ट", ta:"தள அறிக்கை", te:"సైట్ నివేదిక", kn:"ಸೈಟ್ ವರದಿ" },
+  "Worker Reports": { hi:"श्रमिक रिपोर्ट", ta:"தொழிலாளர் அறிக்கைகள்", te:"కార్మికుల నివేదికలు", kn:"ಕಾರ್ಮಿಕರ ವರದಿಗಳು" },
+  "Worker Ledger": { hi:"श्रमिक खाता", ta:"தொழிலாளர் பேரேடு", te:"కార్మికుల లెడ్జర్", kn:"ಕಾರ್ಮಿಕರ ಲೆಡ್ಜರ್" },
+  "Driver Reports": { hi:"ड्राइवर रिपोर्ट", ta:"ஓட்டுநர் அறிக்கைகள்", te:"డ్రైవర్ నివేదికలు", kn:"ಚಾಲಕರ ವರದಿಗಳು" },
+  "Submit Report": { hi:"रिपोर्ट जमा करें", ta:"அறிக்கையைச் சமர்ப்பி", te:"నివేదిక సమర్పించండి", kn:"ವರದಿ ಸಲ್ಲಿಸಿ" },
+  "Purchases": { hi:"खरीद", ta:"கொள்முதல்", te:"కొనుగోళ్లు", kn:"ಖರೀದಿಗಳು" },
+  "Stock": { hi:"स्टॉक", ta:"இருப்பு", te:"స్టాక్", kn:"ದಾಸ್ತಾನು" },
+  "Raw Material": { hi:"कच्चा माल", ta:"மூலப்பொருள்", te:"ముడి పదార్థం", kn:"ಕಚ್ಚಾ ವಸ್ತು" },
+  "Sales": { hi:"बिक्री", ta:"விற்பனை", te:"అమ్మకాలు", kn:"ಮಾರಾಟ" },
+  "Quotations": { hi:"कोटेशन", ta:"விலைமதிப்பீடுகள்", te:"కొటేషన్లు", kn:"ಕೊಟೇಶನ್‌ಗಳು" },
+  "Devices": { hi:"डिवाइस", ta:"சாதனங்கள்", te:"పరికరాలు", kn:"ಸಾಧನಗಳು" },
+  "Users": { hi:"उपयोगकर्ता", ta:"பயனர்கள்", te:"వినియోగదారులు", kn:"ಬಳಕೆದಾರರು" },
+  "Admin": { hi:"एडमिन", ta:"நிர்வாகி", te:"అడ్మిన్", kn:"ಅಡ್ಮಿನ್" },
+  "User": { hi:"उपयोगकर्ता", ta:"பயனர்", te:"వినియోగదారు", kn:"ಬಳಕೆದಾರ" },
+  "Supervisor": { hi:"सुपरवाइजर", ta:"மேற்பார்வையாளர்", te:"సూపర్‌వైజర్", kn:"ಮೇಲ್ವಿಚಾರಕ" },
+  "Driver": { hi:"ड्राइवर", ta:"ஓட்டுநர்", te:"డ్రైవర్", kn:"ಚಾಲಕ" },
+  "Work Planning": { hi:"कार्य योजना", ta:"பணித் திட்டமிடல்", te:"పని ప్రణాళిక", kn:"ಕೆಲಸದ ಯೋಜನೆ" },
+  "Salary": { hi:"वेतन", ta:"சம்பளம்", te:"జీతం", kn:"ಸಂಬಳ" },
+  "Advance Salary": { hi:"अग्रिम वेतन", ta:"முன்பணச் சம்பளம்", te:"అడ్వాన్స్ జీతం", kn:"ಮುಂಗಡ ಸಂಬಳ" },
+  "Production Worker Salary": { hi:"उत्पादन श्रमिक वेतन", ta:"உற்பத்தித் தொழிலாளர் சம்பளம்", te:"ఉత్పత్తి కార్మికుల జీతం", kn:"ಉತ್ಪಾದನಾ ಕಾರ್ಮಿಕರ ಸಂಬಳ" },
+  "Site Worker Salary": { hi:"साइट श्रमिक वेतन", ta:"தளத் தொழிலாளர் சம்பளம்", te:"సైట్ కార్మికుల జీతం", kn:"ಸೈಟ್ ಕಾರ್ಮಿಕರ ಸಂಬಳ" },
+  "Driver Salary": { hi:"ड्राइवर वेतन", ta:"ஓட்டுநர் சம்பளம்", te:"డ్రైవర్ జీతం", kn:"ಚಾಲಕರ ಸಂಬಳ" },
+  "Supervisor Salary": { hi:"सुपरवाइजर वेतन", ta:"மேற்பார்வையாளர் சம்பளம்", te:"సూపర్‌వైజర్ జీతం", kn:"ಮೇಲ್ವಿಚಾರಕರ ಸಂಬಳ" },
+  "Office User Salary": { hi:"कार्यालय उपयोगकर्ता वेतन", ta:"அலுவலகப் பயனர் சம்பளம்", te:"ఆఫీస్ వినియోగదారు జీతం", kn:"ಕಚೇರಿ ಬಳಕೆದಾರರ ಸಂಬಳ" },
+  "Office Daily Report": { hi:"कार्यालय दैनिक रिपोर्ट", ta:"அலுவலக தினசரி அறிக்கை", te:"ఆఫీస్ రోజువారీ నివేదిక", kn:"ಕಚೇರಿ ದೈನಂದಿನ ವರದಿ" },
+  "Date": { hi:"तारीख", ta:"தேதி", te:"తేదీ", kn:"ದಿನಾಂಕ" },
+  "From Date": { hi:"आरंभ तारीख", ta:"தொடக்க தேதி", te:"ప్రారంభ తేదీ", kn:"ಆರಂಭ ದಿನಾಂಕ" },
+  "To Date": { hi:"अंतिम तारीख", ta:"முடிவு தேதி", te:"ముగింపు తేదీ", kn:"ಅಂತಿಮ ದಿನಾಂಕ" },
+  "Month": { hi:"महीना", ta:"மாதம்", te:"నెల", kn:"ತಿಂಗಳು" },
+  "Name": { hi:"नाम", ta:"பெயர்", te:"పేరు", kn:"ಹೆಸರು" },
+  "Worker Name": { hi:"श्रमिक का नाम", ta:"தொழிலாளர் பெயர்", te:"కార్మికుడి పేరు", kn:"ಕಾರ್ಮಿಕರ ಹೆಸರು" },
+  "Driver Name": { hi:"ड्राइवर का नाम", ta:"ஓட்டுநர் பெயர்", te:"డ్రైవర్ పేరు", kn:"ಚಾಲಕರ ಹೆಸರು" },
+  "Site Name": { hi:"साइट का नाम", ta:"தளத்தின் பெயர்", te:"సైట్ పేరు", kn:"ಸೈಟ್ ಹೆಸರು" },
+  "Customer Name": { hi:"ग्राहक का नाम", ta:"வாடிக்கையாளர் பெயர்", te:"కస్టమర్ పేరు", kn:"ಗ್ರಾಹಕರ ಹೆಸರು" },
+  "Supplier Name": { hi:"आपूर्तिकर्ता का नाम", ta:"விநியோகஸ்தர் பெயர்", te:"సరఫరాదారు పేరు", kn:"ಪೂರೈಕೆದಾರರ ಹೆಸರು" },
+  "Mobile Number": { hi:"मोबाइल नंबर", ta:"கைபேசி எண்", te:"మొబైల్ నంబర్", kn:"ಮೊಬೈಲ್ ಸಂಖ್ಯೆ" },
+  "Phone": { hi:"फोन", ta:"தொலைபேசி", te:"ఫోన్", kn:"ದೂರವಾಣಿ" },
+  "Address": { hi:"पता", ta:"முகவரி", te:"చిరునామా", kn:"ವಿಳಾಸ" },
+  "Category": { hi:"श्रेणी", ta:"வகை", te:"వర్గం", kn:"ವರ್ಗ" },
+  "Product": { hi:"उत्पाद", ta:"தயாரிப்பு", te:"ఉత్పత్తి", kn:"ಉತ್ಪನ್ನ" },
+  "Item Name": { hi:"वस्तु का नाम", ta:"பொருளின் பெயர்", te:"వస్తువు పేరు", kn:"ವಸ್ತುವಿನ ಹೆಸರು" },
+  "Quantity": { hi:"मात्रा", ta:"அளவு", te:"పరిమాణం", kn:"ಪ್ರಮಾಣ" },
+  "Unit": { hi:"इकाई", ta:"அலகு", te:"యూనిట్", kn:"ಘಟಕ" },
+  "Rate": { hi:"दर", ta:"விலை", te:"రేటు", kn:"ದರ" },
+  "Amount": { hi:"राशि", ta:"தொகை", te:"మొత్తం", kn:"ಮೊತ್ತ" },
+  "Total Amount": { hi:"कुल राशि", ta:"மொத்தத் தொகை", te:"మొత్తం మొత్తం", kn:"ಒಟ್ಟು ಮೊತ್ತ" },
+  "Payment Given": { hi:"दिया गया भुगतान", ta:"வழங்கிய தொகை", te:"ఇచ్చిన చెల్లింపు", kn:"ನೀಡಿದ ಪಾವತಿ" },
+  "Payment Mode": { hi:"भुगतान का तरीका", ta:"பணம் செலுத்தும் முறை", te:"చెల్లింపు విధానం", kn:"ಪಾವತಿ ವಿಧಾನ" },
+  "Paid": { hi:"भुगतान", ta:"செலுத்தியது", te:"చెల్లించబడింది", kn:"ಪಾವತಿಸಲಾಗಿದೆ" },
+  "Pending": { hi:"बकाया", ta:"நிலுவை", te:"పెండింగ్", kn:"ಬಾಕಿ" },
+  "Total Pending": { hi:"कुल बकाया", ta:"மொத்த நிலுவை", te:"మొత్తం పెండింగ్", kn:"ಒಟ್ಟು ಬಾಕಿ" },
+  "Status": { hi:"स्थिति", ta:"நிலை", te:"స్థితి", kn:"ಸ್ಥಿತಿ" },
+  "Notes": { hi:"टिप्पणियां", ta:"குறிப்புகள்", te:"గమనికలు", kn:"ಟಿಪ್ಪಣಿಗಳು" },
+  "Note": { hi:"टिप्पणी", ta:"குறிப்பு", te:"గమనిక", kn:"ಟಿಪ್ಪಣಿ" },
+  "Remarks": { hi:"टिप्पणी", ta:"குறிப்புகள்", te:"వ్యాఖ్యలు", kn:"ಟಿಪ್ಪಣಿಗಳು" },
+  "Search": { hi:"खोजें", ta:"தேடு", te:"వెతకండి", kn:"ಹುಡುಕಿ" },
+  "All": { hi:"सभी", ta:"அனைத்தும்", te:"అన్నీ", kn:"ಎಲ್ಲಾ" },
+  "Today": { hi:"आज", ta:"இன்று", te:"ఈ రోజు", kn:"ಇಂದು" },
+  "Daily View": { hi:"दैनिक दृश्य", ta:"தினசரி பார்வை", te:"రోజువారీ వీక్షణ", kn:"ದೈನಂದಿನ ನೋಟ" },
+  "Monthly View": { hi:"मासिक दृश्य", ta:"மாதாந்திர பார்வை", te:"నెలవారీ వీక్షణ", kn:"ಮಾಸಿಕ ನೋಟ" },
+  "Active": { hi:"सक्रिय", ta:"செயலில்", te:"సక్రియం", kn:"ಸಕ್ರಿಯ" },
+  "Inactive": { hi:"निष्क्रिय", ta:"செயலற்றது", te:"నిష్క్రియం", kn:"ನಿಷ್ಕ್ರಿಯ" },
+  "Cash": { hi:"नकद", ta:"ரொக்கம்", te:"నగదు", kn:"ನಗದು" },
+  "Bank Transfer": { hi:"बैंक ट्रांसफर", ta:"வங்கி பரிமாற்றம்", te:"బ్యాంక్ బదిలీ", kn:"ಬ್ಯಾಂಕ್ ವರ್ಗಾವಣೆ" },
+  "Cheque": { hi:"चेक", ta:"காசோலை", te:"చెక్", kn:"ಚೆಕ್" },
+  "Other": { hi:"अन्य", ta:"மற்றவை", te:"ఇతర", kn:"ಇತರೆ" },
+  "Save": { hi:"सहेजें", ta:"சேமி", te:"సేవ్", kn:"ಉಳಿಸಿ" },
+  "Submit": { hi:"जमा करें", ta:"சமர்ப்பி", te:"సమర్పించండి", kn:"ಸಲ್ಲಿಸಿ" },
+  "Add": { hi:"जोड़ें", ta:"சேர்", te:"జోడించండి", kn:"ಸೇರಿಸಿ" },
+  "Edit": { hi:"संपादित करें", ta:"திருத்து", te:"సవరించండి", kn:"ತಿದ್ದು" },
+  "Delete": { hi:"हटाएं", ta:"நீக்கு", te:"తొలగించండి", kn:"ಅಳಿಸಿ" },
+  "View": { hi:"देखें", ta:"பார்", te:"చూడండి", kn:"ನೋಡಿ" },
+  "Print": { hi:"प्रिंट", ta:"அச்சிடு", te:"ప్రింట్", kn:"ಮುದ್ರಿಸಿ" },
+  "Make Payment": { hi:"भुगतान करें", ta:"பணம் செலுத்து", te:"చెల్లింపు చేయండి", kn:"ಪಾವತಿ ಮಾಡಿ" },
+  "Mark Payment Done": { hi:"भुगतान पूर्ण करें", ta:"பணம் செலுத்தியதாகக் குறி", te:"చెల్లింపు పూర్తయినట్లు గుర్తించండి", kn:"ಪಾವತಿ ಪೂರ್ಣವೆಂದು ಗುರುತಿಸಿ" },
+  "Loading...": { hi:"लोड हो रहा है...", ta:"ஏற்றுகிறது...", te:"లోడ్ అవుతోంది...", kn:"ಲೋಡ್ ಆಗುತ್ತಿದೆ..." },
+  "No records found": { hi:"कोई रिकॉर्ड नहीं मिला", ta:"பதிவுகள் இல்லை", te:"రికార్డులు కనబడలేదు", kn:"ಯಾವುದೇ ದಾಖಲೆಗಳು ಕಂಡುಬಂದಿಲ್ಲ" },
+  "Saved successfully": { hi:"सफलतापूर्वक सहेजा गया", ta:"வெற்றிகரமாகச் சேமிக்கப்பட்டது", te:"విజయవంతంగా సేవ్ చేయబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ಉಳಿಸಲಾಗಿದೆ" },
+  "Updated successfully": { hi:"सफलतापूर्वक अपडेट किया गया", ta:"வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது", te:"విజయవంతంగా నవీకరించబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ನವೀಕರಿಸಲಾಗಿದೆ" },
+  "Deleted successfully": { hi:"सफलतापूर्वक हटाया गया", ta:"வெற்றிகரமாக நீக்கப்பட்டது", te:"విజయవంతంగా తొలగించబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ಅಳಿಸಲಾಗಿದೆ" },
+};
+Object.assign(LANGUAGE_TEXT, {
+  "Enter username and password": { hi:"उपयोगकर्ता नाम और पासवर्ड दर्ज करें", ta:"பயனர் பெயர் மற்றும் கடவுச்சொல்லை உள்ளிடவும்", te:"వినియోగదారు పేరు మరియు పాస్‌వర్డ్ నమోదు చేయండి", kn:"ಬಳಕೆದಾರ ಹೆಸರು ಮತ್ತು ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ" },
+  "Invalid credentials": { hi:"गलत लॉगिन विवरण", ta:"தவறான உள்நுழைவு விவரங்கள்", te:"చెల్లని లాగిన్ వివరాలు", kn:"ತಪ್ಪಾದ ಲಾಗಿನ್ ವಿವರಗಳು" },
+  "Server error, please try again": { hi:"सर्वर त्रुटि, कृपया फिर प्रयास करें", ta:"சேவையகப் பிழை, மீண்டும் முயற்சிக்கவும்", te:"సర్వర్ లోపం, మళ్లీ ప్రయత్నించండి", kn:"ಸರ್ವರ್ ದೋಷ, ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ" },
+  "+ Add": { hi:"+ जोड़ें", ta:"+ சேர்", te:"+ జోడించండి", kn:"+ ಸೇರಿಸಿ" },
+  "+ Entry": { hi:"+ प्रविष्टि", ta:"+ பதிவு", te:"+ నమోదు", kn:"+ ನಮೂದು" },
+  "Cancel": { hi:"रद्द करें", ta:"ரத்து செய்", te:"రద్దు చేయండి", kn:"ರದ್ದುಮಾಡಿ" },
+  "Close": { hi:"बंद करें", ta:"மூடு", te:"మూసివేయండి", kn:"ಮುಚ್ಚಿ" },
+  "Update": { hi:"अपडेट करें", ta:"புதுப்பி", te:"నవీకరించండి", kn:"ನವೀಕರಿಸಿ" },
+  "Save Changes": { hi:"परिवर्तन सहेजें", ta:"மாற்றங்களைச் சேமி", te:"మార్పులను సేవ్ చేయండి", kn:"ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ" },
+  "View Details": { hi:"विवरण देखें", ta:"விவரங்களைப் பார்", te:"వివరాలు చూడండి", kn:"ವಿವರಗಳನ್ನು ನೋಡಿ" },
+  "Print Ledger": { hi:"खाता प्रिंट करें", ta:"பேரேட்டை அச்சிடு", te:"లెడ్జర్ ప్రింట్ చేయండి", kn:"ಲೆಡ್ಜರ್ ಮುದ್ರಿಸಿ" },
+});
+let ACTIVE_LANGUAGE = "en";
+const tr = (value, language = ACTIVE_LANGUAGE) => {
+  if (typeof value !== "string" || language === "en") return value;
+  const direct = LANGUAGE_TEXT[value]?.[language];
+  if (direct) return direct;
+  const required = value.endsWith(" *") ? " *" : "";
+  const base = required ? value.slice(0,-2) : value;
+  const baseTranslation = LANGUAGE_TEXT[base]?.[language];
+  if (baseTranslation) return `${baseTranslation}${required}`;
+  for (const english of Object.keys(LANGUAGE_TEXT)) {
+    if (base.startsWith(`${english} (`)) return `${LANGUAGE_TEXT[english]?.[language] || english}${base.slice(english.length)}${required}`;
+  }
+  return value;
+};
+
 const mergeDailyReportsByDate = (reports = []) => {
   const map = new Map();
   reports.forEach((r) => {
@@ -114,7 +260,7 @@ function requestAuditReason(action, label, user) {
 // ─── UI COMPONENTS ─────────────────────────────────────────────────────────────
 function Badge({ children, color = "gray" }) {
   const c = { green:"bg-green-100 text-green-700 border-green-200", red:"bg-red-100 text-red-700 border-red-200", yellow:"bg-yellow-100 text-yellow-700 border-yellow-200", blue:"bg-blue-100 text-blue-700 border-blue-200", gray:"bg-gray-100 text-gray-600 border-gray-200", orange:"bg-orange-100 text-orange-700 border-orange-200", purple:"bg-purple-100 text-purple-700 border-purple-200", teal:"bg-teal-100 text-teal-700 border-teal-200", amber:"bg-amber-100 text-amber-700 border-amber-200" };
-  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${c[color]||c.gray}`}>{children}</span>;
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${c[color]||c.gray}`}>{typeof children === "string" ? tr(children) : children}</span>;
 }
 
 function Modal({ title, onClose, children, wide }) {
@@ -122,7 +268,7 @@ function Modal({ title, onClose, children, wide }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-0 sm:p-3">
       <div className={`app-modal bg-white rounded-t-2xl sm:rounded-lg shadow-xl border border-slate-300 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto`}>
         <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 sticky top-0 bg-slate-900 z-10">
-          <h3 className="font-black text-white text-base leading-tight">{title}</h3>
+          <h3 className="font-black text-white text-base leading-tight">{tr(title)}</h3>
           <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white text-2xl leading-none flex items-center justify-center">×</button>
         </div>
         <div className="app-modal-body px-4 sm:px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">{children}</div>
@@ -132,19 +278,21 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 function Input({ label, ...props }) {
+  const localizedProps = { ...props, placeholder:props.placeholder ? tr(props.placeholder) : props.placeholder };
   return (
     <div>
-      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <input className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...props} />
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
+      <input className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...localizedProps} />
     </div>
   );
 }
 
 function Textarea({ label, ...props }) {
+  const localizedProps = { ...props, placeholder:props.placeholder ? tr(props.placeholder) : props.placeholder };
   return (
     <div>
-      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
-      <textarea className="w-full min-h-24 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white resize-none" rows={3} {...props} />
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
+      <textarea className="w-full min-h-24 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white resize-none" rows={3} {...localizedProps} />
     </div>
   );
 }
@@ -152,9 +300,9 @@ function Textarea({ label, ...props }) {
 function Select({ label, options, ...props }) {
   return (
     <div>
-      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{label}</label>}
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
       <select className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...props}>
-        {options.map((o) => <option key={o.value??o} value={o.value??o}>{o.label??o}</option>)}
+        {options.map((o) => <option key={o.value??o} value={o.value??o}>{tr(o.label??o)}</option>)}
       </select>
     </div>
   );
@@ -223,8 +371,8 @@ function StatCard({ label, value, sub, icon, color, solid = false }) {
       <div className={`w-10 h-10 rounded-lg border ${solid ? "bg-white/20 border-white/25 text-white" : c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
       <div className="min-w-0 flex-1">
         <div className={`text-base sm:text-xl font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${solid ? "text-white" : "text-slate-950"}`} title={String(value??"")}>{value}</div>
-        <div className={`text-[11px] font-black uppercase tracking-wide ${solid ? "text-white/90" : "text-slate-500"}`}>{label}</div>
-        {sub && <div className={`text-xs mt-0.5 ${solid ? "text-white/75" : "text-slate-400"}`}>{sub}</div>}
+        <div className={`text-[11px] font-black uppercase tracking-wide ${solid ? "text-white/90" : "text-slate-500"}`}>{tr(label)}</div>
+        {sub && <div className={`text-xs mt-0.5 ${solid ? "text-white/75" : "text-slate-400"}`}>{tr(sub)}</div>}
       </div>
     </div>
   );
@@ -235,7 +383,7 @@ function Loader() {
 }
 
 function EmptyState({ icon, text }) {
-  return <div className="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-500 font-semibold">{text}</div></div>;
+  return <div className="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-500 font-semibold">{tr(text)}</div></div>;
 }
 
 function SectionBox({ title, icon, color = "gray", children }) {
@@ -252,10 +400,67 @@ function SectionBox({ title, icon, color = "gray", children }) {
   const theme = c[color] || c.gray;
   return (
     <section className={`bg-white border ${theme.border} rounded-lg overflow-hidden shadow-sm`}>
-      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase text-white`}>{icon} {title}</div>
+      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase text-white`}>{icon} {tr(title)}</div>
       <div className="p-4 space-y-3">{children}</div>
     </section>
   );
+}
+
+function LanguageSelector({ value, onChange, dark = false, compact = false }) {
+  return (
+    <label className={`flex items-center gap-2 ${compact ? "" : "w-full"}`} title={tr("Language", value)}>
+      {!compact&&<span className={`text-xs font-bold ${dark?"text-slate-300":"text-slate-600"}`}>{tr("Language", value)}</span>}
+      <select
+        aria-label={tr("Language", value)}
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        className={`${compact?"h-9 max-w-[118px] px-2":"min-h-11 flex-1 px-3"} rounded-lg border text-sm font-bold outline-none ${dark?"bg-slate-900 border-slate-700 text-white":"bg-white border-slate-300 text-slate-700 focus:border-blue-600"}`}
+      >
+        {LANGUAGE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function LocalizedContent({ language, children }) {
+  const rootRef = useRef(null);
+  const originalsRef = useRef(new WeakMap());
+  useEffect(()=>{
+    const root = rootRef.current;
+    if (!root) return;
+    const originals = originalsRef.current;
+    const variantsOf = source => [source, ...LANGUAGE_OPTIONS.map(option=>tr(source,option.value))];
+    const translateNode = (node, refreshSource = false) => {
+      if (!node || node.nodeType !== Node.TEXT_NODE || !node.nodeValue?.trim()) return;
+      let source = originals.get(node);
+      const current = node.nodeValue;
+      if (!source) {
+        source = current;
+        originals.set(node, source);
+      } else if (refreshSource && !variantsOf(source).includes(current)) {
+        source = current;
+        originals.set(node, source);
+      }
+      const translated = tr(source, language);
+      if (current !== translated) node.nodeValue = translated;
+    };
+    const translateTree = (target, refreshSource = false) => {
+      if (target.nodeType === Node.TEXT_NODE) return translateNode(target, refreshSource);
+      if (target.nodeType !== Node.ELEMENT_NODE) return;
+      if (["SCRIPT","STYLE"].includes(target.tagName)) return;
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) translateNode(node, refreshSource);
+    };
+    translateTree(root, false);
+    const observer = new MutationObserver(mutations=>mutations.forEach(mutation=>{
+      if (mutation.type === "characterData") translateNode(mutation.target, true);
+      mutation.addedNodes?.forEach(node=>translateTree(node, true));
+    }));
+    observer.observe(root,{subtree:true,childList:true,characterData:true});
+    return ()=>observer.disconnect();
+  },[language]);
+  return <div ref={rootRef} className="contents">{children}</div>;
 }
 
 
@@ -448,7 +653,7 @@ function DeviceManagement({ user }) {
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
-function Login({ onLogin, branding = COMPANY }) {
+function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -501,14 +706,15 @@ function Login({ onLogin, branding = COMPANY }) {
         <div className="text-center mb-8">
           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm"><img src={branding.logo || COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-1" /></div>
           <h1 className="text-2xl font-black text-gray-900">{branding.shortName || branding.companyName || COMPANY.shortName}</h1>
-          <p className="text-slate-500 text-sm mt-1">Management System</p>
+          <p className="text-slate-500 text-sm mt-1">{tr("Management System", language)}</p>
         </div>
         <div className="space-y-4">
+          <LanguageSelector value={language} onChange={onLanguageChange} />
           <Input label="Username" value={username} onChange={e=>setUsername(e.target.value)} placeholder="Enter username" onKeyDown={e=>e.key==="Enter"&&login()} />
           <Input label="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password" onKeyDown={e=>e.key==="Enter"&&login()} />
-          {error && <div className="text-red-600 text-xs font-semibold bg-red-50 rounded-xl p-3">{error}</div>}
+          {error && <div className="text-red-600 text-xs font-semibold bg-red-50 rounded-xl p-3">{tr(error, language)}</div>}
           <button onClick={login} disabled={loading} className="w-full bg-amber-500 text-white py-3 rounded-lg font-black text-base hover:bg-amber-600 shadow-sm disabled:opacity-60">
-            {loading ? "Signing in..." : "Sign In"}
+            {tr(loading ? "Signing in..." : "Sign In", language)}
           </button>
         </div>
         <div className="mt-6 pt-4 border-t border-gray-100 text-center">
@@ -8494,6 +8700,11 @@ const NAV = {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [language, setLanguage] = useState(()=>{
+    const saved = localStorage.getItem("pk_language") || "en";
+    return LANGUAGE_OPTIONS.some(option=>option.value===saved) ? saved : "en";
+  });
+  ACTIVE_LANGUAGE = language;
   const [successToast, setSuccessToast] = useState("");
   const [page, setPage] = useState("dashboard");
   const pageHistory = useRef([]);
@@ -8509,6 +8720,17 @@ export default function App() {
   useEffect(()=>{
     document.title = COMPANY.shortName;
   },[]);
+
+  const changeLanguage = (nextLanguage) => {
+    const next = LANGUAGE_OPTIONS.some(option=>option.value===nextLanguage) ? nextLanguage : "en";
+    localStorage.setItem("pk_language", next);
+    document.documentElement.lang = next;
+    setLanguage(next);
+  };
+
+  useEffect(()=>{
+    document.documentElement.lang = language;
+  },[language]);
 
   useEffect(() => {
     const show = (event) => {
@@ -8570,7 +8792,7 @@ export default function App() {
     setSidebarOpen(false);
   };
 
-  if (!currentUser) return <Login branding={COMPANY} onLogin={(u)=>{
+  if (!currentUser) return <Login branding={COMPANY} language={language} onLanguageChange={changeLanguage} onLogin={(u)=>{
     if (u.devicePending) {
       setCurrentUser({...u, _pendingDevice: true});
     } else {
@@ -8680,7 +8902,7 @@ export default function App() {
     <div className="app-shell min-h-screen bg-slate-100 flex">
       {successToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[80] bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-black border border-green-500">
-          {successToast}
+          {tr(successToast, language)}
         </div>
       )}
       {sidebarOpen&&<div className="fixed inset-0 bg-black/30 z-20 lg:hidden" onClick={()=>setSidebarOpen(false)} />}
@@ -8688,14 +8910,14 @@ export default function App() {
         <div className="px-5 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white border border-white/20 flex items-center justify-center overflow-hidden"><img src={COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-0.5" /></div>
-            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">Management System</div></div>
+            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">{tr("Management System", language)}</div></div>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           {nav.map(item=>(
             <button key={item.id} onClick={()=>navigateTo(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${page===item.id?"bg-amber-500 text-white shadow-sm":"text-slate-400 hover:bg-slate-900 hover:text-white"}`}>
-              <span className="text-base">{item.icon}</span>{item.label}
+              <span className="text-base">{item.icon}</span>{tr(item.label, language)}
             </button>
           ))}
         </nav>
@@ -8706,21 +8928,22 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
-            <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{currentUser.role}</div></div>
-            <button onClick={logout} className="text-stone-500 hover:text-red-400 text-xs font-bold" title="Logout">⏻</button>
+            <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</div></div>
+            <button onClick={logout} className="text-stone-500 hover:text-red-400 text-xs font-bold" title={tr("Logout", language)}>⏻</button>
           </div>
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title="Back to previous page" aria-label="Back to previous page"><span className="text-base" aria-hidden="true">←</span><span className="hidden sm:inline">Back</span></button>}
-          <h1 className="font-black text-slate-950 flex-1 text-base">{currentPageMeta.icon} {currentPageMeta.label}</h1>
+          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title={tr("Back", language)} aria-label={tr("Back", language)}><span className="text-base" aria-hidden="true">←</span><span className="hidden sm:inline">{tr("Back", language)}</span></button>}
+          <h1 className="font-black text-slate-950 flex-1 text-base">{currentPageMeta.icon} {tr(currentPageMeta.label, language)}</h1>
+          <LanguageSelector value={language} onChange={changeLanguage} compact />
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
-            {currentUser.avatar} <span className="capitalize">{currentUser.role}</span>
+            {currentUser.avatar} <span className="capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</span>
           </div>
         </header>
-        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]">{renderPage()}</div></main>
+        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]"><LocalizedContent language={language}>{renderPage()}</LocalizedContent></div></main>
       </div>
     </div>
   );
