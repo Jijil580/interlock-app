@@ -39,7 +39,10 @@ const qtyWithSqft = (row, masters = [], unitFallback = "piece") => {
 };
 const directSitePaymentRows = (site, dailyReceived = 0) => {
   const payments = (site?.payments || []).map(p => ({ ...p, date: p.date || site?.startDate, source: "Site Work" }));
-  if (payments.length) return payments;
+  const cashTransactions = (site?.cashTransactionPayments || []).map(p => ({ ...p, source:p.source || "Cash Transactions" }));
+  const storedLegacy = +(site?.legacyReceived) || 0;
+  const legacyPayments = storedLegacy > 0 ? [{ date:site?.startDate || today(), amount:storedLegacy, mode:site?.paymentMode || "Cash", source:"Initial Site Work" }] : [];
+  if (payments.length || cashTransactions.length || legacyPayments.length) return [...payments, ...legacyPayments, ...cashTransactions];
   const legacy = Math.max(0, (+(site?.totalReceived ?? site?.paidAmount ?? 0) || 0) - (+(dailyReceived) || 0));
   return legacy > 0 ? [{ date: site?.startDate || today(), amount: legacy, mode: site?.paymentMode || "Cash", source: "Initial Site Work" }] : [];
 };
@@ -5923,7 +5926,7 @@ function AdminSiteReport() {
         {paymentHistory.length>0&&(
           <SectionBox title="Payment History" icon="💳" color="blue">
             {paymentHistory.map((p,i)=><div key={i} className="grid grid-cols-4 gap-2 text-xs py-1 border-b border-blue-100">
-              <span>{p.date||"—"}</span><span>{p.source}</span><span>{p.mode||p.paymentMode||"—"}</span><span className="text-right font-bold text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+              <span>{p.date||"—"}{p.time?` ${p.time}`:""}</span><span>{p.source}</span><span>{p.mode||p.paymentMode||"—"}</span><span className="text-right font-bold text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
             </div>)}
           </SectionBox>
         )}
@@ -6867,7 +6870,7 @@ function SupervisorSiteReport({ user }) {
         ):(
           <div className="space-y-3">
             <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
-            {clientPayments.length>0&&<SectionBox title="Site Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
+            {clientPayments.length>0&&<SectionBox title="Site Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date}{p.time?` ${p.time}`:""} · {p.receivedFrom||p.receivedBy||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
             {workerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{workerPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span>{p.date} · {p.workerName||p.paidTo||"—"}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
             {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.materialName||p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
             {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
@@ -8204,6 +8207,7 @@ function AdminCashFlow({ user, allUsers }) {
 
 function CashTransactionsHub({ setPage }) {
   const tiles = [
+    { id:"cashtransactionsite", title:"Site Cash", sub:"Receive site payments and update site balances", icon:"ST", color:"bg-violet-600 border-violet-700 hover:bg-violet-700" },
     { id:"cashtransactiondriver", title:"Driver Cash", sub:"Cash received from or given to drivers", icon:"DR", color:"bg-orange-500 border-orange-600 hover:bg-orange-600" },
     { id:"cashtransactionsupervisor", title:"Supervisor Cash", sub:"Cash received from or given to supervisors", icon:"SV", color:"bg-emerald-600 border-emerald-700 hover:bg-emerald-700" },
     { id:"cashtransactionadmin", title:"Admin Cash", sub:"Cash received from or given to admins", icon:"AD", color:"bg-blue-600 border-blue-700 hover:bg-blue-700" },
@@ -8211,7 +8215,7 @@ function CashTransactionsHub({ setPage }) {
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Cash Transactions</h2><div className="text-xs text-gray-400">Receive and give cash through one accountable ledger</div></div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[140px] rounded-lg border p-4 text-left text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}>
           <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-4 -bottom-5 w-32 h-32 object-contain opacity-[0.12] pointer-events-none" />
           <div className="relative z-[1] w-12 h-12 rounded-lg bg-white/20 border border-white/20 flex items-center justify-center font-black">{tile.icon}</div>
@@ -8223,9 +8227,13 @@ function CashTransactionsHub({ setPage }) {
   );
 }
 
-function CashTransactionLedger({ user, allUsers, partyType }) {
-  const partyTitle = partyType === "driver" ? "Driver" : partyType === "supervisor" ? "Supervisor" : "Admin";
-  const parties = (allUsers || []).filter(person => person.role === partyType);
+function CashTransactionLedger({ user, allUsers, siteWorks, partyType }) {
+  const isSite = partyType === "site";
+  const partyTitle = partyType === "driver" ? "Driver" : partyType === "supervisor" ? "Supervisor" : isSite ? "Site" : "Admin";
+  const partyPlural = isSite ? "Sites" : `${partyTitle}s`;
+  const parties = isSite
+    ? (siteWorks || []).map(site=>({ ...site, name:site.customerName, mobile:site.siteLocation || site.phone || "" }))
+    : (allUsers || []).filter(person => person.role === partyType);
   const [partyFilter, setPartyFilter] = useState("");
   const [dateMode, setDateMode] = useState("all");
   const [selectedDate, setSelectedDate] = useState(today());
@@ -8238,7 +8246,8 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
   const [message, setMessage] = useState("");
   const [editingId, setEditingId] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
-  const [form, setForm] = useState({ date:today(), direction:"receive", partyName:"", amount:"", paymentMode:"Cash", note:"" });
+  const currentTime = () => new Date().toTimeString().slice(0,5);
+  const [form, setForm] = useState({ date:today(), time:currentTime(), direction:"receive", partyId:"", partyName:"", amount:"", paymentMode:"Cash", note:"" });
 
   const monthRange = month => {
     const [year, mon] = String(month || today().slice(0,7)).split("-");
@@ -8267,12 +8276,12 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
 
   const resetForm = () => {
     setEditingId("");
-    setForm({ date:today(), direction:"receive", partyName:partyFilter || "", amount:"", paymentMode:"Cash", note:"" });
+    setForm({ date:today(), time:currentTime(), direction:"receive", partyId:"", partyName:partyFilter || "", amount:"", paymentMode:"Cash", note:"" });
   };
   const save = async () => {
     setMessage("");
-    const selectedParty = parties.find(person => person.name === form.partyName);
-    const payload = { ...form, partyType, partyId:selectedParty?._id || "", amount:+(form.amount || 0), addedBy:user.name, addedByRole:user.role };
+    const selectedParty = parties.find(person => isSite ? String(person._id) === String(form.partyId) : person.name === form.partyName);
+    const payload = { ...form, partyType, partyId:selectedParty?._id || form.partyId || "", partyName:selectedParty?.name || form.partyName, amount:+(form.amount || 0), addedBy:user.name, addedByRole:user.role };
     if (!payload.partyName || payload.amount <= 0) return setMessage(`Select ${partyTitle.toLowerCase()} and enter amount`);
     const audit = editingId ? requestAuditReason("edit", "cash transaction", user) : null;
     if (editingId && !audit) return;
@@ -8285,7 +8294,7 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
   };
   const editRecord = record => {
     setEditingId(record._id);
-    setForm({ date:record.date || today(), direction:record.direction || "receive", partyName:record.partyName || "", amount:String(record.amount || ""), paymentMode:record.paymentMode || "Cash", note:record.note || "" });
+    setForm({ date:record.date || today(), time:record.time || "", direction:isSite?"receive":record.direction || "receive", partyId:record.partyId || "", partyName:record.partyName || "", amount:String(record.amount || ""), paymentMode:record.paymentMode || "Cash", note:record.note || "" });
     window.scrollTo({ top:0, behavior:"smooth" });
   };
   const deleteRecord = async record => {
@@ -8298,25 +8307,27 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
   const money = value => `${CURRENCY}${fmt(value)}`;
   const printLedger = () => {
     const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-    const body = records.map(record=>`<tr><td>${esc(record.date)}</td><td>${esc(record.direction === "receive" ? "Received from" : "Given to")}</td><td>${esc(record.fromName)}</td><td>${esc(record.toName)}</td><td>${esc(record.paymentMode || "-")}</td><td>${esc(record.addedBy || "-")}</td><td class="right">${money(record.amount)}</td></tr>`).join("");
-    const html = `<!doctype html><html><head><title>${partyTitle} Cash Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.right{text-align:right}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.box{border:1px solid #222;padding:9px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}@media print{body{margin:8mm}}</style></head><body><h1>${esc(partyTitle)} Cash Transaction Ledger</h1><p>${esc(partyFilter || `All ${partyTitle}s`)}</p><div class="summary"><div class="box">Received From ${partyTitle}<b>${money(summary.receivedFromParty)}</b></div><div class="box">Given To ${partyTitle}<b>${money(summary.givenToParty)}</b></div><div class="box">${partyTitle} Balance<b>${money(summary.partyBalance)}</b></div></div><table><thead><tr><th>Date</th><th>Transaction</th><th>From</th><th>To</th><th>Mode</th><th>Entered By</th><th>Amount</th></tr></thead><tbody>${body || '<tr><td colspan="7">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const body = records.map(record=>`<tr><td>${esc(record.date)} ${esc(record.time || "")}</td><td>${esc(record.direction === "receive" ? "Received from" : "Given to")}</td><td>${esc(record.fromName)}</td><td>${esc(record.toName)}</td><td>${esc(record.paymentMode || "-")}</td><td>${esc(record.addedBy || "-")}</td><td class="right">${money(record.amount)}</td></tr>`).join("");
+    const summaryHtml = isSite ? `<div class="summary"><div class="box">Received From Sites<b>${money(summary.receivedFromParty)}</b></div><div class="box">Office Cash Increase<b>${money(summary.officeBalanceImpact)}</b></div></div>` : `<div class="summary"><div class="box">Received From ${partyTitle}<b>${money(summary.receivedFromParty)}</b></div><div class="box">Given To ${partyTitle}<b>${money(summary.givenToParty)}</b></div><div class="box">${partyTitle} Balance<b>${money(summary.partyBalance)}</b></div></div>`;
+    const html = `<!doctype html><html><head><title>${partyTitle} Cash Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.right{text-align:right}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.box{border:1px solid #222;padding:9px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}@media print{body{margin:8mm}}</style></head><body><h1>${esc(partyTitle)} Cash Transaction Ledger</h1><p>${esc(partyFilter || `All ${partyPlural}`)}</p>${summaryHtml}<table><thead><tr><th>Date / Time</th><th>Transaction</th><th>From</th><th>To</th><th>Mode</th><th>Entered By</th><th>Amount</th></tr></thead><tbody>${body || '<tr><td colspan="7">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
     const popup = window.open("", "_blank");
     popup.document.write(html);
     popup.document.close();
   };
 
-  const partyOptions = [{ value:"", label:`Select ${partyTitle}` }, ...parties.map(person=>({ value:person.name, label:`${person.name}${person.mobile || person.phone ? ` - ${person.mobile || person.phone}` : ""}` }))];
+  const partyOptions = [{ value:"", label:`Select ${partyTitle}` }, ...parties.map(person=>({ value:isSite?String(person._id):person.name, label:`${person.name}${person.mobile || person.phone ? ` - ${person.mobile || person.phone}` : ""}` }))];
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><h2 className="text-xl font-black text-gray-900">{partyTitle} Cash Transactions</h2><div className="text-xs text-gray-400">Office receive, give and account balance ledger</div></div>
+        <div><h2 className="text-xl font-black text-gray-900">{partyTitle} Cash Transactions</h2><div className="text-xs text-gray-400">{isSite?"Receive site payments and automatically update site reports":"Office receive, give and account balance ledger"}</div></div>
         <button onClick={printLedger} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>
       </div>
-      <SectionBox title={`${editingId ? "Edit" : "New"} ${partyTitle} Cash Transaction`} icon={partyTitle.slice(0,2).toUpperCase()} color={partyType === "driver" ? "amber" : partyType === "supervisor" ? "green" : "blue"}>
+      <SectionBox title={`${editingId ? "Edit" : "New"} ${partyTitle} Cash Transaction`} icon={partyTitle.slice(0,2).toUpperCase()} color={partyType === "driver" ? "amber" : partyType === "supervisor" ? "green" : isSite ? "purple" : "blue"}>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-          <Select label={partyTitle} value={form.partyName} options={partyOptions} onChange={e=>setForm({...form,partyName:e.target.value})} />
-          <Select label="Transaction" value={form.direction} options={[{value:"receive",label:`Receive From ${partyTitle}`},{value:"give",label:`Give To ${partyTitle}`}]} onChange={e=>setForm({...form,direction:e.target.value})} />
+          <Input label="Time" type="time" value={form.time||""} onChange={e=>setForm({...form,time:e.target.value})} />
+          <Select label={partyTitle} value={isSite?form.partyId:form.partyName} options={partyOptions} onChange={e=>{const selected=parties.find(person=>String(isSite?person._id:person.name)===e.target.value);setForm({...form,partyId:isSite?e.target.value:"",partyName:selected?.name||e.target.value});}} />
+          {isSite?<div><div className="text-xs font-semibold text-gray-600 mb-1">Transaction</div><div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-sm font-bold text-green-700">Receive Cash From Site</div></div>:<Select label="Transaction" value={form.direction} options={[{value:"receive",label:`Receive From ${partyTitle}`},{value:"give",label:`Give To ${partyTitle}`}]} onChange={e=>setForm({...form,direction:e.target.value})} />}
           <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
           <Select label="Payment Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
           <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
@@ -8328,7 +8339,7 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
         </div>
       </SectionBox>
       <div className="bg-white rounded-xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <Select label={`${partyTitle} Filter`} value={partyFilter} options={[{value:"",label:`All ${partyTitle}s`}, ...parties.map(person=>({value:person.name,label:person.name}))]} onChange={e=>setPartyFilter(e.target.value)} />
+        <Select label={`${partyTitle} Filter`} value={partyFilter} options={[{value:"",label:`All ${partyPlural}`}, ...parties.map(person=>({value:person.name,label:person.name}))]} onChange={e=>setPartyFilter(e.target.value)} />
         <Select label="Date Filter" value={dateMode} options={[{value:"all",label:"All Time"},{value:"date",label:"Date Wise"},{value:"month",label:"Month Wise"},{value:"range",label:"Date Range"}]} onChange={e=>setDateMode(e.target.value)} />
         {dateMode === "date" && <Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
         {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
@@ -8336,17 +8347,20 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
         {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
       </div>
       {loading ? <Loader /> : <>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {isSite?<div className="grid grid-cols-2 gap-3">
+          <StatCard label="Received From Sites" value={money(summary.receivedFromParty)} icon="IN" color="green" />
+          <StatCard label="Office Cash Increase" value={money(summary.officeBalanceImpact)} icon="OF" color="blue" />
+        </div>:<div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard label={`Received From ${partyTitle}`} value={money(summary.receivedFromParty)} icon="IN" color="green" />
           <StatCard label={`Given To ${partyTitle}`} value={money(summary.givenToParty)} icon="OUT" color="red" />
           <StatCard label="Office Balance Impact" value={money(summary.officeBalanceImpact)} icon="OF" color={summary.officeBalanceImpact >= 0 ? "green" : "red"} />
           <StatCard label={`${partyTitle} Balance`} value={money(summary.partyBalance)} icon="=" color={summary.partyBalance >= 0 ? "blue" : "amber"} />
-        </div>
+        </div>}
         {records.length === 0 ? <EmptyState icon="CT" text="No cash transactions found" /> : <div className="bg-white rounded-xl border shadow-sm overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Transaction</th><th className="p-2 text-left">From</th><th className="p-2 text-left">To</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
+            <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Transaction</th><th className="p-2 text-left">From</th><th className="p-2 text-left">To</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
             <tbody>{records.map(record=><tr key={record._id} className="border-t">
-              <td className="p-2">{record.date || "-"}</td><td className={`p-2 font-bold ${record.direction === "receive" ? "text-green-700" : "text-red-600"}`}>{record.direction === "receive" ? `Received from ${partyTitle}` : `Given to ${partyTitle}`}</td><td className="p-2 font-bold">{record.fromName || "-"}</td><td className="p-2 font-bold">{record.toName || "-"}</td><td className="p-2">{record.paymentMode || "-"}</td><td className="p-2">{record.note || "-"}</td><td className="p-2">{record.addedBy || "-"}<div className="text-gray-400">{record.addedByRole || ""}</div></td><td className="p-2 text-right font-black">{money(record.amount)}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editRecord(record)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button><button onClick={()=>deleteRecord(record)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button></td>
+              <td className="p-2">{record.date || "-"}<div className="text-gray-400">{record.time || ""}</div></td><td className={`p-2 font-bold ${record.direction === "receive" ? "text-green-700" : "text-red-600"}`}>{record.direction === "receive" ? `Received from ${partyTitle}` : `Given to ${partyTitle}`}</td><td className="p-2 font-bold">{record.fromName || "-"}</td><td className="p-2 font-bold">{record.toName || "-"}</td><td className="p-2">{record.paymentMode || "-"}</td><td className="p-2">{record.note || "-"}</td><td className="p-2">{record.addedBy || "-"}<div className="text-gray-400">{record.addedByRole || ""}</div></td><td className="p-2 text-right font-black">{money(record.amount)}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editRecord(record)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button><button onClick={()=>deleteRecord(record)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button></td>
             </tr>)}</tbody>
           </table>
         </div>}
@@ -8753,7 +8767,7 @@ function OfficeHub({ setPage }) {
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
     { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
     { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
-    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive or give cash to drivers, supervisors and admins", icon:"CT", color:"border-indigo-700 bg-indigo-600 hover:bg-indigo-700" },
+    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive site cash or transact with drivers, supervisors and admins", icon:"CT", color:"border-indigo-700 bg-indigo-600 hover:bg-indigo-700" },
     { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
     { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
     { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
@@ -9158,7 +9172,7 @@ export default function App() {
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
-    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
     salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
     salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
     supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
@@ -9205,9 +9219,10 @@ export default function App() {
       case "driverreports": return <DriverReports user={currentUser} />;
       case "cashflowhub": return <CashFlowHub user={currentUser} setPage={navigateTo} />;
       case "cashtransactions": return isAdminLike(currentUser.role)?<CashTransactionsHub setPage={navigateTo} />:null;
-      case "cashtransactiondriver": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="driver" />:null;
-      case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="supervisor" />:null;
-      case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} partyType="admin" />:null;
+      case "cashtransactionsite": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="site" />:null;
+      case "cashtransactiondriver": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="driver" />:null;
+      case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="supervisor" />:null;
+      case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="admin" />:null;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
