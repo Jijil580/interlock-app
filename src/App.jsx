@@ -8265,7 +8265,6 @@ function CashTransactionLedger({ user, allUsers, partyType }) {
 function CashFlowHub({ user, setPage }) {
   const tiles = [
     { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"💵", color:"green", show:true },
-    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive or give cash to drivers, supervisors and admins", icon:"CT", color:"blue", show:isAdminLike(user.role) },
     { id:"companyexpense", title:"Company Expense", sub:"Salary payments and all company expense history", icon:"CE", color:"red", show:isAdminLike(user.role) },
     { id:"companypurchase", title:"Company Purchase", sub:"Record materials and purchases made for the company", icon:"CP", color:"amber", show:isAdminLike(user.role) },
     { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
@@ -8610,6 +8609,7 @@ function OfficeHub({ setPage }) {
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
     { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
     { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
+    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive or give cash to drivers, supervisors and admins", icon:"CT", color:"border-indigo-700 bg-indigo-600 hover:bg-indigo-700" },
     { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
     { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
     { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
