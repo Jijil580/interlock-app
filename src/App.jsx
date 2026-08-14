@@ -444,6 +444,9 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
   const directPayments = directSitePaymentRows(site, dailyReceived);
   const received = dailyReceived + directPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
   const pending = Math.max(0, siteCost - received);
+  const dispatchOperations = site.dispatchOperations || [];
+  const loadedPieces = dispatchOperations.filter(row=>row.operation==="load").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
+  const unloadedPieces = dispatchOperations.filter(row=>row.operation==="unload").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
   return (
     <SectionBox title="Site Work Details" icon="Site" color="amber">
       <div className="grid grid-cols-2 gap-2 text-sm">
@@ -471,6 +474,11 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
         <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(pending)}</span></div>
       </div>
       {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={i} className="flex justify-between border-t py-1"><span>{p.date||"-"} ? {p.mode||p.paymentMode||"-"}</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}</div>}
+      {dispatchOperations.length>0&&<div className="mt-3 border-t pt-3 space-y-2">
+        <div className="font-black text-sm text-violet-700">Material Loading & Unloading Ledger</div>
+        <div className="grid grid-cols-2 gap-2 text-xs text-center"><div className="rounded-lg bg-blue-50 border border-blue-200 p-2"><div className="font-black text-blue-700">{fmt(loadedPieces)} pieces</div><div className="text-gray-500">Loaded</div></div><div className="rounded-lg bg-green-50 border border-green-200 p-2"><div className="font-black text-green-700">{fmt(unloadedPieces)} pieces</div><div className="text-gray-500">Unloaded</div></div></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Action</th><th className="p-2 text-left">Product Details</th><th className="p-2 text-left">Worker</th><th className="p-2 text-right">Pieces</th><th className="p-2 text-right">Worker Charge</th></tr></thead><tbody>{dispatchOperations.map(row=><tr key={row._id} className="border-t"><td className="p-2">{row.date||"-"}<div className="text-gray-400">{row.time||""}</div></td><td className={`p-2 font-black ${row.operation==="load"?"text-blue-700":"text-green-700"}`}>{row.operation==="load"?"Loaded":"Unloaded"}</td><td className="p-2 font-bold">{row.product||"-"}<div className="font-normal text-gray-500">{[row.productType==="hollowbrick"?"Hollow Brick":"Interlock",row.category,row.color,row.size,row.thickness].filter(Boolean).join(" / ")}</div></td><td className="p-2">{row.workerName||"-"}<div className="text-gray-400">{row.workerType==="production-worker"?"Production Worker":"Site Worker"}</div></td><td className="p-2 text-right font-black">{fmt(row.quantity)} {row.unit||"piece"}</td><td className="p-2 text-right font-black text-amber-700">{CURRENCY}{fmt(row.totalAmount||0)}</td></tr>)}</tbody></table></div>
+      </div>}
       {site.note&&<div className="mt-2 text-sm"><div className="text-xs text-gray-400">Note</div><div>{site.note}</div></div>}
     </SectionBox>
   );
@@ -8369,6 +8377,101 @@ function CashTransactionLedger({ user, allUsers, siteWorks, partyType }) {
   );
 }
 
+function LoadingOperations({ user }) {
+  const newKey=()=>globalThis.crypto?.randomUUID?.()||`dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const emptyForm=()=>({date:today(),time:new Date().toTimeString().slice(0,5),operation:"load",saleId:"",siteId:"",workerId:"",quantity:"",rate:"",totalAmount:"",remarks:"",submissionKey:newKey()});
+  const [data,setData]=useState({sales:[],summary:[],operations:[]});
+  const [sites,setSites]=useState([]);
+  const [workers,setWorkers]=useState([]);
+  const [form,setForm]=useState(emptyForm);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [message,setMessage]=useState("");
+  const [editingId,setEditingId]=useState("");
+  const [filter,setFilter]=useState({operation:"",siteId:"",workerName:"",date:""});
+
+  const load=()=>{
+    setLoading(true);
+    Promise.all([api("GET","/loading-operations/availability"),api("GET","/sitework"),api("GET","/workers")]).then(([availability,siteRows,workerRows])=>{
+      setData(availability?.sales?availability:{sales:[],summary:[],operations:[]});
+      setSites(Array.isArray(siteRows)?siteRows:[]);
+      setWorkers((Array.isArray(workerRows)?workerRows:[]).filter(worker=>String(worker.status||"Active").toLowerCase()!=="inactive"));
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  };
+  useEffect(load,[]);
+
+  const selectedSale=data.sales.find(sale=>sale.saleId===form.saleId);
+  const selectedSiteBalance=selectedSale?.siteBalances?.find(site=>site.siteId===form.siteId);
+  const editingEntry=(data.operations||[]).find(entry=>String(entry._id)===String(editingId));
+  const currentAvailable=form.operation==="load"?+(selectedSale?.availableToLoad||0):+(selectedSiteBalance?.availableToUnload||0);
+  const editingAllowance=editingEntry&&editingEntry.saleId===form.saleId&&editingEntry.operation===form.operation&&(form.operation==="load"||editingEntry.siteId===form.siteId)?+(editingEntry.quantity||0):0;
+  const availableQty=currentAvailable+editingAllowance;
+  const saleOptions=data.sales.filter(sale=>sale.saleId===form.saleId||(form.operation==="load"?sale.availableToLoad>0:sale.availableToUnload>0)).map(sale=>({value:sale.saleId,label:`${sale.invoiceNumber||"Sale"} - ${sale.product} / ${sale.color||sale.category||sale.productType} - ${fmt(form.operation==="load"?sale.availableToLoad:sale.availableToUnload)} available`}));
+  const siteOptions=sites.map(site=>({value:String(site._id),label:`${site.customerName}${site.siteLocation?` - ${site.siteLocation}`:""}`}));
+  const workerOptions=workers.map(worker=>({value:String(worker._id),label:`${worker.name} - ${workerTypeOf(worker)}`}));
+  const productDetails=row=>[row.productType==="hollowbrick"?"Hollow Brick":row.productType==="interlock"?"Interlock":"Other",row.category,row.color,row.size,row.thickness].filter(Boolean).join(" / ");
+  const updateOperation=operation=>setForm(current=>({...current,operation,saleId:"",siteId:"",quantity:""}));
+  const updateRate=(field,value)=>setForm(current=>{
+    const next={...current,[field]:value};
+    if(field==="quantity"||field==="rate")next.totalAmount=String((+(field==="quantity"?value:next.quantity)||0)*(+(field==="rate"?value:next.rate)||0));
+    return next;
+  });
+  const save=async()=>{
+    setMessage("");
+    if(!form.saleId||!form.siteId||!form.workerId||+(form.quantity||0)<=0)return setMessage("Select sale, site, worker and quantity");
+    if(+(form.quantity||0)>availableQty)return setMessage(`Only ${fmt(availableQty)} ${selectedSale?.unit||"piece"} available to ${form.operation}`);
+    setSaving(true);
+    const audit=editingId?requestAuditReason("edit","loading/unloading entry",user):null;
+    if(editingId&&!audit){setSaving(false);return;}
+    const result=await api(editingId?"PUT":"POST",editingId?`/loading-operations/${editingId}`:"/loading-operations",{...form,quantity:+form.quantity,rate:+form.rate,totalAmount:+form.totalAmount,addedBy:user.name,...(audit||{})});
+    if(result?._id){setMessage(result.duplicateIgnored?"This entry was already submitted. No duplicate was created.":`${form.operation==="load"?"Loading":"Unloading"} entry saved successfully`);setEditingId("");setForm(emptyForm());await load();}
+    else setMessage(result?.message||"Unable to save entry");
+    setSaving(false);
+  };
+  const editEntry=entry=>{
+    setEditingId(String(entry._id));
+    setMessage("");
+    setForm({date:entry.date||today(),time:entry.time||"",operation:entry.operation,saleId:entry.saleId,siteId:entry.siteId,workerId:entry.workerId,quantity:String(entry.quantity||""),rate:String(entry.rate||""),totalAmount:String(entry.totalAmount||""),remarks:entry.remarks||"",submissionKey:entry.submissionKey||newKey()});
+    window.scrollTo({top:0,behavior:"smooth"});
+  };
+  const deleteEntry=async entry=>{
+    const audit=requestAuditReason("delete","loading/unloading entry",user);
+    if(!audit)return;
+    const result=await api("DELETE",`/loading-operations/${entry._id}`,audit);
+    if(result?.ok){setMessage("Entry deleted and balances recalculated");load();}
+    else if(result?.message)window.alert(result.message);
+  };
+  const cancelEdit=()=>{setEditingId("");setMessage("");setForm(emptyForm());};
+  const filteredOperations=(data.operations||[]).filter(entry=>(!filter.operation||entry.operation===filter.operation)&&(!filter.siteId||entry.siteId===filter.siteId)&&(!filter.workerName||entry.workerName===filter.workerName)&&(!filter.date||entry.date===filter.date));
+
+  if(loading)return <Loader/>;
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Loading & Unloading</h2><div className="text-xs text-gray-400">Sale-linked dispatch, site delivery and worker charge ledger</div></div>
+    <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-800">Stock is reduced when the sale is submitted. Loading and unloading only track dispatch progress, so stock is not reduced again.</div>
+    <SectionBox title={`${editingId?"Edit":"New"} Loading / Unloading Entry`} icon="LU" color="purple">
+      <div className="grid grid-cols-2 gap-2"><button type="button" onClick={()=>updateOperation("load")} className={`py-3 rounded-lg border-2 text-sm font-black ${form.operation==="load"?"bg-blue-600 border-blue-700 text-white":"bg-white border-blue-200 text-blue-700"}`}>{form.operation==="load"?"Selected: LOAD":"Load"}</button><button type="button" onClick={()=>updateOperation("unload")} className={`py-3 rounded-lg border-2 text-sm font-black ${form.operation==="unload"?"bg-green-600 border-green-700 text-white":"bg-white border-green-200 text-green-700"}`}>{form.operation==="unload"?"Selected: UNLOAD":"Unload"}</button></div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label="Time" type="time" value={form.time} onChange={e=>setForm({...form,time:e.target.value})}/>
+        <Select label="Sold Item / Invoice" value={form.saleId} options={[{value:"",label:"Select sale item"},...saleOptions]} onChange={e=>setForm({...form,saleId:e.target.value,siteId:"",quantity:""})}/>
+        <Select label="Site" value={form.siteId} options={[{value:"",label:"Select site"},...siteOptions]} onChange={e=>setForm({...form,siteId:e.target.value,quantity:""})}/>
+        <Select label="Worker (Site or Production)" value={form.workerId} options={[{value:"",label:"Select worker"},...workerOptions]} onChange={e=>setForm({...form,workerId:e.target.value})}/>
+        <Input label={`Quantity (${selectedSale?.unit||"piece"})`} type="number" value={form.quantity} onChange={e=>updateRate("quantity",e.target.value)}/>
+        <Input label={`Charge per ${selectedSale?.unit||"piece"} (${CURRENCY})`} type="number" value={form.rate} onChange={e=>updateRate("rate",e.target.value)}/>
+        <Input label={`Total Worker Charge (${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value,rate:""})}/>
+        <Input label="Remarks" value={form.remarks} onChange={e=>setForm({...form,remarks:e.target.value})}/>
+      </div>
+      {selectedSale&&<div className="rounded-lg bg-slate-50 border p-3 text-xs"><div className="font-black text-slate-900">{selectedSale.product}</div><div className="text-slate-500">{productDetails(selectedSale)} · Sold {fmt(selectedSale.sold)} {selectedSale.unit}</div><div className="mt-2 grid grid-cols-3 gap-2 text-center"><div className="bg-white rounded p-2"><b className="text-blue-700">{fmt(selectedSale.availableToLoad)}</b><div>To Load</div></div><div className="bg-white rounded p-2"><b className="text-green-700">{fmt(selectedSale.availableToUnload)}</b><div>Loaded, not unloaded</div></div><div className="bg-white rounded p-2"><b className="text-violet-700">{fmt(availableQty)}</b><div>Available for this entry</div></div></div>{form.operation==="unload"&&form.siteId&&!selectedSiteBalance&&<div className="mt-2 font-bold text-red-600">Nothing has been loaded for this sale at the selected site.</div>}</div>}
+      <div className="flex flex-wrap gap-2 items-center"><button type="button" disabled={saving} onClick={save} className="bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white px-5 py-2.5 rounded-lg text-sm font-black">{saving?"Saving...":editingId?"Update Entry":"Submit Entry"}</button>{editingId&&<button type="button" onClick={cancelEdit} className="bg-gray-100 px-4 py-2.5 rounded-lg text-sm font-bold">Cancel</button>}{message&&<span className={`text-xs font-bold ${message.includes("success")||message.includes("already")||message.includes("deleted")?"text-green-700":"text-red-600"}`}>{message}</span>}</div>
+    </SectionBox>
+    <SectionBox title="Available Sale Stock by Product" icon="ST" color="blue">
+      {(data.summary||[]).length===0?<EmptyState icon="ST" text="No sold items available"/>:<div className="grid md:grid-cols-2 gap-3">{data.summary.map((row,index)=><div key={`${row.product}-${row.color}-${index}`} className="border rounded-lg p-3"><div className="font-black">{row.product}</div><div className="text-xs text-gray-500">{productDetails(row)}</div><div className="grid grid-cols-5 gap-1 mt-2 text-center text-[10px]"><div className="bg-slate-50 p-1.5 rounded"><b>{fmt(row.sold)}</b><div>Sold</div></div><div className="bg-blue-50 p-1.5 rounded"><b>{fmt(row.loaded)}</b><div>Loaded</div></div><div className="bg-green-50 p-1.5 rounded"><b>{fmt(row.unloaded)}</b><div>Unloaded</div></div><div className="bg-amber-50 p-1.5 rounded"><b>{fmt(row.availableToLoad)}</b><div>To Load</div></div><div className="bg-violet-50 p-1.5 rounded"><b>{fmt(row.availableToUnload)}</b><div>To Unload</div></div></div></div>)}</div>}
+    </SectionBox>
+    <div className="bg-white rounded-lg border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3"><Select label="Action" value={filter.operation} options={[{value:"",label:"Load & Unload"},{value:"load",label:"Loaded"},{value:"unload",label:"Unloaded"}]} onChange={e=>setFilter({...filter,operation:e.target.value})}/><Select label="Site" value={filter.siteId} options={[{value:"",label:"All Sites"},...siteOptions]} onChange={e=>setFilter({...filter,siteId:e.target.value})}/><Select label="Worker" value={filter.workerName} options={[{value:"",label:"All Workers"},...workers.map(worker=>({value:worker.name,label:worker.name}))]} onChange={e=>setFilter({...filter,workerName:e.target.value})}/><Input label="Date" type="date" value={filter.date} onChange={e=>setFilter({...filter,date:e.target.value})}/></div>
+    {filteredOperations.length===0?<EmptyState icon="LU" text="No loading or unloading entries"/>:<div className="bg-white rounded-lg border shadow-sm overflow-x-auto"><table className="w-full min-w-[980px] text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Action</th><th className="p-2 text-left">Invoice / Customer</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Site</th><th className="p-2 text-left">Worker</th><th className="p-2 text-right">Quantity</th><th className="p-2 text-right">Charge</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Action</th></tr></thead><tbody>{filteredOperations.map(entry=><tr key={entry._id} className="border-t"><td className="p-2">{entry.date}<div className="text-gray-400">{entry.time}</div></td><td className={`p-2 font-black ${entry.operation==="load"?"text-blue-700":"text-green-700"}`}>{entry.operation==="load"?"LOAD":"UNLOAD"}</td><td className="p-2 font-bold">{entry.invoiceNumber||"-"}<div className="font-normal text-gray-500">{entry.customerName||""}</div></td><td className="p-2 font-bold">{entry.product}<div className="font-normal text-gray-500">{productDetails(entry)}</div></td><td className="p-2">{entry.siteName}</td><td className="p-2">{entry.workerName}<div className="text-gray-400">{entry.workerType==="production-worker"?"Production Worker":"Site Worker"}</div></td><td className="p-2 text-right font-black">{fmt(entry.quantity)} {entry.unit}</td><td className="p-2 text-right font-black text-amber-700">{CURRENCY}{fmt(entry.totalAmount)}</td><td className="p-2">{entry.addedBy||"-"}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editEntry(entry)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded font-bold mr-1">Edit</button><button onClick={()=>deleteEntry(entry)} className="bg-red-50 text-red-600 px-2 py-1 rounded font-bold">Delete</button></td></tr>)}</tbody></table></div>}
+  </div>;
+}
+
 function CashFlowHub({ user, setPage }) {
   const tiles = [
     { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"💵", color:"green", show:true },
@@ -8765,6 +8868,7 @@ function SalaryHub({ user, setPage }) {
 function OfficeHub({ setPage }) {
   const tiles = [
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
+    { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock to sites and record worker charges", icon:"LU", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
     { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
     { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
     { id:"cashtransactions", title:"Cash Transactions", sub:"Receive site cash or transact with drivers, supervisors and admins", icon:"CT", color:"border-indigo-700 bg-indigo-600 hover:bg-indigo-700" },
@@ -9172,7 +9276,7 @@ export default function App() {
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
-    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, loadingoperations:{label:"Loading & Unloading",icon:"LU"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
     salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
     salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
     supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
@@ -9223,6 +9327,7 @@ export default function App() {
       case "cashtransactiondriver": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="driver" />:null;
       case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="supervisor" />:null;
       case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="admin" />:null;
+      case "loadingoperations": return isAdminLike(currentUser.role)?<LoadingOperations user={currentUser}/>:null;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
