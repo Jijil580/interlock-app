@@ -4480,7 +4480,7 @@ function ProductionSite({ user, setStock }) {
 }
 
 // ─── ATTENDANCE ───────────────────────────────────────────────────────────────
-function AttendanceReports({ user }) {
+function LegacyAttendanceReports({ user }) {
   const [workers, setWorkers] = useState([]);
   const [entries, setEntries] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -4590,6 +4590,91 @@ function AttendanceReports({ user }) {
 }
 
 // ─── WORK PLANNING ────────────────────────────────────────────────────────────
+function AttendanceReports({ user }) {
+  const [people,setPeople]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [tab,setTab]=useState("entry");
+  const [entryDate,setEntryDate]=useState(today());
+  const [attendance,setAttendance]=useState([]);
+  const [dailyDate,setDailyDate]=useState(today());
+  const [month,setMonth]=useState(today().slice(0,7));
+  const [filters,setFilters]=useState({personName:"",designation:"",status:"",recordedBy:""});
+
+  const designationOfWorker=worker=>workerTypeOf(worker)==="Site Worker"?"Site Worker":"Production Worker";
+  const load=()=>{
+    setLoading(true);
+    Promise.all([api("GET","/workers"),api("GET","/users"),api("GET","/attendance-register")]).then(([workers,users,data])=>{
+      const workerPeople=(Array.isArray(workers)?workers:[]).filter(worker=>String(worker.status||"Active").toLowerCase()!=="inactive").map(worker=>({personId:String(worker._id),personName:worker.name,personType:designationOfWorker(worker)==="Site Worker"?"site-worker":"production-worker",designation:designationOfWorker(worker)}));
+      const userPeople=(Array.isArray(users)?users:[]).filter(person=>["driver","supervisor","user"].includes(person.role)&&person.active!==false).map(person=>({personId:String(person._id),personName:person.name,personType:person.role,designation:person.role==="user"?"Office User":person.role.charAt(0).toUpperCase()+person.role.slice(1)}));
+      setPeople([...workerPeople,...userPeople].sort((a,b)=>a.designation.localeCompare(b.designation)||a.personName.localeCompare(b.personName)));
+      setRecords(Array.isArray(data)?data:[]);
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  };
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{
+    if(!people.length)return;
+    const existing=records.find(record=>record.date===entryDate);
+    const existingMap=new Map((existing?.entries||[]).map(row=>[`${row.personType}|${row.personId||row.personName}`,row]));
+    setAttendance(people.map(person=>{
+      const saved=existingMap.get(`${person.personType}|${person.personId}`)||existingMap.get(`${person.personType}|${person.personName}`);
+      return {...person,status:saved?.status==="absent"?"absent":"present"};
+    }));
+  },[entryDate,people,records]);
+
+  const saveAttendance=async()=>{
+    if(!attendance.length)return;
+    setSaving(true);
+    const saved=await api("POST","/attendance-register",{date:entryDate,entries:attendance,recordedBy:user.name,updatedBy:user.name});
+    if(saved?._id){setRecords(previous=>[saved,...previous.filter(record=>record._id!==saved._id&&record.date!==saved.date)]);}
+    else if(saved?.message)window.alert(saved.message);
+    setSaving(false);
+  };
+  const setAll=status=>setAttendance(rows=>rows.map(row=>({...row,status})));
+  const personNames=[...new Set([...people.map(person=>person.personName),...records.flatMap(record=>(record.entries||[]).map(entry=>entry.personName))].filter(Boolean))].sort();
+  const designations=[...new Set([...people.map(person=>person.designation),...records.flatMap(record=>(record.entries||[]).map(entry=>entry.designation))].filter(Boolean))].sort();
+  const recorders=[...new Set(records.flatMap(record=>[record.recordedBy,record.updatedBy]).filter(Boolean))].sort();
+  const rowMatches=row=>(!filters.personName||row.personName===filters.personName)&&(!filters.designation||row.designation===filters.designation)&&(!filters.status||row.status===filters.status);
+  const dailyRecords=records.filter(record=>record.date===dailyDate&&(!filters.recordedBy||record.recordedBy===filters.recordedBy||record.updatedBy===filters.recordedBy));
+  const dailyRows=dailyRecords.flatMap(record=>(record.entries||[]).filter(rowMatches).map(row=>({...row,date:record.date,recordedBy:record.updatedBy||record.recordedBy||"-",entryTime:record.updatedAt||record.createdAt})));
+  const monthlyRecords=records.filter(record=>String(record.date||"").startsWith(month)&&(!filters.recordedBy||record.recordedBy===filters.recordedBy||record.updatedBy===filters.recordedBy));
+  const monthlyMap={};
+  monthlyRecords.forEach(record=>(record.entries||[]).filter(rowMatches).forEach(row=>{
+    const key=`${row.personType}|${row.personId||row.personName}`;
+    if(!monthlyMap[key])monthlyMap[key]={...row,present:0,absent:0,total:0};
+    monthlyMap[key][row.status==="absent"?"absent":"present"]+=1;
+    monthlyMap[key].total+=1;
+  }));
+  const monthlyRows=Object.values(monthlyMap).sort((a,b)=>a.designation.localeCompare(b.designation)||a.personName.localeCompare(b.personName));
+  const dailyPresent=dailyRows.filter(row=>row.status==="present").length;
+  const dailyAbsent=dailyRows.filter(row=>row.status==="absent").length;
+  const formatDateTime=value=>value?new Date(value).toLocaleString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+  const printLedger=()=>{
+    const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const isMonthly=tab==="monthly";
+    const body=isMonthly?monthlyRows.map(row=>`<tr><td>${esc(row.personName)}</td><td>${esc(row.designation)}</td><td class="center">${row.present}</td><td class="center">${row.absent}</td><td class="center">${row.total}</td></tr>`).join(""):dailyRows.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(row.personName)}</td><td>${esc(row.designation)}</td><td>${esc(row.status)}</td><td>${esc(row.recordedBy)}</td><td>${esc(formatDateTime(row.entryTime))}</td></tr>`).join("");
+    const headings=isMonthly?"<th>Name</th><th>Designation</th><th>Present</th><th>Absent</th><th>Total Marked Days</th>":"<th>Date</th><th>Name</th><th>Designation</th><th>Status</th><th>Recorded By</th><th>Entry Time</th>";
+    const html=`<!doctype html><html><head><title>Attendance Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.center{text-align:center;text-transform:capitalize}@media print{body{margin:8mm}}</style></head><body><h1>${isMonthly?"Monthly":"Daily"} Attendance Ledger</h1><p>${esc(isMonthly?month:dailyDate)} | ${esc(filters.personName||"All employees")} | ${esc(filters.designation||"All designations")}</p><table><thead><tr>${headings}</tr></thead><tbody>${body||`<tr><td colspan="${isMonthly?5:6}">No attendance records</td></tr>`}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup=window.open("","_blank");popup.document.write(html);popup.document.close();
+  };
+  const filterPanel=<div className="bg-white rounded-xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3"><Select label="Employee Name" value={filters.personName} options={[{value:"",label:"All Employees"},...personNames.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,personName:e.target.value})}/><Select label="Designation" value={filters.designation} options={[{value:"",label:"All Designations"},...designations.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,designation:e.target.value})}/><Select label="Status" value={filters.status} options={[{value:"",label:"Present & Absent"},{value:"present",label:"Present"},{value:"absent",label:"Absent"}]} onChange={e=>setFilters({...filters,status:e.target.value})}/><Select label="Recorded By User" value={filters.recordedBy} options={[{value:"",label:"All Users"},...recorders.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,recordedBy:e.target.value})}/></div>;
+
+  if(loading)return <Loader/>;
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-xl font-black text-gray-900">Attendance Register</h2><div className="text-xs text-gray-400">Workers, drivers, supervisors and office users</div></div>{tab!=="entry"&&<button onClick={printLedger} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>}</div>
+    <div className="grid grid-cols-3 gap-2"><button onClick={()=>setTab("entry")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="entry"?"bg-amber-500 border-amber-500 text-white":"bg-white text-gray-600"}`}>Daily Entry</button><button onClick={()=>setTab("daily")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="daily"?"bg-blue-600 border-blue-600 text-white":"bg-white text-gray-600"}`}>Daily Ledger</button><button onClick={()=>setTab("monthly")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="monthly"?"bg-violet-600 border-violet-600 text-white":"bg-white text-gray-600"}`}>Monthly Ledger</button></div>
+    {tab==="entry"&&<>
+      <div className="bg-white rounded-xl border shadow-sm p-4 flex flex-wrap items-end gap-3"><div className="min-w-[210px]"><Input label="Attendance Date" type="date" value={entryDate} onChange={e=>setEntryDate(e.target.value)}/></div><button onClick={()=>setAll("present")} className="bg-green-50 text-green-700 border border-green-200 px-3 py-2.5 rounded-lg text-xs font-bold">Mark All Present</button><button onClick={()=>setAll("absent")} className="bg-red-50 text-red-700 border border-red-200 px-3 py-2.5 rounded-lg text-xs font-bold">Mark All Absent</button></div>
+      <div className="bg-white rounded-xl border shadow-sm overflow-hidden"><div className="hidden sm:grid grid-cols-[1fr_140px_190px] gap-2 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500"><span>Name</span><span>Designation</span><span className="text-center">Attendance</span></div>{attendance.map((row,index)=><div key={`${row.personType}-${row.personId}`} className="grid grid-cols-1 sm:grid-cols-[1fr_140px_190px] gap-2 items-center border-t px-3 py-3 text-sm"><div><b className="block min-w-0 truncate">{row.personName}</b><span className="sm:hidden text-xs text-gray-500">{row.designation}</span></div><span className="hidden sm:block text-xs text-gray-500">{row.designation}</span><div className="grid grid-cols-2 gap-1"><button onClick={()=>setAttendance(items=>items.map((item,i)=>i===index?{...item,status:"present"}:item))} className={`py-2 rounded-lg text-xs font-bold ${row.status==="present"?"bg-green-600 text-white":"bg-green-50 text-green-700"}`}>Present</button><button onClick={()=>setAttendance(items=>items.map((item,i)=>i===index?{...item,status:"absent"}:item))} className={`py-2 rounded-lg text-xs font-bold ${row.status==="absent"?"bg-red-600 text-white":"bg-red-50 text-red-700"}`}>Absent</button></div></div>)}</div>
+      <button onClick={saveAttendance} disabled={saving||!attendance.length} className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white py-3 rounded-lg font-black">{saving?"Saving...":"Save Daily Attendance"}</button>
+    </>}
+    {tab==="daily"&&<><div className="bg-white rounded-xl border p-4 max-w-xs"><Input label="Ledger Date" type="date" value={dailyDate} onChange={e=>setDailyDate(e.target.value)}/></div>{filterPanel}<div className="grid grid-cols-3 gap-3"><StatCard label="Total" value={dailyRows.length} icon="N" color="blue"/><StatCard label="Present" value={dailyPresent} icon="P" color="green"/><StatCard label="Absent" value={dailyAbsent} icon="A" color="red"/></div>{dailyRows.length===0?<EmptyState icon="ATT" text="No attendance records for this date"/>:<div className="bg-white rounded-xl border shadow-sm overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Recorded By</th><th className="p-2 text-left">Entry Time</th></tr></thead><tbody>{dailyRows.map((row,index)=><tr key={`${row.personType}-${row.personId}-${index}`} className="border-t"><td className="p-2">{row.date}</td><td className="p-2 font-bold">{row.personName}</td><td className="p-2">{row.designation}</td><td className={`p-2 font-bold capitalize ${row.status==="present"?"text-green-700":"text-red-600"}`}>{row.status}</td><td className="p-2">{row.recordedBy}</td><td className="p-2">{formatDateTime(row.entryTime)}</td></tr>)}</tbody></table></div>}</>}
+    {tab==="monthly"&&<><div className="bg-white rounded-xl border p-4 max-w-xs"><Input label="Ledger Month" type="month" value={month} onChange={e=>setMonth(e.target.value)}/></div>{filterPanel}<div className="grid grid-cols-2 gap-3"><StatCard label="Employees" value={monthlyRows.length} icon="N" color="blue"/><StatCard label="Working Dates" value={monthlyRecords.length} icon="D" color="violet"/></div>{monthlyRows.length===0?<EmptyState icon="ATT" text="No attendance records for this month"/>:<div className="bg-white rounded-xl border shadow-sm overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Name</th><th className="p-2 text-left">Designation</th><th className="p-2 text-center">Present</th><th className="p-2 text-center">Absent</th><th className="p-2 text-center">Total Marked Days</th></tr></thead><tbody>{monthlyRows.map(row=><tr key={`${row.personType}-${row.personId||row.personName}`} className="border-t"><td className="p-2 font-bold">{row.personName}</td><td className="p-2">{row.designation}</td><td className="p-2 text-center font-black text-green-700">{row.present}</td><td className="p-2 text-center font-black text-red-600">{row.absent}</td><td className="p-2 text-center font-black">{row.total}</td></tr>)}</tbody></table></div>}</>}
+  </div>;
+}
+
 function WorkPlanning({ siteWorks, user }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -8413,22 +8498,67 @@ function AdvanceAdjustment({ available, pending, pay, setPay }) {
   </div>;
 }
 
+function SalaryPaymentLedger({ kind="salary", personType="", refreshKey=0, title="Payment Ledger" }) {
+  const [records,setRecords]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filters,setFilters]=useState({recipient:"",givenBy:"",dateMode:"all",date:today(),month:today().slice(0,7),fromDate:today(),toDate:today()});
+  useEffect(()=>{
+    const params=new URLSearchParams({kind});
+    if(personType)params.set("personType",personType);
+    setLoading(true);
+    api("GET",`/salary-payment-ledger?${params.toString()}`).then(data=>{setRecords(data?.records||[]);setLoading(false);});
+  },[kind,personType,refreshKey]);
+  const recipients=[...new Set(records.map(row=>row.recipient).filter(Boolean))].sort();
+  const givers=[...new Set(records.map(row=>row.givenBy).filter(Boolean))].sort();
+  const visible=records.filter(row=>{
+    if(filters.recipient&&row.recipient!==filters.recipient)return false;
+    if(filters.givenBy&&row.givenBy!==filters.givenBy)return false;
+    if(filters.dateMode==="date"&&row.date!==filters.date)return false;
+    if(filters.dateMode==="month"&&!String(row.date||"").startsWith(filters.month))return false;
+    if(filters.dateMode==="range"&&((filters.fromDate&&row.date<filters.fromDate)||(filters.toDate&&row.date>filters.toDate)))return false;
+    return true;
+  });
+  const totals=visible.reduce((sum,row)=>({amount:sum.amount+(+row.amount||0),cash:sum.cash+(+row.cashAmount||0),advance:sum.advance+(+row.advanceAdjusted||0)}),{amount:0,cash:0,advance:0});
+  const dateTime=value=>value?new Date(value).toLocaleString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+  const personTypeLabel=value=>salaryPersonTypes.find(type=>type.value===value)?.label||value||"-";
+  const printLedger=()=>{
+    const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const rows=visible.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(dateTime(row.dateTime))}</td><td>${esc(row.recipient)}</td><td>${esc(personTypeLabel(row.personType))}</td><td>${esc(row.givenBy||"-")}</td><td>${esc(row.mode||"-")}</td><td>${esc(row.source||"-")}</td><td class="right">${CURRENCY}${fmt(row.amount)}</td></tr>`).join("");
+    const html=`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:21px;margin:0 0 4px}p{font-size:12px;color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px}th{background:#f3f4f6;text-align:left}.right{text-align:right}@media print{body{margin:8mm}}</style></head><body><h1>${esc(title)}</h1><p>${esc(filters.recipient||"All employees")} | Given by ${esc(filters.givenBy||"All users")}</p><div class="summary"><div class="box">Total Paid<b>${CURRENCY}${fmt(totals.amount)}</b></div><div class="box">Cash<b>${CURRENCY}${fmt(totals.cash)}</b></div><div class="box">Advance Adjusted<b>${CURRENCY}${fmt(totals.advance)}</b></div></div><table><thead><tr><th>Date</th><th>Entry Time</th><th>Received By</th><th>Designation</th><th>Given By</th><th>Mode</th><th>Source</th><th>Amount</th></tr></thead><tbody>${rows||'<tr><td colspan="8">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup=window.open("","_blank");popup.document.write(html);popup.document.close();
+  };
+  return <SectionBox title={title} icon="LED" color="blue">
+    <div className="flex justify-end mb-3"><button onClick={printLedger} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold">Print Ledger</button></div>
+    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      <Select label="Employee Name" value={filters.recipient} options={[{value:"",label:"All Employees"},...recipients.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,recipient:e.target.value})}/>
+      <Select label="Given By User" value={filters.givenBy} options={[{value:"",label:"All Users"},...givers.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,givenBy:e.target.value})}/>
+      <Select label="Date Filter" value={filters.dateMode} options={[{value:"all",label:"All Time"},{value:"date",label:"Date Wise"},{value:"month",label:"Month Wise"},{value:"range",label:"Date Range"}]} onChange={e=>setFilters({...filters,dateMode:e.target.value})}/>
+      {filters.dateMode==="date"&&<Input label="Date" type="date" value={filters.date} onChange={e=>setFilters({...filters,date:e.target.value})}/>}
+      {filters.dateMode==="month"&&<Input label="Month" type="month" value={filters.month} onChange={e=>setFilters({...filters,month:e.target.value})}/>}
+      {filters.dateMode==="range"&&<><Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})}/><Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})}/></>}
+    </div>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3"><StatCard label="Entries" value={visible.length} icon="N" color="blue"/><StatCard label="Total Paid" value={`${CURRENCY}${fmt(totals.amount)}`} icon="IN" color="green"/><StatCard label="Cash" value={`${CURRENCY}${fmt(totals.cash)}`} icon="C" color="teal"/><StatCard label="Advance Adjusted" value={`${CURRENCY}${fmt(totals.advance)}`} icon="A" color="violet"/></div>
+    {loading?<Loader/>:visible.length===0?<EmptyState icon="LED" text="No payment ledger records"/>:<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Received By</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Given By</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Source / Note</th><th className="p-2 text-right">Amount</th></tr></thead><tbody>{visible.map(row=><tr key={row.id} className="border-t"><td className="p-2"><b>{row.date||"-"}</b><div className="text-gray-400">{dateTime(row.dateTime)}</div></td><td className="p-2 font-bold">{row.recipient||"-"}</td><td className="p-2">{personTypeLabel(row.personType)}</td><td className="p-2 font-bold text-blue-700">{row.givenBy||"-"}</td><td className="p-2">{row.mode||"-"}</td><td className="p-2">{row.source||"-"}<div className="text-gray-400">{row.note||""}</div></td><td className="p-2 text-right font-black text-green-700">{CURRENCY}{fmt(row.amount)}</td></tr>)}</tbody></table></div>}
+  </SectionBox>;
+}
+
 function AdvanceSalary({ user }) {
   const empty={personType:"production-worker",personId:"",amount:"",date:today(),mode:"Cash",note:""};
   const [workers,setWorkers]=useState([]);
   const [users,setUsers]=useState([]);
   const [records,setRecords]=useState([]);
+  const [ledgerKey,setLedgerKey]=useState(0);
   const [form,setForm]=useState(empty);
   const load=()=>Promise.all([api("GET","/workers"),api("GET","/users"),api("GET","/salary-advances")]).then(([w,u,a])=>{setWorkers(Array.isArray(w)?w:[]);setUsers(Array.isArray(u)?u:[]);setRecords(a?.records||[]);});
   useEffect(()=>{load();},[]);
   const people=form.personType==="production-worker"?workers.filter(w=>workerTypeOf(w)==="Production Worker"):form.personType==="site-worker"?workers.filter(w=>workerTypeOf(w)==="Site Worker"):users.filter(u=>u.role===form.personType&&u.active!==false);
-  const save=async()=>{const person=people.find(p=>p._id===form.personId);if(!person||+(form.amount)<=0)return window.alert("Select an employee and enter the advance amount");const saved=await api("POST","/salary-advances",{...form,personName:person.name,mobile:person.mobile||person.phone||"",amount:+form.amount,givenBy:user.name});if(saved?._id){setForm({...empty,personType:form.personType});load();}else if(saved?.message)window.alert(saved.message);};
+  const save=async()=>{const person=people.find(p=>p._id===form.personId);if(!person||+(form.amount)<=0)return window.alert("Select an employee and enter the advance amount");const saved=await api("POST","/salary-advances",{...form,personName:person.name,mobile:person.mobile||person.phone||"",amount:+form.amount,givenBy:user.name});if(saved?._id){setForm({...empty,personType:form.personType});setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);};
   const totalAvailable=records.reduce((sum,row)=>sum+(+(row.balance)||0),0);
   return <div className="space-y-4">
     <div><h2 className="text-xl font-black">Advance Salary</h2><div className="text-xs text-gray-400">Give an advance now and adjust it later during salary payment</div></div>
     <SectionBox title="Give Salary Advance" icon="ADV" color="violet"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"><Select label="Employee Type" value={form.personType} options={salaryPersonTypes} onChange={e=>setForm({...form,personType:e.target.value,personId:""})}/><Select label="Employee Name" value={form.personId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,personId:e.target.value})}/><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label={`Advance Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><Select label="Payment Mode" value={form.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,mode:e.target.value})}/><Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></div><button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Give Advance Salary</button></SectionBox>
     <StatCard label="Total Advance Available" value={`${CURRENCY}${fmt(totalAvailable)}`} icon="ADV" color="violet"/>
-    <div className="space-y-2">{records.map(row=><div key={row._id} className="bg-white border rounded-lg p-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm"><div><span className="text-xs text-gray-400 block">Employee</span><b>{row.personName}</b></div><div><span className="text-xs text-gray-400 block">Type</span><b>{salaryPersonTypes.find(t=>t.value===row.personType)?.label||row.personType}</b></div><div><span className="text-xs text-gray-400 block">Given</span><b>{CURRENCY}{fmt(row.amount)}</b><span className="text-xs text-gray-400 block">{row.date} by {row.givenBy||"-"}</span></div><div><span className="text-xs text-gray-400 block">Adjusted</span><b className="text-blue-700">{CURRENCY}{fmt(row.adjustedAmount)}</b></div><div><span className="text-xs text-gray-400 block">Available</span><b className="text-violet-700">{CURRENCY}{fmt(row.balance)}</b></div></div>)}{records.length===0&&<EmptyState icon="ADV" text="No salary advances"/>}</div>
+    <SalaryPaymentLedger kind="advance" refreshKey={ledgerKey} title="Advance Salary Ledger"/>
   </div>;
 }
 
@@ -8470,6 +8600,7 @@ function OfficeSalaryLedger({ user, role }) {
   const [selected,setSelected]=useState("");
   const [payRecord,setPayRecord]=useState(null);
   const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
   const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{
     setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));
     setRecords(Array.isArray(r)?r:[]);
@@ -8488,7 +8619,7 @@ function OfficeSalaryLedger({ user, role }) {
     const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payRecord?.pendingAmount||0)-(+pay.amount||0))):0;
     if(!payRecord||(+pay.amount||0)+adjusted<=0)return;
     const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,paidBy:user.name});
-    if(saved?._id){setPayRecord(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+    if(saved?._id){setPayRecord(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
   };
   const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
   return <div className="space-y-4">
@@ -8496,6 +8627,7 @@ function OfficeSalaryLedger({ user, role }) {
     <div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div>
     <StatCard label="Total Pending" value={`${CURRENCY}${fmt(totalPending)}`} icon="!" color="red"/>
     <div className="space-y-2">{visible.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>openPayment(r)} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{visible.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    <SalaryPaymentLedger kind="salary" personType={role} refreshKey={ledgerKey} title={`${title} Payment Ledger`}/>
     {payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><AdvanceAdjustment available={advance} pending={payRecord.pendingAmount} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
   </div>;
 }
@@ -8507,6 +8639,7 @@ function PendingWorkerSalary({ user, workerType }) {
   const [advances,setAdvances]=useState([]);
   const [payWorker,setPayWorker]=useState(null);
   const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
   const load=()=>Promise.all([api("GET","/workers"),api("GET",`/salary-advances?personType=${personType}`)]).then(([data,a])=>{setWorkers((Array.isArray(data)?data:[]).filter(w=>workerTypeOf(w)===workerType&&+(w.totalPending||0)>0));setAdvances(a?.records||[]);});
   useEffect(()=>{load();},[workerType]);
   const total=workers.reduce((sum,w)=>sum+(+(w.totalPending)||0),0);
@@ -8517,12 +8650,13 @@ function PendingWorkerSalary({ user, workerType }) {
     if(!payWorker||(+pay.amount||0)+adjusted<=0)return;
     const source=workerType==="Site Worker"?"worker-ledger-site":"worker-ledger-production";
     const saved=await api("POST","/workerpayments",{workerName:payWorker.name,workerId:payWorker._id,personType,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source});
-    if(saved?._id){setPayWorker(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+    if(saved?._id){setPayWorker(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
   };
   return <div className="space-y-4">
     <div><h2 className="text-xl font-black">{workerType} Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
     <StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/>
     <div className="space-y-2">{workers.map(w=><div key={w._id} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div className="font-black">{w.name}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(w.totalPending)}</div><button onClick={()=>openPayment(w)} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{workers.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    <SalaryPaymentLedger kind="salary" personType={personType} refreshKey={ledgerKey} title={`${workerType} Payment Ledger`}/>
     {payWorker&&<Modal title={`Pay - ${payWorker.name}`} onClose={()=>setPayWorker(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payWorker.totalPending)}</b></div><AdvanceAdjustment available={advance} pending={payWorker.totalPending} pay={pay} setPay={setPay}/><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
   </div>;
 }
@@ -8533,6 +8667,7 @@ function PendingDriverSalary({ user }) {
   const [advances,setAdvances]=useState([]);
   const [payDriver,setPayDriver]=useState(null);
   const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
   const load=()=>Promise.all([api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`),api("GET","/salary-advances?personType=driver")]).then(([data,a])=>{const grouped={};(data?.reports||[]).forEach(r=>{const key=r.driverMobile||r.driverName;if(!key)return;if(!grouped[key])grouped[key]={driverName:r.driverName,driverMobile:r.driverMobile,pending:0};grouped[key].pending+=+(r.driverWagePending)||0;});setRows(Object.values(grouped).filter(r=>r.pending>0));setAdvances(a?.records||[]);});
   useEffect(()=>{load();},[user.role,user.name]);
   const total=rows.reduce((sum,r)=>sum+r.pending,0);
@@ -8542,12 +8677,13 @@ function PendingDriverSalary({ user }) {
     const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payDriver?.pending||0)-(+pay.amount||0))):0;
     if(!payDriver||(+pay.amount||0)+adjusted<=0)return;
     const saved=await api("POST","/driverreports/payment",{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,driverName:payDriver.driverName,driverMobile:payDriver.driverMobile,addedBy:user.name});
-    if(saved?.reports){setPayDriver(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);
+    if(saved?.reports){setPayDriver(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
   };
   return <div className="space-y-4">
     <div><h2 className="text-xl font-black">Driver Salary Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
     <StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/>
     <div className="space-y-2">{rows.map(r=><div key={r.driverMobile||r.driverName} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div><div className="font-black">{r.driverName}</div><div className="text-xs text-gray-400">{r.driverMobile||""}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pending)}</div><button onClick={()=>openPayment(r)} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{rows.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    <SalaryPaymentLedger kind="salary" personType="driver" refreshKey={ledgerKey} title="Driver Salary Payment Ledger"/>
     {payDriver&&<Modal title={`Pay - ${payDriver.driverName}`} onClose={()=>setPayDriver(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payDriver.pending)}</b></div><AdvanceAdjustment available={advance} pending={payDriver.pending} pay={pay} setPay={setPay}/><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
   </div>;
 }
