@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pk-interlock-pwa-v1';
+const CACHE_NAME = 'pk-interlock-pwa-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

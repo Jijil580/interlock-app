@@ -2285,10 +2285,10 @@ function DailyReport({ user }) {
   };
 
   const reportActions = (report) => (
-    <div className="flex flex-wrap justify-end gap-1 shrink-0">
-      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold border border-gray-200">View</button>
-      <button type="button" onClick={()=>editDailyReport(report)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-      <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+    <div className="grid grid-cols-3 gap-1 w-full sm:w-auto shrink-0">
+      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap">View Report</button>
+      <button type="button" onClick={()=>editDailyReport(report)} className="bg-blue-100 text-blue-800 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Edit Report</button>
+      <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-100 text-red-700 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Delete Report</button>
     </div>
   );
 
@@ -2347,13 +2347,9 @@ function DailyReport({ user }) {
             {(dateReport.sourceReports||[]).length>0&&(
               <SectionBox title="Reports Submitted This Date" icon="Report" color="blue">
                 {(dateReport.sourceReports||[]).map((r,i)=>(
-                  <div key={r._id||i} className="flex items-center justify-between text-xs py-1 border-b border-blue-100">
+                  <div key={r._id||i} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs py-2 border-b border-blue-100">
                     <span>Report {i+1} ? {r.workerEntries?.length||0} workers ? {CURRENCY}{fmt(r.totalPayments||0)} paid</span>
-                    <div className="flex gap-1">
-                      <button type="button" onClick={(e)=>{e.stopPropagation(); openDailyReportView(r);}} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
-                      <button type="button" onClick={(e)=>{e.stopPropagation(); editDailyReport(r);}} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                      <button type="button" onClick={(e)=>{e.stopPropagation(); deleteDailyReport(r);}} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
-                    </div>
+                    {reportActions(r)}
                   </div>
                 ))}
               </SectionBox>
@@ -2402,17 +2398,13 @@ function DailyReport({ user }) {
               <SectionBox title="Submitted Reports" icon="Report" color="blue">
                 {sr.map((r,i)=>(
                   <div key={r._id||i} className="bg-white rounded-xl border border-blue-100 p-2 mb-2 text-xs">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-black text-gray-800">{r.date} - Report {sr.length-i}</div>
                         <div className="text-gray-500">{r.workerEntries?.length||0} workers | {r.completedToday||0} sqft | {CURRENCY}{fmt(r.totalPayments||0)} paid</div>
                         <div className="text-gray-400">By: {r.addedBy || "-"}</div>
                       </div>
-                      <div className="flex flex-wrap justify-end gap-1 shrink-0">
-                        <button type="button" onClick={(e)=>{e.stopPropagation(); openDailyReportView(r);}} className="bg-gray-50 text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
-                        <button type="button" onClick={(e)=>{e.stopPropagation(); editDailyReport(r);}} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                        <button type="button" onClick={(e)=>{e.stopPropagation(); deleteDailyReport(r);}} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
-                      </div>
+                      {reportActions(r)}
                     </div>
                   </div>
                 ))}
@@ -2509,7 +2501,7 @@ function DailyReport({ user }) {
         <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
           {reportSection==="site"&&sectionRows.site.map(r=>(
             <div key={r._id} className="bg-gray-50 rounded-xl border border-gray-100 p-3 text-xs">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{r.siteName||"Site Entry"}</div>
                   {(r.payments||[]).filter(isSiteReceipt).length>0&&<div className="font-black text-blue-700">Site received: {CURRENCY}{fmt((r.payments||[]).filter(isSiteReceipt).reduce((sum,p)=>sum+(+(p.amount)||0),0))}</div>}
@@ -2522,7 +2514,7 @@ function DailyReport({ user }) {
           ))}
           {reportSection==="workers"&&sectionRows.workers.map(w=>(
             <div key={w.rowId} className="bg-teal-50 rounded-xl border border-teal-100 p-3 text-xs">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{w.workerName||"Worker"}</div>
                   <div className="text-gray-500">{w.report.date||"-"} · {w.report.siteName||"No site"} · {w.workCategory||"-"}</div>
@@ -2539,13 +2531,13 @@ function DailyReport({ user }) {
           ))}
           {reportSection==="expenses"&&sectionRows.expenses.map(p=>(
             <div key={p.rowId} className="bg-green-50 rounded-xl border border-green-100 p-3 text-xs">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{p.type||"Expense"}</div>
                   <div className="text-gray-500">{p.report.date||"-"} · {p.report.siteName||p.siteName||"No site"} · {p.mode||"-"}</div>
                   <div className="mt-1 text-gray-600">{p.receivedFrom?`From: ${p.receivedFrom} · `:""}{p.supplierName?`Supplier: ${p.supplierName} · `:""}{p.remarks||""}</div>
                 </div>
-                <div className="text-right shrink-0 space-y-1">
+                <div className="sm:text-right shrink-0 space-y-1">
                   <div className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount||0)}</div>
                   {reportActions(p.report)}
                 </div>
@@ -2554,7 +2546,7 @@ function DailyReport({ user }) {
           ))}
           {reportSection==="office"&&sectionRows.office.map(r=>(
             <div key={r._id} className="bg-red-50 rounded-xl border border-red-100 p-3 text-xs">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{r.date||"-"} · {r.siteName||"Office Entry"}</div>
                   {r.dayNotes&&<div className="text-gray-600 mt-1">Notes: {r.dayNotes}</div>}
