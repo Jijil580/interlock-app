@@ -2038,6 +2038,13 @@ function DailyReport({ user }) {
     const allowedSite = mySites.some(s=>r.siteName===s.customerName||r.siteId===s._id);
     return r.addedBy===user.name || allowedSite;
   });
+  const reportSiteOptions = [
+    {value:"",label:"All Sites"},
+    ...Array.from(new Set([
+      ...mySites.map(site=>site.customerName),
+      ...visibleReports.map(report=>report.siteName),
+    ].filter(Boolean))).sort((a,b)=>a.localeCompare(b)).map(name=>({value:name,label:name})),
+  ];
   const filterText = (value, needle) => !needle || String(value||"").toLowerCase().includes(String(needle).toLowerCase());
   const filteredReports = visibleReports.filter(r=>
     (!reportFilters.date || r.date===reportFilters.date) &&
@@ -2277,6 +2284,14 @@ function DailyReport({ user }) {
     } else if (deleted?.message) window.alert(deleted.message);
   };
 
+  const reportActions = (report) => (
+    <div className="flex flex-wrap justify-end gap-1 shrink-0">
+      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold border border-gray-200">View</button>
+      <button type="button" onClick={()=>editDailyReport(report)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
+      <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
+    </div>
+  );
+
   if (loading) return <Loader />;
 
   if (selectedSite) {
@@ -2487,7 +2502,7 @@ function DailyReport({ user }) {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <Input label="Date" type="date" value={reportFilters.date} onChange={e=>setReportFilters(f=>({...f,date:e.target.value}))} />
-          <Input label="Site Name" value={reportFilters.siteName} onChange={e=>setReportFilters(f=>({...f,siteName:e.target.value}))} placeholder="Search site" />
+          <Select label="Site Name" value={reportFilters.siteName} options={reportSiteOptions} onChange={e=>setReportFilters(f=>({...f,siteName:e.target.value}))} />
           {reportSection==="workers"&&<Input label="Worker Name" value={reportFilters.workerName} onChange={e=>setReportFilters(f=>({...f,workerName:e.target.value}))} placeholder="Search worker" />}
           {(reportSection==="workers"||reportSection==="expenses")&&<Input label={reportSection==="workers"?"Work Category":"Expense Type"} value={reportFilters.type} onChange={e=>setReportFilters(f=>({...f,type:e.target.value}))} placeholder="Search type" />}
         </div>
@@ -2501,11 +2516,7 @@ function DailyReport({ user }) {
                   <div className="text-gray-400">{r.date||"-"} · {r.addedBy||"-"}</div>
                   <div className="mt-1 text-gray-600">{r.completedToday||0} sqft done {r.materialsUnloaded?`· ${r.materialsUnloaded} ${r.materialQty||""}`:""} {r.extraWorkDesc?`· Extra: ${r.extraWorkDesc}`:""}</div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button type="button" onClick={()=>openDailyReportView(r)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
-                  <button type="button" onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                  <button type="button" onClick={()=>deleteDailyReport(r)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button>
-                </div>
+                {reportActions(r)}
               </div>
             </div>
           ))}
@@ -2522,7 +2533,7 @@ function DailyReport({ user }) {
                     <span>Pending: <b>{CURRENCY}{fmt(w.pending||0)}</b></span>
                   </div>
                 </div>
-                <button type="button" onClick={()=>openDailyReportView(w.report)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold shrink-0">View</button>
+                {reportActions(w.report)}
               </div>
             </div>
           ))}
@@ -2534,9 +2545,9 @@ function DailyReport({ user }) {
                   <div className="text-gray-500">{p.report.date||"-"} · {p.report.siteName||p.siteName||"No site"} · {p.mode||"-"}</div>
                   <div className="mt-1 text-gray-600">{p.receivedFrom?`From: ${p.receivedFrom} · `:""}{p.supplierName?`Supplier: ${p.supplierName} · `:""}{p.remarks||""}</div>
                 </div>
-                <div className="text-right shrink-0">
+                <div className="text-right shrink-0 space-y-1">
                   <div className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount||0)}</div>
-                  <button type="button" onClick={()=>openDailyReportView(p.report)} className="mt-1 bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
+                  {reportActions(p.report)}
                 </div>
               </div>
             </div>
@@ -2551,10 +2562,7 @@ function DailyReport({ user }) {
                   {r.actionTaken&&<div className="text-gray-500 mt-1">Action: {r.actionTaken}</div>}
                   {(r.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className={`mt-1 font-bold ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{p.type}: {CURRENCY}{fmt(p.amount||0)}</div>)}
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button type="button" onClick={()=>openDailyReportView(r)} className="bg-white text-gray-700 px-2 py-1 rounded-lg font-bold">View</button>
-                  <button type="button" onClick={()=>editDailyReport(r)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold">Edit</button>
-                </div>
+                {reportActions(r)}
               </div>
             </div>
           ))}
