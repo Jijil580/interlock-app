@@ -7207,6 +7207,162 @@ function OfficeDailyReport({ user }) {
   );
 }
 
+function QuotationDocument({ quotation }) {
+  const q = quotation || {};
+  const withGst = q.billType === "with_gst";
+  const taxLabel = q.taxType === "igst" ? "IGST" : "CGST / SGST";
+  const signature = q.signature?.dataUrl;
+  const formatSignedAt = (value) => value ? new Date(value).toLocaleString("en-IN") : "";
+  return <div className="quotation-document bg-white text-slate-950 border border-slate-900 shadow-sm print:shadow-none print:border-black">
+    <div className="h-3 bg-amber-400 print:bg-amber-400" />
+    <div className="text-center italic text-xs py-2 border-b border-slate-900">Thank-you for doing business with us</div>
+    <div className="p-4 sm:p-6 border-b border-slate-900 flex flex-col sm:flex-row gap-4 justify-between">
+      <div><h1 className="text-xl font-black">{COMPANY.companyName}</h1><div className="text-xs sm:text-sm mt-1 leading-5">{COMPANY.address}<br/>{COMPANY.state} - State Code: {COMPANY.stateCode}<br/>PH: {COMPANY.phone1}, {COMPANY.phone2}<br/>GSTIN: {COMPANY.gstin}</div></div>
+      <div className="text-3xl sm:text-4xl font-black">QUOTATION</div>
+    </div>
+    <div className="grid sm:grid-cols-3 border-b border-slate-900 text-xs sm:text-sm">
+      <div className="p-3 border-b sm:border-b-0 sm:border-r border-slate-900">Quotation Number: <b>{q.quotationNumber || "-"}</b></div>
+      <div className="p-3 border-b sm:border-b-0 sm:border-r border-slate-900">Quotation Validity: <b>{q.validUntil || "-"}</b></div>
+      <div className="p-3">Date: <b>{q.date || "-"}</b></div>
+    </div>
+    <div className="grid sm:grid-cols-2 border-b border-slate-900">
+      <div className="p-3 sm:p-4 border-b sm:border-b-0 sm:border-r border-slate-900 min-h-32"><div className="font-black bg-amber-50 -m-3 sm:-m-4 mb-3 p-2 border-b border-slate-900">Quotation For</div><h2 className="font-black text-lg">{q.customer}</h2><div className="text-sm whitespace-pre-line mt-1">{q.address}</div><div className="text-xs mt-2">State: {q.state || "-"} | State Code: {q.stateCode || "-"}<br/>GST: {q.gstNumber || "-"}<br/>Mobile: {q.mobileNumber || "-"}</div></div>
+      <div className="p-3 sm:p-4 min-h-32"><div className="font-black bg-amber-50 -m-3 sm:-m-4 mb-3 p-2 border-b border-slate-900">Ship To <span className="float-right text-xs">{withGst ? taxLabel : "Without GST"}</span></div><h2 className="font-black text-lg">{q.shipToName || q.customer}</h2><div className="text-sm whitespace-pre-line mt-1">{q.shipToAddress || q.address}</div><div className="text-xs mt-2">State: {q.shipToState || q.state || "-"} | State Code: {q.shipToStateCode || q.stateCode || "-"}<br/>GST: {q.shipToGstNumber || q.gstNumber || "-"}</div></div>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] border-collapse text-xs">
+        <thead><tr className="bg-amber-50"><th className="border-r border-b border-slate-900 p-2">No.</th><th className="border-r border-b border-slate-900 p-2 text-left">Product</th><th className="border-r border-b border-slate-900 p-2">Qty</th><th className="border-r border-b border-slate-900 p-2">Unit</th><th className="border-r border-b border-slate-900 p-2">Rate</th><th className="border-r border-b border-slate-900 p-2">Discount</th><th className="border-r border-b border-slate-900 p-2">Taxable</th><th className="border-r border-b border-slate-900 p-2">{taxLabel}</th><th className="border-b border-slate-900 p-2">Total</th></tr></thead>
+        <tbody>{(q.items || []).map((item, index) => {
+          const tax = q.taxType === "igst" ? +(item.igstAmount || 0) : +(item.cgstAmount || 0) + +(item.sgstAmount || 0);
+          const details = [item.description, item.color, item.size, item.thickness, +(item.sqftQty || 0) ? `${fmt(item.sqftQty)} sqft` : ""].filter(Boolean);
+          return <tr key={index}><td className="border-r border-b border-slate-900 p-2 text-center">{index + 1}</td><td className="border-r border-b border-slate-900 p-2"><b>{item.product}</b>{details.length > 0 && <div className="text-slate-500 mt-1">{details.join(" / ")}</div>}</td><td className="border-r border-b border-slate-900 p-2 text-center">{fmt(item.quantity)}</td><td className="border-r border-b border-slate-900 p-2 text-center">{item.unit || "piece"}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.rate)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.discountAmount)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.taxableAmount)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{withGst ? `${CURRENCY}${fmt(tax)}` : "-"}</td><td className="border-b border-slate-900 p-2 text-right font-black">{CURRENCY}{fmt(item.total)}</td></tr>;
+        })}</tbody>
+      </table>
+    </div>
+    <div className="grid sm:grid-cols-2 border-b border-slate-900">
+      <div className="p-4 text-center border-b sm:border-b-0 sm:border-r border-slate-900"><b>Total Amount</b><div className="mt-2">{CURRENCY}{fmt(q.total)} only</div></div>
+      <div className="text-sm"><div className="flex justify-between p-2 border-b border-slate-300"><span>Taxable Amount</span><b>{CURRENCY}{fmt(q.taxableAmount)}</b></div><div className="flex justify-between p-2 border-b border-slate-300"><span>Add: Tax</span><span>{CURRENCY}{fmt(q.taxAmount)}</span></div><div className="flex justify-between p-2 border-b border-slate-900"><span>Round Off</span><span>{CURRENCY}{fmt(q.roundOff)}</span></div><div className="flex justify-between p-3 bg-amber-50 text-lg font-black"><span>Total Amount</span><span>{CURRENCY}{fmt(q.total)}</span></div></div>
+    </div>
+    <div className="grid sm:grid-cols-2 min-h-40">
+      <div className="p-4 border-b sm:border-b-0 sm:border-r border-slate-900"><b>Terms and conditions</b><p className="text-xs mt-2 whitespace-pre-line">{q.terms || COMPANY.terms}</p>{q.notes && <p className="text-xs mt-3"><b>Notes:</b> {q.notes}</p>}</div>
+      <div className="p-4 text-center"><div className="text-xs">Customer acceptance and signature</div>{signature ? <><img src={signature} alt="Customer signature" className="h-20 max-w-full object-contain mx-auto mt-2"/><div className="border-t border-slate-700 pt-1 text-xs"><b>{q.signature?.signedBy || q.customer}</b><br/>Signed on {formatSignedAt(q.signature?.signedAt)}</div></> : <div className="h-24 flex items-end justify-center text-xs text-slate-400 border-b border-slate-400 mx-auto max-w-64">Awaiting customer signature</div>}</div>
+    </div>
+  </div>;
+}
+
+function SignaturePad({ customerName, onCancel, onSubmit, saving }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const hasInk = useRef(false);
+  const [signedBy, setSignedBy] = useState(customerName || "");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.round(rect.width * ratio));
+      canvas.height = Math.max(1, Math.round(rect.height * ratio));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#0f172a";
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  const point = (event) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+  const start = (event) => {
+    event.preventDefault();
+    drawing.current = true;
+    hasInk.current = true;
+    const p = point(event);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + 0.1, p.y + 0.1);
+    ctx.stroke();
+    canvasRef.current.setPointerCapture?.(event.pointerId);
+  };
+  const move = (event) => {
+    if (!drawing.current) return;
+    event.preventDefault();
+    const p = point(event);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  };
+  const stop = () => { drawing.current = false; };
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    hasInk.current = false;
+    setError("");
+  };
+  const submit = () => {
+    if (!hasInk.current) return setError("Please draw your signature before submitting.");
+    if (!signedBy.trim()) return setError("Please enter the signer name.");
+    onSubmit({ signatureData: canvasRef.current.toDataURL("image/png"), signedBy: signedBy.trim() });
+  };
+
+  return <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col p-3 sm:p-6">
+    <div className="flex items-center justify-between text-white mb-3"><div><h2 className="text-lg font-black">Sign Quotation</h2><p className="text-xs text-slate-300">Use your finger or mouse inside the white area</p></div><button onClick={onCancel} className="h-10 w-10 rounded-lg bg-slate-800 text-xl" aria-label="Close">×</button></div>
+    <canvas ref={canvasRef} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} className="flex-1 w-full min-h-0 bg-white rounded-lg touch-none cursor-crosshair" />
+    <div className="mt-3 grid sm:grid-cols-[1fr_auto_auto] gap-2"><input value={signedBy} onChange={e=>setSignedBy(e.target.value)} placeholder="Signer name" className="h-11 rounded-lg px-3 border border-slate-600"/><button onClick={clear} className="h-11 px-5 rounded-lg bg-slate-700 text-white font-bold">Clear</button><button onClick={submit} disabled={saving} className="h-11 px-6 rounded-lg bg-emerald-600 text-white font-black disabled:opacity-60">{saving ? "Submitting..." : "Submit Signature"}</button></div>
+    {error && <div className="text-red-300 text-sm font-bold mt-2">{error}</div>}
+  </div>;
+}
+
+function PublicQuotationPage({ token }) {
+  const [quotation, setQuotation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    document.title = "Quotation | PK Interlock";
+    fetch(`${API}/public/quotations/${encodeURIComponent(token)}`, { cache:"no-store" }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to open quotation");
+      setQuotation(data);
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+  }, [token]);
+
+  const submitSignature = async (body) => {
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/public/quotations/${encodeURIComponent(token)}/sign`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to submit signature");
+      setQuotation(data);
+      setSigning(false);
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="min-h-screen bg-slate-100 grid place-items-center"><Loader /></div>;
+  if (error && !quotation) return <div className="min-h-screen bg-slate-100 grid place-items-center p-6"><div className="bg-white border border-red-200 p-6 rounded-lg max-w-md text-center"><h1 className="font-black text-xl">Quotation unavailable</h1><p className="text-sm text-slate-600 mt-2">{error}</p></div></div>;
+  return <div className="min-h-screen bg-slate-100 print:bg-white">
+    <header className="sticky top-0 z-20 bg-slate-950 text-white px-4 py-3 print:hidden"><div className="max-w-5xl mx-auto flex items-center gap-3"><img src={COMPANY.logo} alt="PK Interlock" className="w-9 h-9 bg-white rounded-md"/><div className="flex-1"><div className="font-black text-sm">{COMPANY.shortName}</div><div className="text-xs text-slate-400">Customer Quotation</div></div><button onClick={()=>window.print()} className="h-10 px-4 rounded-lg bg-white text-slate-950 font-bold">Print / PDF</button></div></header>
+    <main className="max-w-5xl mx-auto p-2 sm:p-6 print:p-0 print:max-w-none"><QuotationDocument quotation={quotation}/>
+      <div className="my-4 bg-white border border-slate-200 p-4 rounded-lg print:hidden">{quotation.signature?.dataUrl ? <div className="flex items-center gap-3 text-emerald-700 font-black"><span className="text-2xl">✓</span><div>Quotation signed successfully<div className="text-xs font-normal text-slate-500">The signed quotation is ready to print or save as PDF.</div></div></div> : <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3"><div className="flex-1"><div className="font-black">Customer Acceptance</div><div className="text-sm text-slate-500">Review the quotation above, then add your signature.</div></div><button onClick={()=>setSigning(true)} className="w-full sm:w-auto h-11 px-6 bg-emerald-600 text-white rounded-lg font-black">Sign Quotation</button></div>}</div>
+      {error && <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded-lg print:hidden">{error}</div>}
+    </main>
+    {signing && <SignaturePad customerName={quotation.customer} onCancel={()=>setSigning(false)} onSubmit={submitSignature} saving={saving}/>}
+    <style>{`@media print { @page { size: A4; margin: 10mm; } body { background: white !important; } .quotation-document { box-shadow:none !important; } }`}</style>
+  </div>;
+}
+
 function QuotationModule({ user }) {
   const emptyItem = { productType: "interlock", itemId: "", product: "", category: "", color: "", size: "", thickness: "", hsnSac: "", description: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", rate: "", discountType: "amount", discountValue: "", cgstPercent: "9", sgstPercent: "9", igstPercent: "18" };
   const emptyForm = { quotationNumber: "", date: today(), validUntil: today(), customer: "", mobileNumber: "", address: "", gstNumber: "", state: COMPANY.state, stateCode: COMPANY.stateCode, shipToName: "", shipToAddress: "", shipToGstNumber: "", shipToState: COMPANY.state, shipToStateCode: COMPANY.stateCode, billType: "with_gst", taxType: "cgst_sgst", placeOfSupply: COMPANY.state, terms: "1. This is an electronically generated quotation. 2. Prices are valid only until the quotation validity date.", notes: "", status: "draft", items: [{ ...emptyItem }] };
@@ -7222,6 +7378,8 @@ function QuotationModule({ user }) {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [shareItem, setShareItem] = useState(null);
+  const [shareMessage, setShareMessage] = useState("");
 
   const load = () => {
     Promise.all([api("GET", "/quotations"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([q, i, h, c]) => {
@@ -7288,10 +7446,48 @@ function QuotationModule({ user }) {
     const validItems = (form.items || []).filter(x => x.product && +(x.quantity || 0) > 0 && +(x.rate || 0) >= 0);
     if (!validItems.length) return setError("Add at least one valid product");
     const body = { ...form, mobileNumber: mobile, addedBy: user.name, saveToCustomerMaster: customerMode === "new" ? saveToMaster : true, items: validItems.map(x => ({ ...x, ...calcLine(x), quantity: +(x.quantity || 0), rate: +(x.rate || 0), sqftPerPiece: +(x.sqftPerPiece || 0), sqftQty: calcLine(x).sqftQty })) };
+    const wasNew = !editingId;
     const saved = await api(editingId ? "PUT" : "POST", editingId ? `/quotations/${editingId}` : "/quotations", body);
     if (!saved?._id) return setError(saved.message || "Failed to save quotation");
     setModal(false);
+    if (wasNew) setShareItem(saved);
     load();
+  };
+
+  const getShareItem = async (quotation) => {
+    if (quotation.shareToken) return quotation;
+    const shared = await api("POST", `/quotations/${quotation._id}/share`, { addedBy:user.name });
+    if (!shared?.shareToken) throw new Error(shared?.message || "Unable to create share link");
+    setQuotations(list => list.map(item => item._id === shared._id ? shared : item));
+    return shared;
+  };
+  const openShare = async (quotation) => {
+    setShareMessage("");
+    try { setShareItem(await getShareItem(quotation)); }
+    catch (e) { window.alert(e.message); }
+  };
+  const shareUrl = (quotation = shareItem) => quotation?.shareToken ? `${window.location.origin}/quotation/${quotation.shareToken}` : "";
+  const copyShareLink = async () => {
+    const value = shareUrl();
+    try { await navigator.clipboard.writeText(value); }
+    catch {
+      const input = document.createElement("textarea");
+      input.value = value;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+    setShareMessage("Link copied");
+  };
+  const shareText = () => `Quotation ${shareItem?.quotationNumber || ""} from ${COMPANY.companyName}. View and sign here: ${shareUrl()}`;
+  const shareWhatsApp = () => {
+    const mobile = String(shareItem?.mobileNumber || "").replace(/\D/g, "");
+    const whatsappMobile = mobile.length === 10 ? `91${mobile}` : mobile;
+    window.open(`https://wa.me/${whatsappMobile}?text=${encodeURIComponent(shareText())}`, "_blank", "noopener,noreferrer");
+  };
+  const shareEmail = () => {
+    window.location.href = `mailto:?subject=${encodeURIComponent(`Quotation ${shareItem?.quotationNumber || ""} - ${COMPANY.shortName}`)}&body=${encodeURIComponent(shareText())}`;
   };
 
   const printQuotation = (q) => {
@@ -7305,14 +7501,18 @@ function QuotationModule({ user }) {
       const tax = withGst ? (q.taxType === "igst" ? `${fmt(it.igstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.igst)}` : `${fmt(it.cgstPercent || 0)}% + ${fmt(it.sgstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.cgst + l.sgst)}`) : "-";
       return `<tr><td>${i + 1}</td><td><b>${escapeHtml(it.product)}</b><br><small>${spec}</small></td><td>${fmt(it.quantity)}</td><td>${escapeHtml(it.unit || "piece")}</td><td>${CURRENCY_HTML}${fmt(it.rate)}</td><td>${discount}</td><td>${CURRENCY_HTML}${fmt(l.taxable)}</td><td>${tax}</td><td><b>${CURRENCY_HTML}${fmt(l.total)}</b></td></tr>`;
     }).join("");
+    const customerSignature = q.signature?.dataUrl
+      ? `<div class="customerAcceptance"><b>Customer Acceptance</b><img src="${q.signature.dataUrl}" alt="Customer signature"><div>${escapeHtml(q.signature.signedBy || q.customer || "")} | ${escapeHtml(q.signature.signedAt ? new Date(q.signature.signedAt).toLocaleString("en-IN") : "")}</div></div>`
+      : `<div class="customerAcceptance awaiting"><b>Customer Acceptance</b><div>Awaiting customer signature</div></div>`;
     const html = `<!doctype html><html><head><title>Quotation ${q.quotationNumber || ""}</title><style>
-      @page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111;margin:0}.sheet{border:1px solid #111;min-height:276mm}.top{height:14px;background:#f2c300}.thanks{text-align:center;font-style:italic;font-size:12px;padding:8px}.head{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:18px}.company h2{margin:0 0 6px;font-size:20px}.company div{font-size:13px;line-height:1.5}.title{font-size:38px;font-weight:900;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #111}.meta div{padding:10px;font-size:13px}.partyHead,.totalRow{background:#f8f0d9;font-weight:700}.party{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111}.party>div{padding:10px;min-height:105px}.party h3{margin:0 0 8px;font-size:17px}.party p{margin:4px 0;font-size:13px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #111;padding:8px;font-size:12px;text-align:left}th{text-align:center;background:#f8f0d9}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:center}td:nth-child(n+5){text-align:right}.summary{display:grid;grid-template-columns:1.5fr 1fr;border-bottom:1px solid #111}.words{padding:14px;text-align:center;font-size:13px}.totals div{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:8px 12px;font-size:13px}.totals .grand{background:#f8f0d9;font-weight:900;font-size:20px;padding:14px}.bottom{display:grid;grid-template-columns:1.4fr 1fr;min-height:145px}.terms{padding:12px;border-right:1px solid #111}.sign{text-align:center;padding:12px}.line{height:62px}.small{font-size:12px;color:#333}@media print{button{display:none}.sheet{border-color:#111}}</style></head><body><div class="top"></div><div class="thanks">Thank-you for doing business with us</div><div class="sheet">
+      @page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111;margin:0}.sheet{border:1px solid #111;min-height:276mm}.top{height:14px;background:#f2c300}.thanks{text-align:center;font-style:italic;font-size:12px;padding:8px}.head{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:18px}.company h2{margin:0 0 6px;font-size:20px}.company div{font-size:13px;line-height:1.5}.title{font-size:38px;font-weight:900;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #111}.meta div{padding:10px;font-size:13px}.partyHead,.totalRow{background:#f8f0d9;font-weight:700}.party{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111}.party>div{padding:10px;min-height:105px}.party h3{margin:0 0 8px;font-size:17px}.party p{margin:4px 0;font-size:13px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #111;padding:8px;font-size:12px;text-align:left}th{text-align:center;background:#f8f0d9}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:center}td:nth-child(n+5){text-align:right}.summary{display:grid;grid-template-columns:1.5fr 1fr;border-bottom:1px solid #111}.words{padding:14px;text-align:center;font-size:13px}.totals div{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:8px 12px;font-size:13px}.totals .grand{background:#f8f0d9;font-weight:900;font-size:20px;padding:14px}.customerAcceptance{text-align:center;padding:10px;border-bottom:1px solid #111;font-size:11px}.customerAcceptance img{display:block;max-width:220px;height:65px;object-fit:contain;margin:5px auto 2px}.customerAcceptance.awaiting div{height:35px;padding-top:16px;color:#777}.bottom{display:grid;grid-template-columns:1.4fr 1fr;min-height:145px}.terms{padding:12px;border-right:1px solid #111}.sign{text-align:center;padding:12px}.line{height:62px}.small{font-size:12px;color:#333}@media print{button{display:none}.sheet{border-color:#111}}</style></head><body><div class="top"></div><div class="thanks">Thank-you for doing business with us</div><div class="sheet">
       <div class="head"><div class="company"><h2>${escapeHtml(COMPANY.companyName)}</h2><div>${escapeHtml(COMPANY.address)}</div><div>${escapeHtml(COMPANY.state)} - State Code: ${escapeHtml(COMPANY.stateCode)}</div><div>PH: ${escapeHtml(COMPANY.phone1)}, ${escapeHtml(COMPANY.phone2)}</div><div>GSTIN: ${escapeHtml(COMPANY.gstin)}</div></div><div class="title">QUOTATION</div></div>
       <div class="meta"><div>Quotation Number: <b>${escapeHtml(q.quotationNumber || "")}</b></div><div>Quotation Validity: <b>${escapeHtml(q.validUntil || "")}</b></div><div>Date: <b>${escapeHtml(q.date || "")}</b></div></div>
       <div class="meta partyHead"><div>Quotation For</div><div>Ship To</div><div>${withGst ? taxLabel : "Without GST"}</div></div>
       <div class="party"><div><h3>${escapeHtml(q.customer || "")}</h3><p>${escapeHtml(q.address || "")}</p><p>State: ${escapeHtml(q.state || "")}</p><p>GST: ${escapeHtml(q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.stateCode || "")}</p><p>Mobile: ${escapeHtml(q.mobileNumber || "")}</p></div><div><h3>${escapeHtml(q.shipToName || q.customer || "")}</h3><p>${escapeHtml(q.shipToAddress || q.address || "")}</p><p>State: ${escapeHtml(q.shipToState || q.state || "")}</p><p>GST: ${escapeHtml(q.shipToGstNumber || q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.shipToStateCode || q.stateCode || "")}</p></div></div>
       <table><thead><tr><th>Sr. No.</th><th>Name of Product</th><th>QTY</th><th>Unit</th><th>Rate</th><th>Discount</th><th>Taxable Value</th><th>${taxLabel}</th><th>Total</th></tr></thead><tbody>${rows}<tr class="totalRow"><td></td><td>Total</td><td>${fmt((q.items || []).reduce((a,x)=>a+(+(x.quantity)||0),0))}</td><td></td><td></td><td>${CURRENCY_HTML}${fmt(t.discount)}</td><td>${CURRENCY_HTML}${fmt(t.taxable)}</td><td>${CURRENCY_HTML}${fmt(t.tax)}</td><td>${CURRENCY_HTML}${fmt(t.total)}</td></tr></tbody></table>
       <div class="summary"><div class="words"><b>Total Amount</b><br>${CURRENCY_HTML}${fmt(t.total)} only</div><div class="totals"><div><span>Taxable Amount</span><b>${CURRENCY_HTML}${fmt(t.taxable)}</b></div><div><span>Add: Tax</span><span>${CURRENCY_HTML}${fmt(t.tax)}</span></div><div><span>Round Off Value</span><span>${CURRENCY_HTML}${fmt(t.roundOff)}</span></div><div class="grand"><span>Total Amount</span><span>${CURRENCY_HTML}${fmt(t.total)}</span></div></div></div>
+      ${customerSignature}
       <div class="bottom"><div class="terms"><b>Terms and conditions</b><p class="small">${escapeHtml(q.terms || COMPANY.terms)}</p></div><div class="sign"><div>Certified that the particulars given above are true and correct, for</div><h3>${escapeHtml(COMPANY.signatureName)}</h3><div class="line"></div><div>Authorised Signatory</div></div></div>
       </div><script>window.print()</script></body></html>`;
     const w = window.open("", "_blank");
@@ -7338,8 +7538,8 @@ function QuotationModule({ user }) {
       <Input placeholder="Search quotation, customer or mobile" value={search} onChange={e=>setSearch(e.target.value)} />
       {filtered.length === 0 ? <EmptyState icon="QT" text="No quotations found" /> : <div className="grid gap-3">{filtered.map(q => <div key={q._id} className="bg-white border rounded-xl shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
         <div><div className="font-black text-gray-900">{q.quotationNumber}</div><div className="text-sm text-gray-500">{q.customer} - {q.mobileNumber}</div><div className="text-xs text-gray-400">{q.date} | Valid until {q.validUntil || "-"}</div></div>
-        <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(q.total)}</div><Badge color={q.billType === "with_gst" ? "blue" : "gray"}>{q.billType === "with_gst" ? "With GST" : "Without GST"}</Badge></div>
-        <div className="flex gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">View</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">Print</button></div>
+        <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(q.total)}</div><div className="flex gap-1 mt-1"><Badge color={q.billType === "with_gst" ? "blue" : "gray"}>{q.billType === "with_gst" ? "With GST" : "Without GST"}</Badge>{q.signature?.dataUrl&&<Badge color="green">Signed</Badge>}</div></div>
+        <div className="flex flex-wrap gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">View</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>openShare(q)} className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold">Share</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">Print</button></div>
       </div>)}</div>}
 
       {modal && <Modal title={editingId ? "Edit Quotation" : "New Quotation"} onClose={()=>setModal(false)} wide>
@@ -7369,7 +7569,17 @@ function QuotationModule({ user }) {
       {viewItem && <Modal title="Quotation Details" onClose={()=>setViewItem(null)} wide>
         <div className="space-y-3"><div className="flex justify-between"><div><div className="font-black">{viewItem.quotationNumber}</div><div className="text-sm text-gray-500">{viewItem.customer}</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(viewItem.total)}</div></div>
         <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left border-b"><th className="py-2">Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Taxable</th><th>Total</th></tr></thead><tbody>{(viewItem.items||[]).map((it,i)=><tr key={i} className="border-b"><td className="py-2 font-bold">{it.product}<div className="font-normal text-gray-400">{it.description}</div></td><td>{fmt(it.quantity)} {it.unit}</td><td>{CURRENCY}{fmt(it.rate)}</td><td>{CURRENCY}{fmt(it.discountAmount)}</td><td>{CURRENCY}{fmt(it.taxableAmount)}</td><td className="font-bold">{CURRENCY}{fmt(it.total)}</td></tr>)}</tbody></table></div>
-        <div className="flex gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 bg-green-600 text-white py-2 rounded-lg font-bold">Print</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
+        {viewItem.signature?.dataUrl&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3"><div className="text-xs font-black text-emerald-700">Customer Signed</div><img src={viewItem.signature.dataUrl} alt="Customer signature" className="h-20 max-w-full object-contain mt-1"/><div className="text-xs text-slate-500">{viewItem.signature.signedBy || viewItem.customer} | {viewItem.signature.signedAt ? new Date(viewItem.signature.signedAt).toLocaleString("en-IN") : ""}</div></div>}
+        <div className="flex flex-wrap gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 min-w-28 bg-green-600 text-white py-2 rounded-lg font-bold">Print</button><button onClick={()=>openShare(viewItem)} className="flex-1 min-w-28 bg-emerald-50 text-emerald-700 py-2 rounded-lg font-bold">Share</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 min-w-28 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
+      </Modal>}
+
+      {shareItem && <Modal title="Share Quotation" onClose={()=>{setShareItem(null);setShareMessage("");}}>
+        <div className="space-y-4">
+          <div className="bg-slate-50 border rounded-lg p-3"><div className="font-black">{shareItem.quotationNumber}</div><div className="text-sm text-slate-500">{shareItem.customer}</div>{shareItem.signature?.dataUrl&&<div className="text-xs font-bold text-emerald-700 mt-1">Customer signed</div>}</div>
+          <div><label className="text-xs font-bold text-slate-600">Customer link</label><div className="flex gap-2 mt-1"><input readOnly value={shareUrl()} onFocus={e=>e.target.select()} className="min-w-0 flex-1 h-11 px-3 border rounded-lg bg-white text-sm"/><button onClick={copyShareLink} className="h-11 px-4 rounded-lg bg-slate-900 text-white font-bold">Copy</button></div>{shareMessage&&<div className="text-xs text-emerald-700 font-bold mt-1">{shareMessage}</div>}</div>
+          <div className="grid sm:grid-cols-2 gap-2"><button onClick={shareWhatsApp} className="h-12 rounded-lg bg-emerald-600 text-white font-black">Share on WhatsApp</button><button onClick={shareEmail} className="h-12 rounded-lg bg-blue-600 text-white font-black">Share by Email</button></div>
+          <div className="text-xs text-slate-500">The customer can open this link without logging in, review the quotation, sign it, and print or save the signed quotation.</div>
+        </div>
       </Modal>}
     </div>
   );
@@ -9233,6 +9443,8 @@ const NAV = {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const publicQuotationMatch = window.location.pathname.match(/^\/quotation\/([^/]+)\/?$/);
+  const publicQuotationToken = publicQuotationMatch ? decodeURIComponent(publicQuotationMatch[1]) : "";
   const [currentUser, setCurrentUser] = useState(null);
   const [language, setLanguage] = useState(()=>{
     const saved = localStorage.getItem("pk_language") || "en";
@@ -9325,6 +9537,8 @@ export default function App() {
     });
     setSidebarOpen(false);
   };
+
+  if (publicQuotationToken) return <PublicQuotationPage token={publicQuotationToken} />;
 
   if (!currentUser) return <Login branding={COMPANY} language={language} onLanguageChange={changeLanguage} onLogin={(u)=>{
     if (u.devicePending) {
