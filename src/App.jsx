@@ -1259,6 +1259,15 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     setSiteWorks(p=>p.filter(x=>x._id!==id));
   };
 
+  const submitCompletion = async (site) => {
+    if (!window.confirm(`Submit ${site.customerName} as completed for User and Admin approval?`)) return;
+    const updated = await api("POST", `/sitework/${site._id}/completion/submit`, { role:user.role, name:user.name });
+    if (!updated?._id) return window.alert(updated?.message || "Unable to submit completion");
+    setSiteWorks(list=>list.map(item=>item._id===updated._id?updated:item));
+    setViewItem(current=>current?._id===updated._id?updated:current);
+    window.alert("Site completion submitted. User approval is pending.");
+  };
+
   const filtered = siteWorks.filter(s=>{
     const matchFilter = filter==="all" || s.status===filter;
     const matchSearch = !search || (s.customerName||"").toLowerCase().includes(search.toLowerCase()) || (s.siteLocation||"").toLowerCase().includes(search.toLowerCase());
@@ -1342,6 +1351,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-black text-gray-900">{s.customerName}</span>
                   <Badge color={statusColor[s.status]||"gray"}>{s.status||"pending"}</Badge>
+                  {s.completionApprovalStatus&&s.completionApprovalStatus!=="approved"&&<Badge color={s.completionApprovalStatus==="rejected"?"red":"blue"}>{s.completionApprovalStatus==="pending_user"?"Awaiting User":s.completionApprovalStatus==="pending_admin"?"Awaiting Admin":"Completion Rejected"}</Badge>}
                   <Badge color={s.paymentStatus==="paid"?"green":s.paymentStatus==="partial"?"amber":"red"}>{s.paymentStatus||"pending"}</Badge>
                 </div>
                 <div className="text-xs text-gray-400 mt-0.5">📍 {s.siteLocation||"—"} · 📅 {s.startDate}</div>
@@ -1357,10 +1367,12 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
                 {(s.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}
               </div>
             )}
+            {s.completionApprovalStatus==="rejected"&&<div className="mt-2 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2"><b>Rejected:</b> {s.completionRejectionReason||"No reason provided"}. Please correct and resubmit.</div>}
             <div className="mt-2 flex gap-1">
               <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
               {(isAdminLike(user.role)||user.role==="supervisor")&&<button onClick={()=>setEditItem({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
               <button onClick={()=>generateInvoice(s)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 py-1.5 rounded-xl text-xs font-bold">🧾 Invoice</button>
+              {user.role==="supervisor"&&s.status!=="completed"&&!['pending_user','pending_admin'].includes(s.completionApprovalStatus)&&<button onClick={()=>submitCompletion(s)} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1.5 rounded-xl text-xs font-bold">Submit Complete</button>}
               {isAdminLike(user.role)&&<button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
             </div>
           </div>
@@ -1376,6 +1388,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
             <div className="flex gap-2 flex-wrap">
               <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
               <Badge color={viewItem.paymentStatus==="paid"?"green":viewItem.paymentStatus==="partial"?"amber":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
+              {viewItem.completionApprovalStatus&&<Badge color={viewItem.completionApprovalStatus==="approved"?"green":viewItem.completionApprovalStatus==="rejected"?"red":"blue"}>{viewItem.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
               <button onClick={()=>generateInvoice(viewItem)} className="ml-auto bg-amber-50 text-amber-700 px-3 py-1 rounded-lg text-xs font-bold hover:bg-amber-100">🧾 Download Invoice</button>
             </div>
             <SectionBox title="Customer" icon="👤" color="blue">
@@ -1688,7 +1701,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
             <Input label="Start Date" type="date" value={f.startDate||""} onChange={e=>setF({...f,startDate:e.target.value})} />
             <Input label="End Date" type="date" value={f.endDate||""} onChange={e=>setF({...f,endDate:e.target.value})} />
           </div>
-          <Select label="Status" value={f.status||"running"} options={["pending","running","completed","cancelled"]} onChange={e=>setF({...f,status:e.target.value})} />
+          <Select label="Status" value={f.status||"running"} options={f.status==="completed"?["completed"]:["pending","running","cancelled"]} onChange={e=>setF({...f,status:e.target.value})} />
           <Textarea label="Note" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any additional notes..." />
         </SectionBox>
 
@@ -2652,7 +2665,7 @@ function DailyReport({ user }) {
             </div>:null}
             <div className={entrySection==="site"?"grid grid-cols-2 gap-2":"grid grid-cols-1 gap-2"}>
               <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
-              {entrySection==="site"&&<Select label="Site Status" value={form.siteStatus} options={["pending","running","completed"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />}
+              {entrySection==="site"&&<Select label="Site Status" value={form.siteStatus} options={form.siteStatus==="completed"?["completed"]:["pending","running"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />}
             </div>
             {entrySection==="site"&&<SectionBox title="Work Progress" icon="📐" color="blue">
               <div className="grid grid-cols-2 gap-2">
@@ -2930,12 +2943,6 @@ function SupervisorReports({ allUsers }) {
   const running = filterSites(siteWorks.filter(s=>s.status==="running"));
   const completed = filterSites(siteWorks.filter(s=>s.status==="completed"));
 
-  const approveSite = async (id) => {
-    await api("PUT",`/sitework/${id}`,{status:"completed"});
-    setSiteWorks(p=>p.map(x=>x._id===id?{...x,status:"completed"}:x));
-    if (selectedSite?._id===id) setSelectedSite(s=>({...s,status:"completed"}));
-  };
-
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
     const allReports = reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).sort((a,b)=>b.date.localeCompare(a.date));
@@ -2963,7 +2970,7 @@ function SupervisorReports({ allUsers }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
-          {selectedSite.status!=="completed"&&<button onClick={()=>approveSite(selectedSite._id)} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold">✅ Approve</button>}
+          {selectedSite.completionApprovalStatus&&<Badge color={selectedSite.completionApprovalStatus==="approved"?"green":selectedSite.completionApprovalStatus==="rejected"?"red":"blue"}>{selectedSite.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
           <div className="flex items-start justify-between">
@@ -3149,7 +3156,7 @@ function SupervisorReports({ allUsers }) {
               const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
               return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-start justify-between"><div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
-                <button onClick={e=>{e.stopPropagation();approveSite(s._id);}} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-bold">✅ Approve</button></div>
+                {s.completionApprovalStatus&&<Badge color={s.completionApprovalStatus==="rejected"?"red":"blue"}>{s.completionApprovalStatus.replaceAll('_',' ')}</Badge>}</div>
                 <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
                   <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"-"} sqft</div><div className="text-gray-400">Progress</div></div>
                   <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
@@ -5949,13 +5956,7 @@ function AdminSiteReport() {
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
           <div className="flex items-center gap-2">
             <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
-            {selectedSite.status!=="completed"&&(
-              <button onClick={async()=>{
-                await api("PUT",`/sitework/${selectedSite._id}`,{status:"completed",endDate:today()});
-                setSiteWorks(p=>p.map(s=>s._id===selectedSite._id?{...s,status:"completed",endDate:today()}:s));
-                setSelectedSite(s=>({...s,status:"completed",endDate:today()}));
-              }} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-600">✅ Mark Complete</button>
-            )}
+            {selectedSite.completionApprovalStatus&&<Badge color={selectedSite.completionApprovalStatus==="approved"?"green":selectedSite.completionApprovalStatus==="rejected"?"red":"blue"}>{selectedSite.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
           </div>
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-4">
@@ -6853,12 +6854,14 @@ function SupervisorSiteReport({ user }) {
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
           <div className="flex items-center gap-2">
             <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
-            {selectedSite.status!=="completed"&&(
+            {selectedSite.status!=="completed"&&!['pending_user','pending_admin'].includes(selectedSite.completionApprovalStatus)&&(
               <button onClick={async()=>{
-                await api("PUT",`/sitework/${selectedSite._id}`,{status:"completed",endDate:today()});
-                setSiteWorks(p=>p.map(s=>s._id===selectedSite._id?{...s,status:"completed",endDate:today()}:s));
-                setSelectedSite(s=>({...s,status:"completed",endDate:today()}));
-              }} className="bg-green-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-600">✅ Mark Complete</button>
+                const updated=await api("POST",`/sitework/${selectedSite._id}/completion/submit`,{role:user.role,name:user.name});
+                if(!updated?._id)return window.alert(updated?.message||"Unable to submit completion");
+                setSiteWorks(p=>p.map(s=>s._id===updated._id?updated:s));
+                setSelectedSite(updated);
+                window.alert("Site completion submitted. User approval is pending.");
+              }} className="bg-green-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-700">Submit Complete</button>
             )}
           </div>
         </div>
@@ -9175,9 +9178,55 @@ function SalaryHub({ user, setPage }) {
   return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages, advances and salary payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-lg font-black">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">{tile.label}</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.amount)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">{tile.action}</span></div></button>)}</div></div>;
 }
 
+function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
+  const [sites,setSites]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState("pending");
+  const [search,setSearch]=useState("");
+  const load=()=>api("GET","/sitework").then(rows=>{const list=Array.isArray(rows)?rows:[];setSites(list);setGlobalSiteWorks?.(list);}).finally(()=>setLoading(false));
+  useEffect(load,[]);
+  const approvalOf=site=>site.completionApprovalStatus||(site.status==="completed"?"approved":"");
+  const submitted=sites.filter(site=>approvalOf(site));
+  const filtered=submitted.filter(site=>{
+    const approval=approvalOf(site);
+    const group=approval==="pending_user"||approval==="pending_admin"?"pending":approval;
+    const matchesFilter=filter==="all"||group===filter;
+    const haystack=[site.customerName,site.phone,site.siteLocation,site.completionSubmittedBy].join(" ").toLowerCase();
+    return matchesFilter&&(!search||haystack.includes(search.toLowerCase()));
+  });
+  const review=async(site,action)=>{
+    let reason="";
+    if(action==="reject"){
+      reason=window.prompt("Enter the reason for rejecting this completion:","")?.trim()||"";
+      if(!reason)return;
+    }else if(!window.confirm(`${user.role==="admin"?"Give final approval for":"Approve"} ${site.customerName}?`))return;
+    const updated=await api("POST",`/sitework/${site._id}/completion/review`,{role:user.role,name:user.name,action,reason,date:today()});
+    if(!updated?._id)return window.alert(updated?.message||"Unable to review site completion");
+    setSites(list=>list.map(item=>item._id===updated._id?updated:item));
+    setGlobalSiteWorks?.(list=>list.map(item=>item._id===updated._id?updated:item));
+    window.alert(action==="reject"?"Completion rejected. Supervisor must resubmit.":user.role==="admin"?"Final approval completed.":"User approved. Admin approval is now pending.");
+  };
+  if(loading)return <Loader/>;
+  const counts={pending:submitted.filter(s=>['pending_user','pending_admin'].includes(approvalOf(s))).length,rejected:submitted.filter(s=>approvalOf(s)==="rejected").length,approved:submitted.filter(s=>approvalOf(s)==="approved").length};
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Completed Works</h2><div className="text-xs text-gray-400">User review followed by final Admin approval</div></div>
+    <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search site name, number or supervisor" className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"/>
+    <div className="grid grid-cols-3 gap-2">{[{id:"pending",label:"Pending",count:counts.pending,on:"bg-amber-600 text-white border-amber-700",off:"bg-amber-50 border-amber-200 text-amber-700"},{id:"approved",label:"Completed",count:counts.approved,on:"bg-green-600 text-white border-green-700",off:"bg-green-50 border-green-200 text-green-700"},{id:"rejected",label:"Rejected",count:counts.rejected,on:"bg-red-600 text-white border-red-700",off:"bg-red-50 border-red-200 text-red-700"}].map(tab=><button key={tab.id} onClick={()=>setFilter(tab.id)} className={`rounded-lg border p-3 text-center ${filter===tab.id?tab.on:tab.off}`}><div className="text-xl font-black">{tab.count}</div><div className="text-xs font-bold">{tab.label}</div></button>)}</div>
+    {filtered.length===0?<EmptyState icon="CW" text="No completed-work requests found"/>:<div className="grid md:grid-cols-2 gap-3">{filtered.map(site=>{const approval=approvalOf(site);const canUserApprove=user.role==="user"&&approval==="pending_user";const canAdminApprove=user.role==="admin"&&approval==="pending_admin";const canReject=(user.role==="user"&&approval==="pending_user")||(user.role==="admin"&&['pending_user','pending_admin'].includes(approval));return <div key={site._id} className="bg-white border rounded-lg shadow-sm p-4 space-y-3">
+      <div className="flex justify-between gap-3"><div><div className="font-black text-lg">{site.customerName||"Unnamed Site"}</div><div className="text-xs text-gray-500">Number: {site.phone||"-"}</div><div className="text-xs text-gray-500">{site.siteLocation||"-"}</div></div><Badge color={approval==="approved"?"green":approval==="rejected"?"red":"blue"}>{approval==="pending_user"?"User Approval Pending":approval==="pending_admin"?"Admin Approval Pending":approval==="approved"?"Completed":"Rejected"}</Badge></div>
+      <div className="grid grid-cols-2 gap-2 text-xs"><div className="bg-emerald-50 rounded-lg p-2"><div className="text-gray-500">Total Amount</div><div className="text-lg font-black text-emerald-700">{CURRENCY}{fmt(+(site.totalCost||site.totalAmount)||0)}</div></div><div className="bg-blue-50 rounded-lg p-2"><div className="text-gray-500">Submitted By</div><div className="font-black text-blue-700">{site.completionSubmittedBy||site.addedBy||"-"}</div><div className="text-gray-400">{site.completionSubmittedAt?new Date(site.completionSubmittedAt).toLocaleString("en-IN"):"Legacy completed site"}</div></div></div>
+      {site.userApprovedBy&&<div className="text-xs text-blue-700">User approved by <b>{site.userApprovedBy}</b>{site.userApprovedAt?` on ${new Date(site.userApprovedAt).toLocaleString("en-IN")}`:""}</div>}
+      {site.adminApprovedBy&&<div className="text-xs text-green-700">Final approval by <b>{site.adminApprovedBy}</b>{site.adminApprovedAt?` on ${new Date(site.adminApprovedAt).toLocaleString("en-IN")}`:""}</div>}
+      {approval==="rejected"&&<div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2"><b>Rejected by {site.completionRejectedBy||site.completionRejectedRole||"reviewer"}:</b> {site.completionRejectionReason||"-"}</div>}
+      {(canUserApprove||canAdminApprove||canReject)&&<div className="flex gap-2">{(canUserApprove||canAdminApprove)&&<button onClick={()=>review(site,"approve")} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-black">{canAdminApprove?"Final Approve":"User Approve"}</button>}{canReject&&<button onClick={()=>review(site,"reject")} className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 py-2 rounded-lg text-sm font-black">Reject</button>}</div>}
+    </div>})}</div>}
+  </div>;
+}
+
 function OfficeHub({ setPage }) {
   const tiles = [
     { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
+    { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:"CW", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
     { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock to sites and record worker charges", icon:"LU", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
     { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
     { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
@@ -9580,7 +9629,7 @@ export default function App() {
   const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
-  const officeNestedPages = ["sitework", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
+  const officeNestedPages = ["sitework", "completedworks", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
   const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
     (currentUser.role !== "user" || !["devices", "users", "dashboard"].includes(item.id)) &&
     (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
@@ -9590,7 +9639,7 @@ export default function App() {
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
-    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, loadingoperations:{label:"Loading & Unloading",icon:"LU"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, loadingoperations:{label:"Loading & Unloading",icon:"LU"}, completedworks:{label:"Completed Works",icon:"CW"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
     salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
     salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
     supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
@@ -9642,6 +9691,7 @@ export default function App() {
       case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="supervisor" />:null;
       case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="admin" />:null;
       case "loadingoperations": return isAdminLike(currentUser.role)?<LoadingOperations user={currentUser}/>:null;
+      case "completedworks": return isAdminLike(currentUser.role)?<CompletedSiteApprovals user={currentUser} setGlobalSiteWorks={setSiteWorks}/>:null;
       case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
       case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
