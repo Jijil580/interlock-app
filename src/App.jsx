@@ -7799,10 +7799,12 @@ function DriverReports({ user }) {
   const driverKeys = [...new Set(reports.map(r => r.driverMobile || r.driverName).filter(Boolean))];
   const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1;
   const driverPayableAmount = (report) => {
-    const storedEarned = +(report?.driverWageEarned || 0);
-    const supplierCash = +(report?.cashGivenToSupplier || 0);
-    const charge = +(report?.driverCharge || 0);
-    return storedEarned >= (charge + supplierCash) ? storedEarned : storedEarned + supplierCash;
+    if (report?.driverWageEarned !== undefined && report?.driverWageEarned !== null) {
+      return +(report.driverWageEarned) || 0;
+    }
+    const expenses = (Array.isArray(report?.expenses) ? report.expenses : [])
+      .reduce((sum, expense) => sum + (+(expense.amount) || 0), 0);
+    return (+(report?.driverCharge) || 0) + (+(report?.cashGivenToSupplier) || 0) + expenses;
   };
   const driverPaidAmount = (report) => +(report?.driverWagePaid || 0);
   const driverPendingAmount = (report) => Math.max(0, driverPayableAmount(report) - driverPaidAmount(report));
@@ -7833,8 +7835,8 @@ function DriverReports({ user }) {
       body{font-family:Arial,sans-serif;color:#111;margin:16px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}.company{font-weight:900;font-size:18px}.muted{font-size:12px;color:#555}.title{text-align:right;font-size:24px;font-weight:900}.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:15px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px;vertical-align:top}th{background:#f3f4f6}.right{text-align:right}.printbtn{position:fixed;right:16px;top:12px;background:#111;color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700}@media print{.printbtn{display:none}body{margin:8mm}.summary{grid-template-columns:repeat(3,1fr)}} 
     </style></head><body><button class="printbtn" onclick="window.print()">Print</button>
       <div class="top"><div><div class="company">${escapePrint(COMPANY.companyName)}</div><div class="muted">${escapePrint(COMPANY.address)} | ${escapePrint(COMPANY.phone1 || "")}</div></div><div class="title">DRIVER LEDGER<div class="muted">${escapePrint(title)}</div></div></div>
-      <div class="summary"><div class="box">Trips<b>${fmt(summary.totalTrips || 0)}</b></div><div class="box">Total Earned<b>${CURRENCY}${fmt(summary.totalEarned || 0)}</b></div><div class="box">Total Paid<b>${CURRENCY}${fmt(summary.totalPaid || 0)}</b></div><div class="box">Total Pending<b>${CURRENCY}${fmt(summary.totalPending || 0)}</b></div><div class="box">Expenses<b>${CURRENCY}${fmt(summary.totalExpenses || 0)}</b></div><div class="box">KM Run<b>${fmt(summary.totalKm || 0)}</b></div></div>
-      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Earned</th><th>Paid</th><th>Payment Receipt</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="13">No driver ledger entries found</td></tr>`}</tbody></table>
+      <div class="summary"><div class="box">Trips<b>${fmt(summary.totalTrips || 0)}</b></div><div class="box">Total Due<b>${CURRENCY}${fmt(summary.totalEarned || 0)}</b></div><div class="box">Total Paid<b>${CURRENCY}${fmt(summary.totalPaid || 0)}</b></div><div class="box">Total Pending<b>${CURRENCY}${fmt(summary.totalPending || 0)}</b></div><div class="box">Driver Expenses<b>${CURRENCY}${fmt(summary.totalDriverExpenses || 0)}</b></div><div class="box">KM Run<b>${fmt(summary.totalKm || 0)}</b></div></div>
+      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Total Due</th><th>Paid</th><th>Payment Receipt</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="13">No driver ledger entries found</td></tr>`}</tbody></table>
     <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
     const w = window.open("", "_blank");
     w.document.write(html);
@@ -7869,11 +7871,11 @@ function DriverReports({ user }) {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
         <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
-        <StatCard label="Earned" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" />
+        <StatCard label="Total Due" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" sub="Charge + reimbursements" />
         <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
         <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
         <StatCard label="Credit" value={`${CURRENCY}${fmt(summary.totalCredit || 0)}`} icon="CR" color="green" />
-        <StatCard label="Expenses" value={`${CURRENCY}${fmt(summary.totalExpenses)}`} icon="EX" color="amber" sub={+(summary.totalLoadAmount || 0) > 0 ? `Load ${CURRENCY}${fmt(summary.totalLoadAmount)}` : ""} />
+        <StatCard label="Driver Expenses" value={`${CURRENCY}${fmt(summary.totalDriverExpenses)}`} icon="EX" color="amber" sub="Included in pending" />
         <StatCard label="Fuel Liters" value={fmt(summary.totalLiters || 0)} icon="L" color="blue" />
         <StatCard label="KM Run" value={fmt(summary.totalKm || 0)} icon="KM" color="purple" />
       </div>
@@ -7899,7 +7901,7 @@ function DriverReports({ user }) {
         {reports.length === 0 ? <div className="text-xs text-gray-400">No driver reports found</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Date</th><th>Driver</th><th>Vehicle</th><th>Item / Route</th><th>Expenses</th><th className="text-right">KM</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+              <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Date</th><th>Driver</th><th>Vehicle</th><th>Item / Route</th><th>Expenses</th><th className="text-right">KM</th><th className="text-right">Total Due</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
               <tbody>{reports.map(r => {
                 const km = r.vehicleKm || {};
                 return <tr key={`ledger-${r._id}`} className="border-b border-gray-100">
@@ -7963,7 +7965,7 @@ function DriverReports({ user }) {
           )}
           {expenses.length > 0 && (
             <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 text-xs">
-              <div className="flex justify-between font-bold text-amber-700 mb-1"><span>Driver Expenses{litersTotal > 0 ? ` | ${fmt(litersTotal)} liters` : ""}</span><span>{CURRENCY}{fmt(expenseTotal)}</span></div>
+              <div className="flex justify-between font-bold text-amber-700 mb-1"><span>Driver Expenses (included in pending){litersTotal > 0 ? ` | ${fmt(litersTotal)} liters` : ""}</span><span>{CURRENCY}{fmt(expenseTotal)}</span></div>
               {expenses.map((e, i) => (
                 <div key={i} className="flex justify-between border-t border-amber-100 py-1 first:border-t-0">
                   <span>{e.category || "Other"}{+(e.liters || 0) > 0 ? ` | ${fmt(e.liters)} liters` : ""}{e.note ? ` | ${e.note}` : ""}</span>
@@ -7984,7 +7986,7 @@ function DriverReports({ user }) {
             </div>
           )}
           {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
-          <div className="grid grid-cols-4 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPayableAmount(r))}</b><br />Payable</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPaidAmount(r))}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPendingAmount(r))}</b><br />Pending</div><div className="bg-emerald-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverCreditAmount(r))}</b><br />Credit</div></div>
+          <div className="grid grid-cols-4 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPayableAmount(r))}</b><br />Total Due</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPaidAmount(r))}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPendingAmount(r))}</b><br />Pending</div><div className="bg-emerald-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverCreditAmount(r))}</b><br />Credit</div></div>
           {(canOfficeEdit || user.role === "driver") && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Report</button><button onClick={() => deleteDriverReport(r)} className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold">Delete</button></div>}
         </div>;
         })}
