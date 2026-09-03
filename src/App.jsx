@@ -7250,11 +7250,11 @@ function QuotationDocument({ quotation }) {
   </div>;
 }
 
-function SignaturePad({ customerName, onCancel, onSubmit, saving }) {
+function SignaturePad({ onCancel, onSubmit, saving }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const hasInk = useRef(false);
-  const [signedBy, setSignedBy] = useState(customerName || "");
+  const [signedBy, setSignedBy] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -7309,14 +7309,13 @@ function SignaturePad({ customerName, onCancel, onSubmit, saving }) {
   };
   const submit = () => {
     if (!hasInk.current) return setError("Please draw your signature before submitting.");
-    if (!signedBy.trim()) return setError("Please enter the signer name.");
     onSubmit({ signatureData: canvasRef.current.toDataURL("image/png"), signedBy: signedBy.trim() });
   };
 
   return <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col p-3 sm:p-6">
     <div className="flex items-center justify-between text-white mb-3"><div><h2 className="text-lg font-black">Sign Quotation</h2><p className="text-xs text-slate-300">Use your finger or mouse inside the white area</p></div><button onClick={onCancel} className="h-10 w-10 rounded-lg bg-slate-800 text-xl" aria-label="Close">×</button></div>
     <canvas ref={canvasRef} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} className="flex-1 w-full min-h-0 bg-white rounded-lg touch-none cursor-crosshair" />
-    <div className="mt-3 grid sm:grid-cols-[1fr_auto_auto] gap-2"><input value={signedBy} onChange={e=>setSignedBy(e.target.value)} placeholder="Signer name" className="h-11 rounded-lg px-3 border border-slate-600"/><button onClick={clear} className="h-11 px-5 rounded-lg bg-slate-700 text-white font-bold">Clear</button><button onClick={submit} disabled={saving} className="h-11 px-6 rounded-lg bg-emerald-600 text-white font-black disabled:opacity-60">{saving ? "Submitting..." : "Submit Signature"}</button></div>
+    <div className="mt-3 grid sm:grid-cols-[1fr_auto_auto] gap-2"><input value={signedBy} onChange={e=>setSignedBy(e.target.value)} placeholder="Type signer name (optional)" aria-label="Signer name (optional)" className="h-11 rounded-lg px-3 border border-slate-600"/><button onClick={clear} className="h-11 px-5 rounded-lg bg-slate-700 text-white font-bold">Clear</button><button onClick={submit} disabled={saving} className="h-11 px-6 rounded-lg bg-emerald-600 text-white font-black disabled:opacity-60">{saving ? "Submitting..." : "Submit Signature"}</button></div>
     {error && <div className="text-red-300 text-sm font-bold mt-2">{error}</div>}
   </div>;
 }
@@ -7358,7 +7357,7 @@ function PublicQuotationPage({ token }) {
       <div className="my-4 bg-white border border-slate-200 p-4 rounded-lg print:hidden">{quotation.signature?.dataUrl ? <div className="flex items-center gap-3 text-emerald-700 font-black"><span className="text-2xl">✓</span><div>Quotation signed successfully<div className="text-xs font-normal text-slate-500">The signed quotation is ready to print or save as PDF.</div></div></div> : <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3"><div className="flex-1"><div className="font-black">Customer Acceptance</div><div className="text-sm text-slate-500">Review the quotation above, then add your signature.</div></div><button onClick={()=>setSigning(true)} className="w-full sm:w-auto h-11 px-6 bg-emerald-600 text-white rounded-lg font-black">Sign Quotation</button></div>}</div>
       {error && <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded-lg print:hidden">{error}</div>}
     </main>
-    {signing && <SignaturePad customerName={quotation.customer} onCancel={()=>setSigning(false)} onSubmit={submitSignature} saving={saving}/>}
+    {signing && <SignaturePad onCancel={()=>setSigning(false)} onSubmit={submitSignature} saving={saving}/>}
     <style>{`@media print { @page { size: A4; margin: 10mm; } body { background: white !important; } .quotation-document { box-shadow:none !important; } }`}</style>
   </div>;
 }
@@ -7381,6 +7380,15 @@ function QuotationModule({ user }) {
   const [shareItem, setShareItem] = useState(null);
   const [shareMessage, setShareMessage] = useState("");
 
+  const refreshQuotations = async () => {
+    const q = await api("GET", "/quotations");
+    const list = Array.isArray(q) ? q : [];
+    setQuotations(list);
+    setViewItem(current => current ? (list.find(item => item._id === current._id) || current) : current);
+    setShareItem(current => current ? (list.find(item => item._id === current._id) || current) : current);
+    return list;
+  };
+
   const load = () => {
     Promise.all([api("GET", "/quotations"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([q, i, h, c]) => {
       setQuotations(Array.isArray(q) ? q : []);
@@ -7391,7 +7399,11 @@ function QuotationModule({ user }) {
     });
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    const refreshTimer = window.setInterval(() => { refreshQuotations().catch(() => {}); }, 15000);
+    return () => window.clearInterval(refreshTimer);
+  }, []);
 
   const calcLine = (row, source = form) => {
     const qty = +(row.quantity || 0);
@@ -7533,13 +7545,13 @@ function QuotationModule({ user }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-xl font-black text-gray-900">Quotations</h2><div className="text-xs text-gray-400">Create, edit, view and print customer quotations</div></div>
-        <button onClick={openNew} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm">+ New Quotation</button>
+        <div className="flex gap-2"><button onClick={()=>refreshQuotations()} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold shadow-sm">Refresh Status</button><button onClick={openNew} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm">+ New Quotation</button></div>
       </div>
       <Input placeholder="Search quotation, customer or mobile" value={search} onChange={e=>setSearch(e.target.value)} />
       {filtered.length === 0 ? <EmptyState icon="QT" text="No quotations found" /> : <div className="grid gap-3">{filtered.map(q => <div key={q._id} className="bg-white border rounded-xl shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
         <div><div className="font-black text-gray-900">{q.quotationNumber}</div><div className="text-sm text-gray-500">{q.customer} - {q.mobileNumber}</div><div className="text-xs text-gray-400">{q.date} | Valid until {q.validUntil || "-"}</div></div>
         <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(q.total)}</div><div className="flex gap-1 mt-1"><Badge color={q.billType === "with_gst" ? "blue" : "gray"}>{q.billType === "with_gst" ? "With GST" : "Without GST"}</Badge>{q.signature?.dataUrl&&<Badge color="green">Signed</Badge>}</div></div>
-        <div className="flex flex-wrap gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">View</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>openShare(q)} className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold">Share</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">Print</button></div>
+        <div className="flex flex-wrap gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">{q.signature?.dataUrl ? "View Signed" : "View"}</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>openShare(q)} className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold">Share</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">{q.signature?.dataUrl ? "Print / Save PDF" : "Print"}</button></div>
       </div>)}</div>}
 
       {modal && <Modal title={editingId ? "Edit Quotation" : "New Quotation"} onClose={()=>setModal(false)} wide>
@@ -7570,7 +7582,7 @@ function QuotationModule({ user }) {
         <div className="space-y-3"><div className="flex justify-between"><div><div className="font-black">{viewItem.quotationNumber}</div><div className="text-sm text-gray-500">{viewItem.customer}</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(viewItem.total)}</div></div>
         <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left border-b"><th className="py-2">Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Taxable</th><th>Total</th></tr></thead><tbody>{(viewItem.items||[]).map((it,i)=><tr key={i} className="border-b"><td className="py-2 font-bold">{it.product}<div className="font-normal text-gray-400">{it.description}</div></td><td>{fmt(it.quantity)} {it.unit}</td><td>{CURRENCY}{fmt(it.rate)}</td><td>{CURRENCY}{fmt(it.discountAmount)}</td><td>{CURRENCY}{fmt(it.taxableAmount)}</td><td className="font-bold">{CURRENCY}{fmt(it.total)}</td></tr>)}</tbody></table></div>
         {viewItem.signature?.dataUrl&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3"><div className="text-xs font-black text-emerald-700">Customer Signed</div><img src={viewItem.signature.dataUrl} alt="Customer signature" className="h-20 max-w-full object-contain mt-1"/><div className="text-xs text-slate-500">{viewItem.signature.signedBy || viewItem.customer} | {viewItem.signature.signedAt ? new Date(viewItem.signature.signedAt).toLocaleString("en-IN") : ""}</div></div>}
-        <div className="flex flex-wrap gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 min-w-28 bg-green-600 text-white py-2 rounded-lg font-bold">Print</button><button onClick={()=>openShare(viewItem)} className="flex-1 min-w-28 bg-emerald-50 text-emerald-700 py-2 rounded-lg font-bold">Share</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 min-w-28 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
+        <div className="flex flex-wrap gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 min-w-28 bg-green-600 text-white py-2 rounded-lg font-bold">{viewItem.signature?.dataUrl ? "Print / Save Signed PDF" : "Print"}</button><button onClick={()=>openShare(viewItem)} className="flex-1 min-w-28 bg-emerald-50 text-emerald-700 py-2 rounded-lg font-bold">Share</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 min-w-28 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
       </Modal>}
 
       {shareItem && <Modal title="Share Quotation" onClose={()=>{setShareItem(null);setShareMessage("");}}>
