@@ -34,7 +34,7 @@ const today = () => new Date().toISOString().split("T")[0];
 const withUnit = (value, unit) => {
   const text = String(value || "").trim();
   if (!text) return "";
-  return new RegExp(`\\b${unit}(?:es)?$`, "i").test(text) ? text : `${text} ${unit}`;
+  return new RegExp(`${unit}(?:es)?$`, "i").test(text) ? text : `${text} ${unit}`;
 };
 const cleanDisplayUnits = (value) => String(value || "")
   .replace(/\binch\s+inch\b/gi, "inch")
@@ -4918,6 +4918,17 @@ function Stock({ stock, setStock, user }) {
 
   const del = async (item) => { if(!window.confirm("Delete this stock item?")) return; const ids=item._ids?.length?item._ids:[item._id]; await Promise.all(ids.map(id=>api("DELETE",`/stock/${id}`))); setStock(p=>p.filter(x=>!ids.includes(x._id))); };
 
+  const stockTone = (item) => {
+    const clue = `${item.color || ""} ${item.category || ""} ${item.name || ""}`.toLowerCase();
+    if (/red|maroon|rose|pink/.test(clue)) return { card:"bg-rose-50/80 border-rose-200", icon:"bg-rose-100 text-rose-700 border-rose-200", qty:"text-rose-700" };
+    if (/green|olive/.test(clue)) return { card:"bg-emerald-50/80 border-emerald-200", icon:"bg-emerald-100 text-emerald-700 border-emerald-200", qty:"text-emerald-700" };
+    if (/blue|navy/.test(clue)) return { card:"bg-blue-50/80 border-blue-200", icon:"bg-blue-100 text-blue-700 border-blue-200", qty:"text-blue-700" };
+    if (/yellow|gold|cream/.test(clue)) return { card:"bg-amber-50/80 border-amber-200", icon:"bg-amber-100 text-amber-700 border-amber-200", qty:"text-amber-700" };
+    if (/black|grey|gray|charcoal/.test(clue)) return { card:"bg-slate-100/90 border-slate-300", icon:"bg-slate-200 text-slate-700 border-slate-300", qty:"text-slate-800" };
+    if (item.productType === "hollowbrick") return { card:"bg-orange-50/80 border-orange-200", icon:"bg-orange-100 text-orange-700 border-orange-200", qty:"text-orange-700" };
+    return { card:"bg-cyan-50/80 border-cyan-200", icon:"bg-cyan-100 text-cyan-700 border-cyan-200", qty:"text-cyan-700" };
+  };
+
 
   const groupedStock = Object.values((stock || []).reduce((acc, s) => {
     const prefix = s.category ? `${s.category} - ` : "";
@@ -4941,14 +4952,18 @@ function Stock({ stock, setStock, user }) {
         <h2 className="text-xl font-black text-gray-900">📦 Stock</h2>
         {isAdminLike(user.role)&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
       </div>
-      <div className="space-y-2">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
         {groupedStock.length===0&&<EmptyState icon="BOX" text="No stock items" />}
-        {groupedStock.map(s=>(
-          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
-            <div><div className="font-black">{s.name}</div>{s.category&&<div className="text-xs text-gray-400">{s.category}{s.color?` · ${s.color}`:""}</div>}<div className="text-sm text-gray-600">{s.quantity} piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` · ${fmt(s.sqftQuantity)} sqft`:""}</div>{s.sqftPerPiece>0&&<div className="text-xs text-gray-400">1 piece = {fmt(s.sqftPerPiece)} sqft</div>}{s.price>0&&<div className="text-xs text-amber-600">Rate: {CURRENCY}{fmt(s.price)}</div>}{s.duplicateCount>1&&<div className="text-xs text-blue-600 font-bold">{s.duplicateCount} entries combined</div>}</div>
-            {isAdminLike(user.role)&&<div className="flex gap-1"><button onClick={()=>{setForm({...s,name:s._editName||s.name});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">Edit</button><button onClick={()=>del(s)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">Delete</button></div>}
-          </div>
-        ))}
+        {groupedStock.map(s=>{const tone=stockTone(s);const isOut=+(s.quantity||0)<=0;const isLow=!isOut&&+(s.minStock||0)>0&&+(s.quantity||0)<=+(s.minStock||0);return (
+          <article key={s._id} className={`relative overflow-hidden min-h-[190px] rounded-lg border shadow-sm p-4 flex flex-col justify-between ${tone.card}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tone.icon}`}><UiIcon icon={s.productType==="hollowbrick"?Blocks:Package} size={21}/></div>
+              <div className="flex items-center gap-1.5">{(isOut||isLow)&&<span className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-black uppercase text-red-700">{isOut?"Out of stock":"Low stock"}</span>}{isAdminLike(user.role)&&<><button onClick={()=>{setForm({...s,name:s._editName||s.name});setEditItem(s);setModal(true);}} className="w-8 h-8 rounded-lg border border-white/80 bg-white/80 text-blue-700 flex items-center justify-center hover:bg-white" title="Edit stock" aria-label="Edit stock"><Pencil size={14}/></button><button onClick={()=>del(s)} className="w-8 h-8 rounded-lg border border-red-200 bg-white/80 text-red-600 flex items-center justify-center hover:bg-red-50" title="Delete stock" aria-label="Delete stock"><Trash2 size={14}/></button></> }</div>
+            </div>
+            <div className="py-4"><div className="font-black text-slate-950 text-base leading-tight">{s.name}</div><div className="text-xs font-semibold text-slate-500 mt-1">{[s.productType==="hollowbrick"?"Hollow Brick":"Interlock",s.category,s.color].filter(Boolean).join(" / ")}</div></div>
+            <div className="border-t border-slate-900/10 pt-3 flex items-end justify-between gap-3"><div><div className={`text-2xl font-black leading-none ${tone.qty}`}>{fmt(s.quantity)}</div><div className="text-[10px] font-black uppercase text-slate-500 mt-1">Piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` / ${fmt(s.sqftQuantity)} sqft`:""}</div></div><div className="text-right text-xs text-slate-500">{s.sqftPerPiece>0&&<div>1 pc = <b>{fmt(s.sqftPerPiece)} sqft</b></div>}{s.price>0&&<div>Rate <b className="text-slate-800">{CURRENCY}{fmt(s.price)}</b></div>}{s.duplicateCount>1&&<div className="font-bold text-blue-700">{s.duplicateCount} combined</div>}</div></div>
+          </article>
+        )})}
       </div>
       {modal&&<Modal title={editItem?"Edit":"Add Stock"} onClose={()=>{setModal(false);setEditItem(null);}}>
         <div className="space-y-3">
