@@ -9253,34 +9253,34 @@ function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
 
 function OfficeHub({ setPage }) {
   const groups = [
-    { title:"Site Operations", items:[
-      { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-sky-50 border-sky-200" },
-      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
-      { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-violet-50 border-violet-200" },
+    { title:"Site Operations", heading:"bg-sky-100 text-sky-800 border-sky-200", items:[
+      { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-white/70 border-sky-200", surface:"bg-sky-50/80 border-sky-200 hover:border-sky-300" },
+      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
+      { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
     ]},
-    { title:"Sales & Inventory", items:[
-      { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:ReceiptIndianRupee, accent:"text-cyan-700 bg-cyan-50 border-cyan-200" },
-      { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:FileText, accent:"text-violet-700 bg-violet-50 border-violet-200" },
-      { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:Package, accent:"text-blue-700 bg-blue-50 border-blue-200" },
+    { title:"Sales & Inventory", heading:"bg-cyan-100 text-cyan-800 border-cyan-200", items:[
+      { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:ReceiptIndianRupee, accent:"text-cyan-700 bg-white/70 border-cyan-200", surface:"bg-cyan-50/80 border-cyan-200 hover:border-cyan-300" },
+      { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:FileText, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
+      { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:Package, accent:"text-blue-700 bg-white/70 border-blue-200", surface:"bg-blue-50/80 border-blue-200 hover:border-blue-300" },
     ]},
-    { title:"Purchasing & Production", items:[
-      { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:ShoppingCart, accent:"text-amber-700 bg-amber-50 border-amber-200" },
-      { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:Store, accent:"text-orange-700 bg-orange-50 border-orange-200" },
-      { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:Blocks, accent:"text-red-700 bg-red-50 border-red-200" },
-      { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:Factory, accent:"text-slate-700 bg-slate-100 border-slate-200" },
+    { title:"Purchasing & Production", heading:"bg-amber-100 text-amber-800 border-amber-200", items:[
+      { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:ShoppingCart, accent:"text-amber-700 bg-white/70 border-amber-200", surface:"bg-amber-50/80 border-amber-200 hover:border-amber-300" },
+      { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:Store, accent:"text-orange-700 bg-white/70 border-orange-200", surface:"bg-orange-50/80 border-orange-200 hover:border-orange-300" },
+      { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:Blocks, accent:"text-red-700 bg-white/70 border-red-200", surface:"bg-red-50/80 border-red-200 hover:border-red-300" },
+      { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:Factory, accent:"text-slate-700 bg-white/70 border-slate-200", surface:"bg-slate-100/80 border-slate-200 hover:border-slate-300" },
     ]},
-    { title:"People & Finance", items:[
-      { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:UserRoundPlus, accent:"text-teal-700 bg-teal-50 border-teal-200" },
-      { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:CalendarCheck, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
-      { id:"salaryhub", title:"Salary", sub:"View and settle pending worker payments", icon:WalletCards, accent:"text-pink-700 bg-pink-50 border-pink-200" },
-      { id:"cashflowhub", title:"Cash Flow Records", sub:"Review daily cash and company records", icon:Landmark, accent:"text-green-700 bg-green-50 border-green-200" },
-      { id:"cashtransactions", title:"Cash Transactions", sub:"Receive and transfer cash between accounts", icon:ArrowLeftRight, accent:"text-indigo-700 bg-indigo-50 border-indigo-200" },
+    { title:"People & Finance", heading:"bg-emerald-100 text-emerald-800 border-emerald-200", items:[
+      { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:UserRoundPlus, accent:"text-teal-700 bg-white/70 border-teal-200", surface:"bg-teal-50/80 border-teal-200 hover:border-teal-300" },
+      { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:CalendarCheck, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
+      { id:"salaryhub", title:"Salary", sub:"View and settle pending worker payments", icon:WalletCards, accent:"text-pink-700 bg-white/70 border-pink-200", surface:"bg-pink-50/80 border-pink-200 hover:border-pink-300" },
+      { id:"cashflowhub", title:"Cash Flow Records", sub:"Review daily cash and company records", icon:Landmark, accent:"text-green-700 bg-white/70 border-green-200", surface:"bg-green-50/80 border-green-200 hover:border-green-300" },
+      { id:"cashtransactions", title:"Cash Transactions", sub:"Receive and transfer cash between accounts", icon:ArrowLeftRight, accent:"text-indigo-700 bg-white/70 border-indigo-200", surface:"bg-indigo-50/80 border-indigo-200 hover:border-indigo-300" },
     ]},
   ];
   return (
     <div className="space-y-6">
       <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
-      {groups.map(group=><section key={group.title} className="space-y-2"><h3 className="text-xs font-black uppercase text-slate-500 border-b border-slate-200 pb-2">{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[104px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
+      {groups.map(group=><section key={group.title} className="space-y-3"><h3 className={`inline-flex rounded-md border px-3 py-2 text-xs font-black uppercase ${group.heading}`}>{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`group min-h-[104px] rounded-lg border p-4 text-left flex items-start gap-3 shadow-sm hover:shadow-md transition-all ${tile.surface}`}><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-600 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
     </div>
   );
 }
