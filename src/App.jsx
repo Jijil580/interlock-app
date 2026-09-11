@@ -545,6 +545,31 @@ function StatCard({ label, value, sub, icon, color, solid = false }) {
   );
 }
 
+function DashboardDonut({ incoming = 0, outgoing = 0 }) {
+  const total = Math.max(0, +incoming || 0) + Math.max(0, +outgoing || 0);
+  const incomingShare = total ? Math.round((Math.max(0, +incoming || 0) / total) * 100) : 50;
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-5">
+      <div className="relative w-36 h-36 shrink-0 rounded-full shadow-inner" style={{background:total?`conic-gradient(#10b981 0 ${incomingShare}%, #f43f5e ${incomingShare}% 100%)`:"#e2e8f0"}}>
+        <div className="absolute inset-[18px] rounded-full bg-white flex flex-col items-center justify-center shadow-sm">
+          <div className="text-xl font-black text-slate-950">{CURRENCY}{fmt(total)}</div>
+          <div className="text-[10px] font-black uppercase text-slate-400">Cash Movement</div>
+        </div>
+      </div>
+      <div className="w-full space-y-3">
+        <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-bold text-slate-700"><i className="w-3 h-3 rounded-full bg-emerald-500"/>Cash In</span><strong className="text-emerald-700">{CURRENCY}{fmt(incoming)}</strong></div>
+        <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-bold text-slate-700"><i className="w-3 h-3 rounded-full bg-rose-500"/>Cash Out</span><strong className="text-rose-700">{CURRENCY}{fmt(outgoing)}</strong></div>
+        <div className="border-t border-slate-100 pt-3 flex items-center justify-between gap-3"><span className="text-xs font-bold text-slate-500">Net Balance</span><strong className={(+incoming-(+outgoing))>=0?"text-emerald-700":"text-rose-700"}>{CURRENCY}{fmt((+incoming||0)-(+outgoing||0))}</strong></div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardBars({ rows = [] }) {
+  const max = Math.max(1, ...rows.map(row => Math.max(0, +row.value || 0)));
+  return <div className="space-y-4">{rows.map(row=><div key={row.label} className="space-y-1.5"><div className="flex items-center justify-between gap-3 text-xs"><span className="font-bold text-slate-600">{row.label}</span><strong className="text-slate-950">{row.display}</strong></div><div className="h-3 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${row.color}`} style={{width:`${Math.max(0,+row.value||0)?Math.max(3,((Math.max(0,+row.value||0)/max)*100)):0}%`}}/></div></div>)}</div>;
+}
+
 function Loader() {
   return <div className="flex items-center justify-center py-16"><div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>;
 }
@@ -938,6 +963,12 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
   const total = summary.totals || {};
   const money = value => `${CURRENCY}${fmt(value)}`;
   const currentRange = range();
+  const activityBars = [
+    { label:"Sales", value:total.salesAmount, display:money(total.salesAmount), color:"bg-blue-500" },
+    { label:"Purchases", value:total.purchaseAmount, display:money(total.purchaseAmount), color:"bg-amber-500" },
+    { label:"Production Value", value:total.productionValue, display:money(total.productionValue), color:"bg-violet-500" },
+    { label:"Site Value", value:total.siteValue, display:money(total.siteValue), color:"bg-emerald-500" },
+  ];
 
   return (
     <div className="space-y-5">
@@ -967,6 +998,15 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
             <StatCard solid label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft)} sqft | Value ${money(total.productionValue)}`} />
             <StatCard solid label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
             <StatCard solid label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <SectionBox title="Cash Flow Overview" icon="CF" color="green">
+              <DashboardDonut incoming={total.cashIn} outgoing={total.cashOut} />
+            </SectionBox>
+            <SectionBox title="Business Activity" icon="BA" color="blue">
+              <DashboardBars rows={activityBars} />
+            </SectionBox>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-4">
