@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  ArrowLeft, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
-  HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings,
+  ArrowLeft, BarChart3, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
+  HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings, ShieldCheck,
   ShoppingCart, Smartphone, Store, Truck, UserRoundPlus, UsersRound,
   WalletCards, LogOut, Printer, Pencil, Trash2, BookOpen,
   ArrowLeftRight
@@ -46,6 +46,14 @@ function UiIcon({ icon: Icon, size = 20, className = "" }) {
   }
   return <span className={className} aria-hidden="true">{Icon}</span>;
 }
+
+const NAV_ICON_MAP = {
+  cashflowhub: Landmark, admincontrol: ShieldCheck, officehub: Building2,
+  dashboard: BarChart3, reports: FileText, sitework: Building2,
+  dailyreport: ClipboardList, mysitereports: FileSearch, sitereport: Building2,
+  workerreport: ClipboardList, workerreport2: HardHat, workplan: CalendarCheck,
+  quotations: FileText, driversubmit: Truck, driverreports: Truck,
+};
 const findMasterItem = (row, masters = []) => masters.find(m => (
   (row?.itemId && m._id === row.itemId) ||
   ((m.name || "").toLowerCase() === String(row?.itemName || row?.product || row?.name || row?.item || "").toLowerCase() &&
@@ -517,21 +525,21 @@ function StatCard({ label, value, sub, icon, color, solid = false }) {
     gray:"bg-slate-50 text-slate-600 border-slate-200"
   };
   const solidColors = {
-    amber:"bg-amber-500 border-amber-600",
-    blue:"bg-blue-600 border-blue-700",
-    green:"bg-emerald-600 border-emerald-700",
-    red:"bg-red-600 border-red-700",
-    purple:"bg-violet-600 border-violet-700",
-    teal:"bg-teal-600 border-teal-700",
-    gray:"bg-slate-600 border-slate-700"
+    amber:"bg-amber-50 border-amber-200",
+    blue:"bg-blue-50 border-blue-200",
+    green:"bg-emerald-50 border-emerald-200",
+    red:"bg-rose-50 border-rose-200",
+    purple:"bg-violet-50 border-violet-200",
+    teal:"bg-teal-50 border-teal-200",
+    gray:"bg-slate-50 border-slate-200"
   };
   return (
-    <div className={`${solid ? `${solidColors[color]||solidColors.amber} text-white min-h-[118px] shadow-sm hover:shadow-md` : "bg-white border-slate-200 shadow-sm"} rounded-xl border p-4 flex items-start gap-3 transition-shadow`}>
-      <div className={`w-10 h-10 rounded-lg border ${solid ? "bg-white/20 border-white/25 text-white" : c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
+    <div className={`${solid ? `${solidColors[color]||solidColors.amber} min-h-[118px] shadow-sm hover:shadow-md` : "bg-white border-slate-200 shadow-sm"} rounded-xl border p-4 flex items-start gap-3 transition-shadow`}>
+      <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
       <div className="min-w-0 flex-1">
-        <div className={`text-base sm:text-xl font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${solid ? "text-white" : "text-slate-950"}`} title={String(value??"")}>{value}</div>
-        <div className={`text-[11px] font-black uppercase tracking-wide ${solid ? "text-white/90" : "text-slate-500"}`}>{tr(label)}</div>
-        {sub && <div className={`text-xs mt-0.5 ${solid ? "text-white/75" : "text-slate-400"}`}>{tr(sub)}</div>}
+        <div className="text-base sm:text-xl font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-slate-950" title={String(value??"")}>{value}</div>
+        <div className="text-[11px] font-black uppercase text-slate-600">{tr(label)}</div>
+        {sub && <div className="text-xs mt-0.5 text-slate-500">{tr(sub)}</div>}
       </div>
     </div>
   );
@@ -933,7 +941,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="dashboard-welcome flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-black text-gray-900">Good day, {user.name.split(" ")[0]}</h2>
           <p className="text-xs text-gray-400 mt-0.5">{isAdmin ? `Dashboard period: ${currentRange.label}` : "Today's office dashboard"}</p>
@@ -9757,34 +9765,34 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell min-h-screen bg-slate-100 flex">
+    <div className="app-shell min-h-screen bg-slate-50 flex">
       {successToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[80] bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-black border border-green-500">
           {tr(successToast, language)}
         </div>
       )}
       {sidebarOpen&&<div className="fixed inset-0 bg-black/30 z-20 lg:hidden" onClick={()=>setSidebarOpen(false)} />}
-      <aside className={`fixed top-0 left-0 h-full w-64 bg-slate-950 z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
-        <div className="px-5 py-5 border-b border-slate-800">
+      <aside className={`fixed top-0 left-0 h-full w-[280px] bg-[#08264b] z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
+        <div className="px-5 py-5 border-b border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white border border-white/20 flex items-center justify-center overflow-hidden"><img src={COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-0.5" /></div>
             <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">{tr("Management System", language)}</div></div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
           {nav.map(item=>(
             <button key={item.id} onClick={()=>navigateTo(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${page===item.id?"bg-amber-500 text-white shadow-sm":"text-slate-400 hover:bg-slate-900 hover:text-white"}`}>
-              <span className="text-base">{item.icon}</span>{tr(item.label, language)}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-sm font-bold transition-all ${page===item.id?"bg-blue-500 text-white shadow-md":"text-blue-100/75 hover:bg-white/10 hover:text-white"}`}>
+              <span className="w-5 h-5 flex items-center justify-center shrink-0"><UiIcon icon={NAV_ICON_MAP[item.id] || item.icon} size={18}/></span>{tr(item.label, language)}
             </button>
           ))}
         </nav>
-        <div className="px-3 py-4 border-t border-slate-800">
+        <div className="px-3 py-4 border-t border-white/10">
           <div className="px-2 pb-3 text-center">
             <div className="text-[10px] font-bold text-slate-400">{POWERED_BY}</div>
             <div className="text-[9px] text-slate-500 mt-0.5">{COPYRIGHT_TEXT}</div>
           </div>
-          <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
+          <div className="flex items-center gap-3 bg-white/10 border border-white/10 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</div></div>
             <button onClick={logout} className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-red-400" title={tr("Logout", language)} aria-label={tr("Logout", language)}><LogOut size={16}/></button>
@@ -9792,7 +9800,7 @@ export default function App() {
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+        <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 lg:px-6 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden h-9 w-9 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100" title="Open menu" aria-label="Open menu"><Menu size={20}/></button>
           {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title={tr("Back", language)} aria-label={tr("Back", language)}><ArrowLeft size={16}/><span className="hidden sm:inline">{tr("Back", language)}</span></button>}
           <div className="flex-1 min-w-0"><div className="text-[10px] font-bold uppercase text-slate-400">Workspace</div><h1 className="font-black text-slate-950 text-sm truncate">{tr(currentPageMeta.label, language)}</h1></div>
