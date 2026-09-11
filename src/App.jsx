@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import {
+  ArrowLeft, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
+  HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings,
+  ShoppingCart, Smartphone, Store, Truck, UserRoundPlus, UsersRound,
+  WalletCards, LogOut, Printer, Pencil, Trash2, BookOpen,
+  ArrowLeftRight
+} from "lucide-react";
 
 const API = "https://interlock-backend.onrender.com/api";
 const COMPANY = {
@@ -24,6 +31,21 @@ const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All 
 const CURRENCY = "₹";
 const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().split("T")[0];
+const withUnit = (value, unit) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return new RegExp(`\\b${unit}(?:es)?$`, "i").test(text) ? text : `${text} ${unit}`;
+};
+const cleanDisplayUnits = (value) => String(value || "")
+  .replace(/\binch\s+inch\b/gi, "inch")
+  .replace(/\binch\s+thick\s+inch\s+thick\b/gi, "inch thick");
+
+function UiIcon({ icon: Icon, size = 20, className = "" }) {
+  if (typeof Icon === "function" || (typeof Icon === "object" && Icon)) {
+    return <Icon size={size} strokeWidth={2} className={className} aria-hidden="true" />;
+  }
+  return <span className={className} aria-hidden="true">{Icon}</span>;
+}
 const findMasterItem = (row, masters = []) => masters.find(m => (
   (row?.itemId && m._id === row.itemId) ||
   ((m.name || "").toLowerCase() === String(row?.itemName || row?.product || row?.name || row?.item || "").toLowerCase() &&
@@ -525,19 +547,19 @@ function EmptyState({ icon, text }) {
 
 function SectionBox({ title, icon, color = "gray", children }) {
   const c = {
-    gray:{ border:"border-slate-300", header:"bg-slate-700" },
-    blue:{ border:"border-blue-300", header:"bg-blue-600" },
-    green:{ border:"border-emerald-300", header:"bg-emerald-600" },
-    amber:{ border:"border-amber-300", header:"bg-amber-500" },
-    red:{ border:"border-red-300", header:"bg-red-600" },
-    purple:{ border:"border-violet-300", header:"bg-violet-600" },
-    teal:{ border:"border-teal-300", header:"bg-teal-600" },
-    orange:{ border:"border-orange-300", header:"bg-orange-600" }
+    gray:{ border:"border-slate-200", header:"bg-slate-100 text-slate-700" },
+    blue:{ border:"border-blue-200", header:"bg-blue-50 text-blue-800" },
+    green:{ border:"border-emerald-200", header:"bg-emerald-50 text-emerald-800" },
+    amber:{ border:"border-amber-200", header:"bg-amber-50 text-amber-800" },
+    red:{ border:"border-red-200", header:"bg-red-50 text-red-800" },
+    purple:{ border:"border-violet-200", header:"bg-violet-50 text-violet-800" },
+    teal:{ border:"border-teal-200", header:"bg-teal-50 text-teal-800" },
+    orange:{ border:"border-orange-200", header:"bg-orange-50 text-orange-800" }
   };
   const theme = c[color] || c.gray;
   return (
     <section className={`bg-white border ${theme.border} rounded-lg overflow-hidden shadow-sm`}>
-      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase text-white`}>{icon} {tr(title)}</div>
+      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase border-b ${theme.border}`}>{icon} {tr(title)}</div>
       <div className="p-4 space-y-3">{children}</div>
     </section>
   );
@@ -795,10 +817,12 @@ function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [slowLoading, setSlowLoading] = useState(false);
 
   const login = async () => {
     if (!username || !password) return setError("Enter username and password");
-    setLoading(true); setError("");
+    setLoading(true); setSlowLoading(false); setError("");
+    const slowTimer = window.setTimeout(() => setSlowLoading(true), 4000);
     try {
       const res = await fetch(`${API}/login`, {
         method: "POST",
@@ -834,6 +858,8 @@ function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
     } catch {
       setError("Server error, please try again");
     }
+    window.clearTimeout(slowTimer);
+    setSlowLoading(false);
     setLoading(false);
   };
 
@@ -853,6 +879,7 @@ function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
           <button onClick={login} disabled={loading} className="w-full bg-amber-500 text-white py-3 rounded-lg font-black text-base hover:bg-amber-600 shadow-sm disabled:opacity-60">
             {tr(loading ? "Signing in..." : "Sign In", language)}
           </button>
+          {slowLoading && <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-500"><span className="w-3.5 h-3.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />Server is starting. This can take a few seconds.</div>}
         </div>
         <div className="mt-6 pt-4 border-t border-gray-100 text-center">
           <div className="text-[11px] font-bold text-gray-500">{POWERED_BY}</div>
@@ -1161,10 +1188,10 @@ function MasterData() {
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1">
                 <div className="font-black text-gray-900">{item.name}</div>
-                {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,item.size&&`${item.size} inch`,item.thickness&&`${item.thickness} inch thick`].filter(Boolean).join(" / ")}</div>}
+                {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,withUnit(item.size,"inch"),item.thickness&&`${withUnit(item.thickness,"inch")} thick`].filter(Boolean).join(" / ")}</div>}
                 {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}/sqft`}</div>}
                 {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
-                {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,item.size&&`${item.size} inch`].filter(Boolean).join(" / ")}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,withUnit(item.size,"inch")].filter(Boolean).join(" / ")}</div>}
                 {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.boxCount>0&&` / 1 box = ${fmt(item.boxCount)} pcs`} {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
                 {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
                 {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
@@ -4850,7 +4877,7 @@ function Stock({ stock, setStock, user }) {
     const cleanName = prefix && rawName.toLowerCase().startsWith(prefix.toLowerCase()) ? rawName.slice(prefix.length).trim() : rawName;
     const sizeKey = s.productType === "hollowbrick" ? String(s.size || "").trim().toLowerCase() : "";
     const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${sizeKey}|${String(s.unit || "").trim().toLowerCase()}`;
-    const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${s.size} inch` : (cleanName || s.name);
+    const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${withUnit(s.size,"inch")}` : (cleanName || s.name);
     if (!acc[key]) acc[key] = { ...s, name: displayName, _editName:s.name, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
     acc[key].quantity += +(s.quantity) || 0;
     acc[key].sqftPerPiece = s.productType === "hollowbrick" ? 0 : (acc[key].sqftPerPiece || +(s.sqftPerPiece || 0));
@@ -5249,7 +5276,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
     const details = isOther(printSale)
       ? [printSale.category, printSale.color, printSale.size].filter(Boolean).join(" / ")
-      : [printSale.shape, printSale.color, printSale.size ? `${printSale.size} inch` : "", printSale.thickness ? `${printSale.thickness} inch thick` : ""].filter(Boolean).join(" / ");
+      : [printSale.shape, printSale.color, withUnit(printSale.size,"inch"), printSale.thickness ? `${withUnit(printSale.thickness,"inch")} thick` : ""].filter(Boolean).join(" / ");
     const countOnly = isHollow(printSale) || (isOther(printSale) && !hasSqftSale(printSale));
     const saleSqft = countOnly ? 0 : saleSqftOf(printSale);
     const itemAmount = tax.taxable;
@@ -5261,8 +5288,8 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       printSale.category ? `Category: ${printSale.category}` : "",
       printSale.shape ? `Shape: ${printSale.shape}` : "",
       printSale.color ? `Color: ${printSale.color}` : "",
-      printSale.size ? `Size/No.: ${isOther(printSale) ? printSale.size : `${printSale.size} inch`}` : "",
-      printSale.thickness && !isOther(printSale) ? `Thickness: ${printSale.thickness} inch` : "",
+      printSale.size ? `Size/No.: ${isOther(printSale) ? printSale.size : withUnit(printSale.size,"inch")}` : "",
+      printSale.thickness && !isOther(printSale) ? `Thickness: ${withUnit(printSale.thickness,"inch")}` : "",
       printSale.sqftPerPiece && !countOnly ? `1 piece = ${fmt(printSale.sqftPerPiece)} sqft` : "",
       printSale.unit ? `Unit: ${printSale.unit}` : ""
     ].filter(Boolean).join("<br>");
@@ -5570,7 +5597,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="font-black text-gray-900">{s.product}</div>
-                {s.interlockDetails && <div className="text-xs text-amber-600">{s.interlockDetails}</div>}
+                {s.interlockDetails && <div className="text-xs text-amber-600">{cleanDisplayUnits(s.interlockDetails)}</div>}
                 <div className="text-xs text-gray-400 mt-0.5">📅 {s.date}{s.customer ? ` · 👤 ${s.customer}` : ""}</div>
                 {s.mobileNumber && <div className="text-xs text-gray-500">📱 {s.mobileNumber}</div>}
                 <div className="text-sm text-gray-600">{saleQtyText(s)} x {CURRENCY}{s.price}{isHollow(s) ? "" : ""}</div>
@@ -5584,13 +5611,13 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {s.mobileNumber && (
-                <button onClick={() => openLedger(s.mobileNumber)} className="text-xs text-amber-600 font-bold hover:underline">View Customer Ledger</button>
+                <button onClick={() => openLedger(s.mobileNumber)} className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 font-bold hover:bg-slate-50 inline-flex items-center gap-1.5"><BookOpen size={14}/>Customer Ledger</button>
               )}
-              <button onClick={() => openPrintBill(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Print Bill</button>
+              <button onClick={() => openPrintBill(s)} className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 inline-flex items-center gap-1.5"><Printer size={14}/>Print Bill</button>
               {isAdminLike(user.role) && (
                 <>
-                  <button onClick={() => openEditSale(s)} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Edit</button>
-                  <button onClick={() => deleteSale(s)} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>
+                  <button onClick={() => openEditSale(s)} className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-blue-700 hover:bg-blue-50 inline-flex items-center justify-center" title="Edit sale" aria-label="Edit sale"><Pencil size={15}/></button>
+                  <button onClick={() => deleteSale(s)} className="h-9 w-9 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center justify-center" title="Delete sale" aria-label="Delete sale"><Trash2 size={15}/></button>
                 </>
               )}
             </div>
@@ -8786,17 +8813,18 @@ function CashFlowHub({ user, setPage }) {
 
 function AdminControlHub({ setPage }) {
   const tiles = [
-    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:"⚙️", color:"border-amber-600 bg-amber-500 hover:bg-amber-600" },
-    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:"📱", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
-    { id:"users", title:"Users", sub:"Create and manage application users", icon:"👥", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
-    { id:"salarymanagement", title:"Salary Management", sub:"Set monthly salary, incentive and absent days", icon:"💼", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
-    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:"🔎", color:"border-red-700 bg-red-600 hover:bg-red-700" },
+    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, tone:"amber" },
+    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:Smartphone, tone:"blue" },
+    { id:"users", title:"Users", sub:"Create and manage application users", icon:UsersRound, tone:"teal" },
+    { id:"salarymanagement", title:"Salary Management", sub:"Set monthly salary, incentive and absent days", icon:WalletCards, tone:"violet" },
+    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:FileSearch, tone:"red" },
   ];
+  const tones = { amber:"border-amber-200 text-amber-700 bg-amber-50", blue:"border-blue-200 text-blue-700 bg-blue-50", teal:"border-teal-200 text-teal-700 bg-teal-50", violet:"border-violet-200 text-violet-700 bg-violet-50", red:"border-red-200 text-red-700 bg-red-50" };
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[112px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tones[tile.tone]}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}
       </div>
     </div>
   );
@@ -8804,16 +8832,16 @@ function AdminControlHub({ setPage }) {
 
 function ReportsHub({ setPage }) {
   const tiles = [
-    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:"🏗️", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
-    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:"👷", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
-    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:"🚚", color:"border-orange-600 bg-orange-500 hover:bg-orange-600" },
-    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:"📋", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
+    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:Building2, accent:"text-blue-700 bg-blue-50 border-blue-200" },
+    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:HardHat, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:Truck, accent:"text-orange-700 bg-orange-50 border-orange-200" },
+    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:ClipboardList, accent:"text-violet-700 bg-violet-50 border-violet-200" },
   ];
   return (
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Reports</h2><div className="text-xs text-gray-400">Open detailed operational reports</div></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[132px] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center mb-3 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></button>)}
       </div>
     </div>
   );
@@ -9224,29 +9252,35 @@ function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
 }
 
 function OfficeHub({ setPage }) {
-  const tiles = [
-    { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:"🏗️", color:"border-sky-700 bg-sky-600 hover:bg-sky-700" },
-    { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:"CW", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
-    { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock to sites and record worker charges", icon:"LU", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
-    { id:"salaryhub", title:"Salary", sub:"Production, driver and site worker pending payments", icon:"💳", color:"border-pink-700 bg-pink-600 hover:bg-pink-700" },
-    { id:"cashflowhub", title:"Cash Flow Records", sub:"Daily cash, company expenses, purchases and cash records", icon:"💵", color:"border-green-700 bg-green-600 hover:bg-green-700" },
-    { id:"cashtransactions", title:"Cash Transactions", sub:"Receive site cash or transact with drivers, supervisors and admins", icon:"CT", color:"border-indigo-700 bg-indigo-600 hover:bg-indigo-700" },
-    { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
-    { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:"✅", color:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700" },
-    { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:"📦", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
-    { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:"💰", color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700" },
-    { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:"🛒", color:"border-amber-600 bg-amber-500 hover:bg-amber-600" },
-    { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:"🏪", color:"border-orange-700 bg-orange-600 hover:bg-orange-700" },
-    { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:"🧱", color:"border-red-700 bg-red-600 hover:bg-red-700" },
-    { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:"🧾", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
-    { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:"🏭", color:"border-slate-700 bg-slate-600 hover:bg-slate-700" },
+  const groups = [
+    { title:"Site Operations", items:[
+      { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-sky-50 border-sky-200" },
+      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+      { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-violet-50 border-violet-200" },
+    ]},
+    { title:"Sales & Inventory", items:[
+      { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:ReceiptIndianRupee, accent:"text-cyan-700 bg-cyan-50 border-cyan-200" },
+      { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:FileText, accent:"text-violet-700 bg-violet-50 border-violet-200" },
+      { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:Package, accent:"text-blue-700 bg-blue-50 border-blue-200" },
+    ]},
+    { title:"Purchasing & Production", items:[
+      { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:ShoppingCart, accent:"text-amber-700 bg-amber-50 border-amber-200" },
+      { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:Store, accent:"text-orange-700 bg-orange-50 border-orange-200" },
+      { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:Blocks, accent:"text-red-700 bg-red-50 border-red-200" },
+      { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:Factory, accent:"text-slate-700 bg-slate-100 border-slate-200" },
+    ]},
+    { title:"People & Finance", items:[
+      { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:UserRoundPlus, accent:"text-teal-700 bg-teal-50 border-teal-200" },
+      { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:CalendarCheck, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+      { id:"salaryhub", title:"Salary", sub:"View and settle pending worker payments", icon:WalletCards, accent:"text-pink-700 bg-pink-50 border-pink-200" },
+      { id:"cashflowhub", title:"Cash Flow Records", sub:"Review daily cash and company records", icon:Landmark, accent:"text-green-700 bg-green-50 border-green-200" },
+      { id:"cashtransactions", title:"Cash Transactions", sub:"Receive and transfer cash between accounts", icon:ArrowLeftRight, accent:"text-indigo-700 bg-indigo-50 border-indigo-200" },
+    ]},
   ];
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden aspect-square sm:aspect-[4/3] min-h-[130px] rounded-lg border p-4 text-center flex flex-col items-center justify-center gap-2 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-32 h-32 object-contain opacity-[0.12] drop-shadow-lg pointer-events-none" /><span className="relative z-[1] w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-3xl" aria-hidden="true">{tile.icon}</span><span className="relative z-[1] font-black text-white">{tile.title}</span><span className="relative z-[1] text-xs text-white/85">{tile.sub}</span></button>)}
-      </div>
+      {groups.map(group=><section key={group.title} className="space-y-2"><h3 className="text-xs font-black uppercase text-slate-500 border-b border-slate-200 pb-2">{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[104px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
     </div>
   );
 }
@@ -9517,6 +9551,7 @@ export default function App() {
   const [successToast, setSuccessToast] = useState("");
   const [page, setPage] = useState("dashboard");
   const pageHistory = useRef([]);
+  const mainScrollRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stock, setStock] = useState([]);
   const [raw, setRaw] = useState([]);
@@ -9600,6 +9635,11 @@ export default function App() {
     });
     setSidebarOpen(false);
   };
+
+  useEffect(() => {
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [page]);
 
   if (publicQuotationToken) return <PublicQuotationPage token={publicQuotationToken} />;
 
@@ -9747,21 +9787,21 @@ export default function App() {
           <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-3">
             <div className={`w-9 h-9 rounded-full ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
             <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</div></div>
-            <button onClick={logout} className="text-stone-500 hover:text-red-400 text-xs font-bold" title={tr("Logout", language)}>⏻</button>
+            <button onClick={logout} className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-red-400" title={tr("Logout", language)} aria-label={tr("Logout", language)}><LogOut size={16}/></button>
           </div>
         </div>
       </aside>
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
-          <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden text-gray-600 text-xl">☰</button>
-          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title={tr("Back", language)} aria-label={tr("Back", language)}><span className="text-base" aria-hidden="true">←</span><span className="hidden sm:inline">{tr("Back", language)}</span></button>}
-          <h1 className="font-black text-slate-950 flex-1 text-base">{currentPageMeta.icon} {tr(currentPageMeta.label, language)}</h1>
+          <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden h-9 w-9 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100" title="Open menu" aria-label="Open menu"><Menu size={20}/></button>
+          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title={tr("Back", language)} aria-label={tr("Back", language)}><ArrowLeft size={16}/><span className="hidden sm:inline">{tr("Back", language)}</span></button>}
+          <div className="flex-1 min-w-0"><div className="text-[10px] font-bold uppercase text-slate-400">Workspace</div><h1 className="font-black text-slate-950 text-sm truncate">{tr(currentPageMeta.label, language)}</h1></div>
           <LanguageSelector value={language} onChange={changeLanguage} compact />
           <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
             {currentUser.avatar} <span className="capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</span>
           </div>
         </header>
-        <main className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]"><LocalizedContent language={language}>{renderPage()}</LocalizedContent></div></main>
+        <main ref={mainScrollRef} className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]"><LocalizedContent language={language}>{renderPage()}</LocalizedContent></div></main>
       </div>
     </div>
   );
