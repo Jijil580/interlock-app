@@ -5984,6 +5984,7 @@ function AdminSiteReport({ user }) {
   const [filterTo, setFilterTo] = useState("");
   const [selectedDate, setSelectedDate] = useState(null);
   const [editReport, setEditReport] = useState(null);
+  const [editDayReports, setEditDayReports] = useState([]);
 
   useEffect(()=>{
     Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
@@ -6012,16 +6013,36 @@ function AdminSiteReport({ user }) {
 
   const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
 
+  useEffect(()=>{
+    if (!editReport?._id) return;
+    setEditDayReports(rows=>rows.map(row=>row._id===editReport._id?editReport:row));
+  },[editReport]);
+
+  const openDayReportEditor = (report, reports) => {
+    const clone = row=>({...row,workerEntries:(row.workerEntries||[]).map(item=>({...item})),payments:(row.payments||[]).map(item=>({...item}))});
+    const dayRows = reports.filter(row=>row.date===report.date).map(clone);
+    setEditDayReports(dayRows);
+    setEditReport(dayRows.find(row=>row._id===report._id)||clone(report));
+  };
+
   const saveReportEdit = async () => {
     if (!editReport?._id) return;
-    const audit = requestAuditReason("edit", "site report entry", user);
+    const audit = requestAuditReason("edit", "day's site report entries", user);
     if (!audit) return;
-    const updated = await api("PUT", `/dailyreport/${editReport._id}`, { ...editReport, ...audit, addedBy:editReport.addedBy || user.name });
-    if (updated?._id) {
-      setDailyReports(rows=>rows.map(row=>row._id===updated._id?updated:row));
+    const rowsToSave = editDayReports.map(row=>row._id===editReport._id?editReport:row);
+    const updatedRows = [];
+    for (const row of rowsToSave) {
+      const updated = await api("PUT", `/dailyreport/${row._id}`, { ...row, ...audit, addedBy:row.addedBy || user.name });
+      if (!updated?._id) return window.alert(updated?.message||"Unable to update this report entry");
+      updatedRows.push(updated);
+    }
+    if (updatedRows.length) {
+      const updatedById = new Map(updatedRows.map(row=>[row._id,row]));
+      setDailyReports(rows=>rows.map(row=>updatedById.get(row._id)||row));
       setEditReport(null);
+      setEditDayReports([]);
       api("GET","/sitework").then(rows=>setSiteWorks(Array.isArray(rows)?rows:[]));
-    } else if (updated?.message) window.alert(updated.message);
+    }
   };
 
   const deleteReportEntry = async (report) => {
@@ -6130,7 +6151,7 @@ function AdminSiteReport({ user }) {
         )}
 
         <SectionBox title={`Submitted Report Entries (${sr.length})`} icon="RP" color="purple">
-          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900">{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>setEditReport({...report,workerEntries:(report.workerEntries||[]).map(row=>({...row})),payments:(report.payments||[]).map(row=>({...row}))})} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
+          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900">{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>openDayReportEditor(report,sr)} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit Day</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
         </SectionBox>
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
@@ -6211,10 +6232,15 @@ function AdminSiteReport({ user }) {
         )}
         {editReport&&<Modal title="Edit Site Report Entry" onClose={()=>setEditReport(null)} wide>
           <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1">
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <div className="text-xs font-black text-violet-800 mb-2">All entries submitted on {editReport.date} ({editDayReports.length})</div>
+              <div className="flex flex-wrap gap-2">{editDayReports.map((row,index)=><button key={row._id} type="button" onClick={()=>setEditReport(row)} className={`px-3 py-2 rounded-lg border text-xs font-black ${row._id===editReport._id?"bg-violet-600 border-violet-700 text-white":"bg-white border-violet-200 text-violet-700"}`}>Entry {index+1}: {(row.entrySection||row.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</button>)}</div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input label="Date" type="date" value={editReport.date||""} onChange={e=>setEditReport({...editReport,date:e.target.value})}/>
               <Input label="Site" value={editReport.siteName||selectedSite.customerName||""} readOnly/>
               <Select label="Report Section" value={editReport.entrySection||"site"} options={[{value:"site",label:"Site"},{value:"workers",label:"Workers"},{value:"expenses",label:"Expenses"},{value:"office",label:"Office"}]} onChange={e=>setEditReport({...editReport,entrySection:e.target.value})}/>
+              <Select label="Site Status" value={editReport.siteStatus||selectedStatus} options={["pending","running","completed"]} onChange={e=>setEditReport({...editReport,siteStatus:e.target.value})}/>
               <Input label="Submitted By" value={editReport.addedBy||""} readOnly/>
             </div>
             <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-3">
@@ -6227,19 +6253,24 @@ function AdminSiteReport({ user }) {
                 <Input label="Materials Unloaded" value={editReport.materialsUnloaded||""} onChange={e=>setEditReport({...editReport,materialsUnloaded:e.target.value})}/>
                 <Input label="Material Quantity" value={editReport.materialQty||""} onChange={e=>setEditReport({...editReport,materialQty:e.target.value})}/>
                 <Input label="Supplier" value={editReport.supplierName||""} onChange={e=>setEditReport({...editReport,supplierName:e.target.value})}/>
+                <Input label="Material Remarks" value={editReport.materialRemarks||""} onChange={e=>setEditReport({...editReport,materialRemarks:e.target.value})}/>
                 <Input label="Extra Work" value={editReport.extraWorkDesc||""} onChange={e=>setEditReport({...editReport,extraWorkDesc:e.target.value})}/>
+                <Input label="Extra Work Quantity" value={editReport.extraWorkQty||""} onChange={e=>setEditReport({...editReport,extraWorkQty:e.target.value})}/>
                 <Input label={`Extra Work Cost (${CURRENCY})`} type="number" value={editReport.extraWorkCost||""} onChange={e=>setEditReport({...editReport,extraWorkCost:e.target.value})}/>
+                <Input label="Extra Work Remarks" value={editReport.extraWorkRemarks||""} onChange={e=>setEditReport({...editReport,extraWorkRemarks:e.target.value})}/>
               </div>
               <Textarea label="Day Notes" value={editReport.dayNotes||""} onChange={e=>setEditReport({...editReport,dayNotes:e.target.value})}/>
-              <Textarea label="Complaints / Action Taken" value={[editReport.complaints,editReport.actionTaken].filter(Boolean).join(" | ")} onChange={e=>setEditReport({...editReport,complaints:e.target.value})}/>
+              <Textarea label="Complaints" value={editReport.complaints||""} onChange={e=>setEditReport({...editReport,complaints:e.target.value})}/>
+              <Textarea label="Action Taken" value={editReport.actionTaken||""} onChange={e=>setEditReport({...editReport,actionTaken:e.target.value})}/>
             </div>
             {(editReport.workerEntries||[]).map((worker,index)=><div key={`worker-${index}`} className="rounded-xl border border-teal-100 bg-teal-50/50 p-3"><div className="font-black text-sm text-teal-800 mb-2">Worker Entry {index+1}</div><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Input label="Worker" value={worker.workerName||""} onChange={e=>updateEditWorker(index,"workerName",e.target.value)}/><Input label="Category" value={worker.workCategory||""} onChange={e=>updateEditWorker(index,"workCategory",e.target.value)}/><Input label="Area" type="number" value={worker.workArea||""} onChange={e=>updateEditWorker(index,"workArea",e.target.value)}/><Input label="Unit" value={worker.unit||""} onChange={e=>updateEditWorker(index,"unit",e.target.value)}/><Input label="Rate" type="number" value={worker.rate||""} onChange={e=>updateEditWorker(index,"rate",e.target.value)}/><Input label="Payment Given" type="number" value={worker.paymentGiven||""} onChange={e=>updateEditWorker(index,"paymentGiven",e.target.value)}/><Input label="Loading Charge" type="number" value={worker.loadingCharge||""} onChange={e=>updateEditWorker(index,"loadingCharge",e.target.value)}/><Input label="Unloading Charge" type="number" value={worker.unloadingCharge||""} onChange={e=>updateEditWorker(index,"unloadingCharge",e.target.value)}/><Input label="Payment Mode" value={worker.paymentMode||""} onChange={e=>updateEditWorker(index,"paymentMode",e.target.value)}/>
+              <Input label="Worker" value={worker.workerName||""} onChange={e=>updateEditWorker(index,"workerName",e.target.value)}/><Select label="Attendance" value={worker.attendance||"present"} options={["present","absent"]} onChange={e=>updateEditWorker(index,"attendance",e.target.value)}/><Input label="Duty Area" value={worker.dutyArea||""} onChange={e=>updateEditWorker(index,"dutyArea",e.target.value)}/><Input label="Work Done" value={worker.workDone||""} onChange={e=>updateEditWorker(index,"workDone",e.target.value)}/><Input label="Category" value={worker.workCategory||""} onChange={e=>updateEditWorker(index,"workCategory",e.target.value)}/><Input label="Area" type="number" value={worker.workArea||""} onChange={e=>updateEditWorker(index,"workArea",e.target.value)}/><Input label="Unit" value={worker.unit||""} onChange={e=>updateEditWorker(index,"unit",e.target.value)}/><Input label="Rate" type="number" value={worker.rate||""} onChange={e=>updateEditWorker(index,"rate",e.target.value)}/><Input label="Earned / Salary" type="number" value={worker.amountEarned||worker.salary||""} onChange={e=>updateEditWorker(index,"amountEarned",e.target.value)}/><Input label="Payment Given" type="number" value={worker.paymentGiven||""} onChange={e=>updateEditWorker(index,"paymentGiven",e.target.value)}/><Input label="Loading Charge" type="number" value={worker.loadingCharge||""} onChange={e=>updateEditWorker(index,"loadingCharge",e.target.value)}/><Input label="Unloading Charge" type="number" value={worker.unloadingCharge||""} onChange={e=>updateEditWorker(index,"unloadingCharge",e.target.value)}/><Input label="Payment Mode" value={worker.paymentMode||""} onChange={e=>updateEditWorker(index,"paymentMode",e.target.value)}/><Input label="Remarks" value={worker.remarks||""} onChange={e=>updateEditWorker(index,"remarks",e.target.value)}/>
             </div></div>)}
             {(editReport.payments||[]).map((payment,index)=><div key={`payment-${index}`} className="rounded-xl border border-amber-100 bg-amber-50/50 p-3"><div className="font-black text-sm text-amber-800 mb-2">Payment / Expense {index+1}</div><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Input label="Type" value={payment.type||""} onChange={e=>updateEditPayment(index,"type",e.target.value)}/><Input label="Amount" type="number" value={payment.amount||""} onChange={e=>updateEditPayment(index,"amount",e.target.value)}/><Input label="Mode" value={payment.mode||""} onChange={e=>updateEditPayment(index,"mode",e.target.value)}/><Input label="Paid To" value={payment.paidTo||""} onChange={e=>updateEditPayment(index,"paidTo",e.target.value)}/><Input label="Received From" value={payment.receivedFrom||""} onChange={e=>updateEditPayment(index,"receivedFrom",e.target.value)}/><Input label="Remarks" value={payment.remarks||""} onChange={e=>updateEditPayment(index,"remarks",e.target.value)}/>
+              <Input label="Type" value={payment.type||""} onChange={e=>updateEditPayment(index,"type",e.target.value)}/><Input label="Amount" type="number" value={payment.amount||""} onChange={e=>updateEditPayment(index,"amount",e.target.value)}/><Input label="Pending" type="number" value={payment.pending||""} onChange={e=>updateEditPayment(index,"pending",e.target.value)}/><Input label="Mode" value={payment.mode||""} onChange={e=>updateEditPayment(index,"mode",e.target.value)}/><Input label="Worker / Paid To" value={payment.workerName||payment.paidTo||""} onChange={e=>updateEditPayment(index,payment.workerName!==undefined?"workerName":"paidTo",e.target.value)}/><Input label="Received From" value={payment.receivedFrom||""} onChange={e=>updateEditPayment(index,"receivedFrom",e.target.value)}/><Input label="Material" value={payment.materialName||""} onChange={e=>updateEditPayment(index,"materialName",e.target.value)}/><Input label="Supplier" value={payment.supplierName||""} onChange={e=>updateEditPayment(index,"supplierName",e.target.value)}/><Input label="Equipment" value={payment.equipmentName||""} onChange={e=>updateEditPayment(index,"equipmentName",e.target.value)}/><Input label="Expense Name" value={payment.expenseName||""} onChange={e=>updateEditPayment(index,"expenseName",e.target.value)}/><Input label="Remarks" value={payment.remarks||""} onChange={e=>updateEditPayment(index,"remarks",e.target.value)}/>
             </div></div>)}
-            <div className="flex justify-end gap-2 sticky bottom-0 bg-white pt-3 border-t"><button type="button" className="px-4 py-2 rounded-lg border font-bold text-sm" onClick={()=>setEditReport(null)}>Cancel</button><button type="button" className="px-4 py-2 rounded-lg bg-blue-600 text-white font-black text-sm" onClick={saveReportEdit}>Save Changes</button></div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="font-black text-sm text-slate-700 mb-2">Legacy / Additional Details</div><div className="grid grid-cols-1 sm:grid-cols-2 gap-2"><Input label="New Site" value={editReport.newSite||""} onChange={e=>setEditReport({...editReport,newSite:e.target.value})}/><Input label="Running Site" value={editReport.runningSite||""} onChange={e=>setEditReport({...editReport,runningSite:e.target.value})}/><Textarea label="Worker Details" value={editReport.workersDetail||""} onChange={e=>setEditReport({...editReport,workersDetail:e.target.value})}/><Textarea label="Material Supply" value={editReport.materialSupply||""} onChange={e=>setEditReport({...editReport,materialSupply:e.target.value})}/><Textarea label="Legacy Day Note" value={editReport.dayNote||""} onChange={e=>setEditReport({...editReport,dayNote:e.target.value})}/><Textarea label="Legacy Expenses" value={editReport.expenses||""} onChange={e=>setEditReport({...editReport,expenses:e.target.value})}/></div></div>
+            <div className="flex justify-end gap-2 sticky bottom-0 bg-white pt-3 border-t"><button type="button" className="px-4 py-2 rounded-lg border font-bold text-sm" onClick={()=>{setEditReport(null);setEditDayReports([]);}}>Cancel</button><button type="button" className="px-4 py-2 rounded-lg bg-blue-600 text-white font-black text-sm" onClick={saveReportEdit}>Save All Day Entries</button></div>
           </div>
         </Modal>}
       </div>
