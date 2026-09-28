@@ -927,7 +927,7 @@ function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
 function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
   const isAdmin = user.role === "admin";
   const fixedToday = today();
-  const [view, setView] = useState("daily");
+  const [view, setView] = useState("all");
   const [selectedDate, setSelectedDate] = useState(fixedToday);
   const [selectedMonth, setSelectedMonth] = useState(fixedToday.slice(0, 7));
   const [fromDate, setFromDate] = useState(fixedToday);
@@ -991,7 +991,7 @@ function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard solid label="Cash In" value={money(total.cashIn)} icon="IN" color="green" sub={`Sales ${money(total.salesReceived)} | Site ${money(total.siteReceived)}`} />
-            <StatCard solid label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchasePaid)} | Worker ${money(total.productionPaid)}`} />
+            <StatCard solid label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchaseCashOut)} | Payroll ${money(total.payrollPaid)} | Other ${money(total.otherExpensePaid)}`} />
             <StatCard solid label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
             <StatCard solid label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
             <StatCard solid label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
