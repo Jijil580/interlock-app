@@ -68,7 +68,7 @@ const qtyWithSqft = (row, masters = [], unitFallback = "piece") => {
   return `${fmt(itemCount(row))} ${unit}${sqft ? ` / ${fmt(sqft)} sqft` : ""}`;
 };
 const directSitePaymentRows = (site, dailyReceived = 0) => {
-  const payments = (site?.payments || []).map(p => ({ ...p, date: p.date || site?.startDate, source: "Site Work" }));
+  const payments = (site?.payments || []).map((p, paymentIndex) => ({ ...p, paymentIndex, editable:true, date: String(p.date || site?.startDate || "").slice(0,10), source: "Site Work" }));
   const cashTransactions = (site?.cashTransactionPayments || []).map(p => ({ ...p, source:p.source || "Cash Transactions" }));
   const storedLegacy = +(site?.legacyReceived) || 0;
   const legacyPayments = storedLegacy > 0 ? [{ date:site?.startDate || today(), amount:storedLegacy, mode:site?.paymentMode || "Cash", source:"Initial Site Work" }] : [];
@@ -467,7 +467,7 @@ function Select({ label, options, ...props }) {
   );
 }
 
-function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
+function SiteWorkDetailsPanel({ site, dailyReceived = 0, onEditPayment, onDeletePayment }) {
   if (!site) return null;
   const baseCost = (+(site.workSize || 0)) * (+(site.ratePerUnit || 0));
   const siteCost = +(site.totalCost || site.totalAmount || 0);
@@ -503,7 +503,7 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0 }) {
         <div className="flex justify-between"><span>Total Received</span><span className="font-bold text-blue-700">{CURRENCY}{fmt(received)}</span></div>
         <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(pending)}</span></div>
       </div>
-      {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={i} className="flex justify-between border-t py-1"><span>{p.date||"-"} ? {p.mode||p.paymentMode||"-"}</span><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span></div>)}</div>}
+      {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={`${p.source}-${p.paymentIndex??i}`} className="flex items-center justify-between gap-3 border-t py-2"><div><span className="font-bold">{p.date||"-"} · {p.mode||p.paymentMode||"-"}</span><div className="text-gray-400">{p.source}</div></div><div className="flex items-center gap-2"><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span>{p.editable&&onEditPayment&&<button type="button" title="Edit payment" onClick={()=>onEditPayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700"><Pencil size={14}/></button>}{p.editable&&onDeletePayment&&<button type="button" title="Delete payment" onClick={()=>onDeletePayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700"><Trash2 size={14}/></button>}</div></div>)}</div>}
       {dispatchOperations.length>0&&<div className="mt-3 border-t pt-3 space-y-2">
         <div className="font-black text-sm text-violet-700">Material Loading & Unloading Ledger</div>
         <div className="grid grid-cols-2 gap-2 text-xs text-center"><div className="rounded-lg bg-blue-50 border border-blue-200 p-2"><div className="font-black text-blue-700">{fmt(loadedPieces)} pieces</div><div className="text-gray-500">Loaded</div></div><div className="rounded-lg bg-green-50 border border-green-200 p-2"><div className="font-black text-green-700">{fmt(unloadedPieces)} pieces</div><div className="text-gray-500">Unloaded</div></div></div>
@@ -2365,8 +2365,12 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   const normalizeDailyReport = (report = {}) => ({
     ...emptyForm,
     ...report,
-    payments: (report.payments || []).filter(p => p.type !== "Worker Payment"),
-    workerEntries: report.workerEntries || []
+    date: String(report.date || report.createdAt || today()).slice(0,10),
+    siteName: report.siteName || report.runningSite || report.newSite || "",
+    dayNotes: report.dayNotes || report.dayNote || "",
+    materialsUnloaded: report.materialsUnloaded || report.materialSupply || "",
+    payments: (report.payments || []).filter(p => p.type !== "Worker Payment").map(p=>({...p})),
+    workerEntries: (report.workerEntries || []).map(row=>({...row}))
   });
 
   const openDailyReportView = (report) => {
@@ -5991,6 +5995,7 @@ function AdminSiteReport({ user, onEditReport }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [editReport, setEditReport] = useState(null);
   const [editDayReports, setEditDayReports] = useState([]);
+  const [editSitePayment, setEditSitePayment] = useState(null);
 
   useEffect(()=>{
     Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
@@ -6061,6 +6066,30 @@ function AdminSiteReport({ user, onEditReport }) {
     } else if (deleted?.message) window.alert(deleted.message);
   };
 
+  const applyUpdatedSite = (updated) => {
+    if (!updated?._id) return false;
+    setSiteWorks(rows=>rows.map(row=>row._id===updated._id?{...row,...updated}:row));
+    setSelectedSite(site=>site?._id===updated._id?{...site,...updated}:site);
+    return true;
+  };
+
+  const saveSitePayment = async () => {
+    if (!selectedSite?._id || editSitePayment?.paymentIndex===undefined) return;
+    const audit = requestAuditReason("edit", "site payment", user);
+    if (!audit) return;
+    const updated = await api("PUT", `/sitework/${selectedSite._id}/payments/${editSitePayment.paymentIndex}`, { ...editSitePayment, ...audit });
+    if (applyUpdatedSite(updated)) setEditSitePayment(null);
+    else window.alert(updated?.message || "Unable to update this site payment");
+  };
+
+  const deleteSitePayment = async (payment) => {
+    if (!selectedSite?._id || payment?.paymentIndex===undefined) return;
+    const audit = requestAuditReason("delete", "site payment", user);
+    if (!audit) return;
+    const updated = await api("DELETE", `/sitework/${selectedSite._id}/payments/${payment.paymentIndex}`, audit);
+    if (!applyUpdatedSite(updated)) window.alert(updated?.message || "Unable to delete this site payment");
+  };
+
   const updateEditWorker = (index, field, value) => setEditReport(report=>({ ...report, workerEntries:(report.workerEntries||[]).map((row,i)=>i===index?{...row,[field]:value}:row) }));
   const updateEditPayment = (index, field, value) => setEditReport(report=>({ ...report, payments:(report.payments||[]).map((row,i)=>i===index?{...row,[field]:value}:row) }));
 
@@ -6119,7 +6148,17 @@ function AdminSiteReport({ user, onEditReport }) {
           <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
           {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
         </div>
-        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailySiteReceived} />
+        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailySiteReceived} onEditPayment={setEditSitePayment} onDeletePayment={deleteSitePayment} />
+        {editSitePayment&&<Modal title="Edit Site Payment" onClose={()=>setEditSitePayment(null)}>
+          <div className="space-y-3 p-4 sm:p-5">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">This is a Site Work receipt. Saving it recalculates received and pending totals across reports and the dashboard.</div>
+            <Input label="Payment Date" type="date" value={String(editSitePayment.date||"").slice(0,10)} onChange={e=>setEditSitePayment(p=>({...p,date:e.target.value}))}/>
+            <Input label={`Amount (${CURRENCY})`} type="number" min="0" value={editSitePayment.amount??""} onChange={e=>setEditSitePayment(p=>({...p,amount:e.target.value}))}/>
+            <Select label="Payment Mode" value={editSitePayment.mode||editSitePayment.paymentMode||"Cash"} options={["Cash","UPI","Bank Transfer","Cheque","Other"]} onChange={e=>setEditSitePayment(p=>({...p,mode:e.target.value}))}/>
+            <Input label="Remarks" value={editSitePayment.remarks||""} onChange={e=>setEditSitePayment(p=>({...p,remarks:e.target.value}))} placeholder="Optional"/>
+            <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={()=>setEditSitePayment(null)} className="h-10 px-4 rounded-lg border border-slate-300 font-bold text-sm">Cancel</button><button type="button" onClick={saveSitePayment} className="h-10 px-4 rounded-lg bg-blue-600 text-white font-black text-sm">Save Payment</button></div>
+          </div>
+        </Modal>}
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Amount Received</div></div>
