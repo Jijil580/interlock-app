@@ -2065,7 +2065,7 @@ function WorkerReport({ user }) {
 // ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
 
 // ─── DAILY REPORT (Supervisor) ────────────────────────────────────────────────
-function DailyReport({ user }) {
+function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   const [siteWorks, setSiteWorks] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [reports, setReports] = useState([]);
@@ -2392,6 +2392,12 @@ function DailyReport({ user }) {
     setEntrySection(editSection);
     setAddModal(true);
   };
+
+  useEffect(()=>{
+    if (!initialEditReport?._id) return;
+    editDailyReport(initialEditReport, initialEditReport.entrySection || initialEditReport.entrySections?.[0] || "");
+    onInitialEditOpened?.();
+  },[initialEditReport?._id]);
 
   const deleteDailyReport = async (report) => {
     if (!report?._id) return;
@@ -5974,7 +5980,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
 }
 
 // ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
-function AdminSiteReport({ user }) {
+function AdminSiteReport({ user, onEditReport }) {
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6151,7 +6157,7 @@ function AdminSiteReport({ user }) {
         )}
 
         <SectionBox title={`Submitted Report Entries (${sr.length})`} icon="RP" color="purple">
-          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900">{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>openDayReportEditor(report,sr)} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit Day</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
+          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900">{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>onEditReport?.(report)} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit in Original Form</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
         </SectionBox>
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
@@ -9742,6 +9748,7 @@ export default function App() {
   const [sales, setSales] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
+  const [pendingDailyReportEdit, setPendingDailyReportEdit] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(()=>{
@@ -9894,11 +9901,11 @@ export default function App() {
       case "supervisorsitereport": return <SupervisorSiteReport user={currentUser} />;
       case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
       case "workerreport": return <WorkerReport user={currentUser} />;
-      case "dailyreport": return <DailyReport user={currentUser} />;
+      case "dailyreport": return <DailyReport user={currentUser} initialEditReport={pendingDailyReportEdit} onInitialEditOpened={()=>setPendingDailyReportEdit(null)} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
-      case "sitereport": return <AdminSiteReport user={currentUser} />;
+      case "sitereport": return <AdminSiteReport user={currentUser} onEditReport={report=>{setPendingDailyReportEdit(report);navigateTo("dailyreport");}} />;
       case "workerreport2": return <AdminWorkerReport user={currentUser} />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
