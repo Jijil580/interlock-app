@@ -5994,11 +5994,21 @@ function AdminSiteReport({ user }) {
   },[]);
 
   const getSiteReports = (site) => {
-    let r = dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+    const siteName = String(site.customerName||"").trim().toLowerCase();
+    let r = dailyReports.filter(report=>{
+      if (String(report.siteId||"")===String(site._id||"")) return true;
+      return [report.siteName,report.runningSite,report.newSite]
+        .some(name=>String(name||"").trim().toLowerCase()===siteName);
+    });
     if (filterFrom) r = r.filter(x=>x.date>=filterFrom);
     if (filterTo) r = r.filter(x=>x.date<=filterTo);
     return r.sort((a,b)=>b.date.localeCompare(a.date));
   };
+
+  const siteDisplayStatus = (site, reports = getSiteReports(site)) =>
+    site.status==="completed" || site.completionApprovalStatus==="approved" || reports.some(report=>report.siteStatus==="completed")
+      ? "completed"
+      : (site.status||"running");
 
   const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
 
@@ -6031,6 +6041,7 @@ function AdminSiteReport({ user }) {
 
   if (selectedSite) {
     const sr = getSiteReports(selectedSite);
+    const selectedStatus = siteDisplayStatus(selectedSite, sr);
     const groupedReports = mergeDailyReportsByDate(sr);
     const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
     const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
@@ -6071,7 +6082,7 @@ function AdminSiteReport({ user }) {
         <div className="flex items-center justify-between">
           <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
           <div className="flex items-center gap-2">
-            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+            <Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge>
             {selectedSite.completionApprovalStatus&&<Badge color={selectedSite.completionApprovalStatus==="approved"?"green":selectedSite.completionApprovalStatus==="rejected"?"red":"blue"}>{selectedSite.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
           </div>
         </div>
@@ -6195,7 +6206,7 @@ function AdminSiteReport({ user }) {
             {allComplaints.length>0&&<SectionBox title="Complaints" icon="⚠️" color="red">{allComplaints.map((r,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{r.date} · {r.complaints}</div>{r.actionTaken&&<div className="text-gray-400">Action: {r.actionTaken}</div>}</div>)}</SectionBox>}
             <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
             {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted" />}
-            {groupedReports.map(r=><div key={r.date} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status||"running"}</Badge></div></div></div>)}
+            {groupedReports.map(r=><div key={r.date} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge></div></div></div>)}
           </div>
         )}
         {editReport&&<Modal title="Edit Site Report Entry" onClose={()=>setEditReport(null)} wide>
@@ -6244,8 +6255,8 @@ function AdminSiteReport({ user }) {
         <Input label="To Date" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center"><div className="font-black text-emerald-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-xs text-gray-400">Completed</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>siteDisplayStatus(s)!=="completed").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center"><div className="font-black text-emerald-700">{siteWorks.filter(s=>siteDisplayStatus(s)==="completed").length}</div><div className="text-xs text-gray-400">Completed</div></div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
         <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
       </div>
@@ -6253,12 +6264,13 @@ function AdminSiteReport({ user }) {
         {filteredSites.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
         {filteredSites.map(s=>{
           const sr=getSiteReports(s);
+          const displayStatus=siteDisplayStatus(s,sr);
           const received=dailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id).flatMap(r=>(r.payments||[]).filter(p=>p.type==="Client Payment Received")).reduce((a,p)=>a+(+(p.amount)||0),0);
           return(
             <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
               <div className="flex items-start justify-between">
                 <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div><div className="text-xs text-gray-400">📅 {s.startDate||"—"} · {sr.length} reports</div></div>
-                <div className="text-right"><Badge color={s.status==="completed"?"green":"amber"}>{s.status}</Badge><div className="text-xs text-green-600 font-bold mt-1">Received: {CURRENCY}{fmt(received)}</div><div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.pendingAmount||0))}</div></div>
+                <div className="text-right"><Badge color={displayStatus==="completed"?"green":"amber"}>{displayStatus}</Badge><div className="text-xs text-green-600 font-bold mt-1">Received: {CURRENCY}{fmt(received)}</div><div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="mt-2 text-xs font-black text-blue-700">Open & Manage Reports →</div></div>
               </div>
             </div>
           );

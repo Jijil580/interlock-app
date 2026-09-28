@@ -1,5 +1,5 @@
-const CACHE_NAME = 'pk-interlock-pwa-v2';
-const APP_SHELL = ['/', '/manifest.webmanifest'];
+const CACHE_NAME = 'pk-interlock-pwa-v3';
+const APP_SHELL = ['/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -26,12 +26,20 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/'))
+      fetch(request).then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
+        return response;
+      }).catch(() => caches.match('/'))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request))
+    fetch(request).then((response) => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+      return response;
+    }).catch(() => caches.match(request))
   );
 });
