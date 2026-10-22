@@ -7,24 +7,25 @@ import {
   ArrowLeftRight
 } from "lucide-react";
 
-const API = "https://interlock-backend.onrender.com/api";
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "").replace(/\/api$/, "");
+const API = `${API_BASE}/api`;
 const COMPANY = {
-  companyName: "P. K. INTERLOCKS & HOLLOW BRICKS",
-  shortName: "PK Interlock",
-  logo: "/icons/interlock-logo.png",
-  address: "HAJ ROAD, VILAKKODE, IRITTY",
-  state: "Kerala",
-  stateCode: "32",
-  gstin: "32AESHA2414P1ZP",
-  phone1: "7034116685",
-  phone2: "9946956685",
-  invoiceTitle: "TAX INVOICE",
-  invoicePrefix: "INV",
-  signatureName: "P.K. Interlocks & Hollowbricks",
-  bankName: "",
-  bankAccount: "",
-  bankIfsc: "",
-  terms: "Certified that the particulars given above are true and correct.",
+  companyName: import.meta.env.VITE_COMPANY_LEGAL_NAME || "PK Interlock 2",
+  shortName: import.meta.env.VITE_COMPANY_SHORT_NAME || "PK Interlock 2",
+  logo: import.meta.env.VITE_COMPANY_LOGO || "/icons/interlock-logo.png",
+  address: import.meta.env.VITE_COMPANY_ADDRESS || "",
+  state: import.meta.env.VITE_COMPANY_STATE || "Kerala",
+  stateCode: import.meta.env.VITE_COMPANY_STATE_CODE || "32",
+  gstin: import.meta.env.VITE_COMPANY_GSTIN || "",
+  phone1: import.meta.env.VITE_COMPANY_PHONE1 || "",
+  phone2: import.meta.env.VITE_COMPANY_PHONE2 || "",
+  invoiceTitle: import.meta.env.VITE_COMPANY_INVOICE_TITLE || "TAX INVOICE",
+  invoicePrefix: import.meta.env.VITE_COMPANY_INVOICE_PREFIX || "INV",
+  signatureName: import.meta.env.VITE_COMPANY_SIGNATURE_NAME || import.meta.env.VITE_COMPANY_LEGAL_NAME || "PK Interlock 2",
+  bankName: import.meta.env.VITE_COMPANY_BANK_NAME || "",
+  bankAccount: import.meta.env.VITE_COMPANY_BANK_ACCOUNT || "",
+  bankIfsc: import.meta.env.VITE_COMPANY_BANK_IFSC || "",
+  terms: import.meta.env.VITE_COMPANY_TERMS || "Certified that the particulars given above are true and correct.",
 };
 const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
 const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
@@ -7573,7 +7574,7 @@ function PublicQuotationPage({ token }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    document.title = "Quotation | PK Interlock";
+    document.title = `Quotation | ${COMPANY.shortName}`;
     fetch(`${API}/public/quotations/${encodeURIComponent(token)}`, { cache:"no-store" }).then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Unable to open quotation");
