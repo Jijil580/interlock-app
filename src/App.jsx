@@ -5151,6 +5151,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [editSale, setEditSale] = useState(null);
   const [interlockTypes, setInterlockTypes] = useState([]);
   const [customerMaster, setCustomerMaster] = useState([]);
+  const [salesWorkers, setSalesWorkers] = useState([]);
   const [customerMode, setCustomerMode] = useState("existing");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [saveToMaster, setSaveToMaster] = useState(true);
@@ -5167,15 +5168,16 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [customerPayForm, setCustomerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash", workerCharges: [] };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([d, h, c]) => {
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers"), api("GET", "/workers")]).then(([d, h, c, w]) => {
       const interlocks = Array.isArray(d) ? d.map(x => ({ ...x, productType: "interlock" })) : [];
       const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
       setInterlockTypes([...interlocks, ...hollow]);
       setCustomerMaster(Array.isArray(c) ? c : []);
+      setSalesWorkers(Array.isArray(w) ? w.filter(x => !x.status || x.status === "Active") : []);
     });
   }, []);
 
@@ -5293,10 +5295,13 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     if (!mobile || mobile.length < 10) { setSaveError("Mobile number is required (10 digits)"); return; }
     if (!form.customer) { setSaveError("Customer name is required"); return; }
     if (!form.product) { setSaveError("Select a product"); return; }
+    const workerCharges = (form.workerCharges || []).filter(x => x.enabled).map(x => ({ operation: x.operation, workerId: x.workerId, rate: +(x.rate || 0) }));
+    if (workerCharges.some(x => !x.workerId || x.rate <= 0)) { setSaveError("Choose an employee and enter a charge per unit for each selected loading/unloading task"); return; }
     const total = calcTotal();
     const amountPaid = +(form.amountPaid || 0);
     const payload = {
       ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
+      workerCharges,
       taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: hasSqftSale() ? calcSqftQty() : 0, cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
       cgstAmount: calcCgst(), sgstAmount: calcSgst(),
       amountPaid, amountPending: Math.max(0, total - amountPaid),
@@ -5350,6 +5355,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       amountPaid: String(sale.amountPaid ?? ""),
       cgstPercent: String(sale.cgstPercent ?? ""),
       sgstPercent: String(sale.sgstPercent ?? ""),
+      workerCharges: (sale.workerCharges || []).map(x => ({ ...x, enabled: true, rate: String(x.rate ?? "") })),
     });
     setCustomerMode("new");
     setSelectedCustomerId("");
@@ -5847,6 +5853,29 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
                 <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
               </>}
               <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-3">
+              <div className="text-sm font-bold text-amber-900">Loading & Unloading Worker Earnings</div>
+              <div className="text-xs text-amber-800">Optional. Earnings are added to the selected workers' ledger and are not included on the sales bill.</div>
+              {[{ operation: "load", label: "Loading" }, { operation: "unload", label: "Unloading" }].map(task => {
+                const assignment = (form.workerCharges || []).find(x => x.operation === task.operation) || { operation: task.operation, enabled: false, workerId: "", rate: "" };
+                const earning = (+form.quantity || 0) * (+assignment.rate || 0);
+                return <div key={task.operation} className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr_auto] gap-2 items-end">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 pb-2"><input type="checkbox" checked={!!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: e.target.checked ? [...next, { ...assignment, enabled: true }] : next });
+                  }} />{task.label}</label>
+                  <Select label="Employee" value={assignment.workerId} options={[{ value: "", label: "Select employee" }, ...salesWorkers.map(w => ({ value: w._id, label: w.name }))]} disabled={!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: [...next, { ...assignment, workerId: e.target.value }] });
+                  }} />
+                  <Input label={`Charge per unit (${CURRENCY})`} type="number" min="0" step="any" value={assignment.rate} disabled={!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: [...next, { ...assignment, rate: e.target.value }] });
+                  }} placeholder="0" />
+                  <div className="pb-2 text-xs text-gray-600">Earning: <b>{CURRENCY}{fmt(earning)}</b></div>
+                </div>;
+              })}
             </div>
             <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
