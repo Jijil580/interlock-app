@@ -10004,7 +10004,8 @@ export default function App() {
       api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[])).catch(()=>{});
       return;
     }
-    setLoading(true);
+    // Let the dashboard summary load while shared page data is fetched in parallel.
+    setLoading(false);
     Promise.all([api("GET","/stock"),api("GET","/raw"),api("GET","/production"),api("GET","/sales"),api("GET","/users"),api("GET","/sitework")])
       .then(([s,r,p,sa,u,sw])=>{
         setStock(Array.isArray(s)?s:[]);
