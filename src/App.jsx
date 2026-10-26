@@ -9467,8 +9467,8 @@ function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
   const [loading,setLoading]=useState(true);
   const [filter,setFilter]=useState("pending");
   const [search,setSearch]=useState("");
-  const load=()=>api("GET","/sitework").then(rows=>{const list=Array.isArray(rows)?rows:[];setSites(list);setGlobalSiteWorks?.(list);}).finally(()=>setLoading(false));
-  useEffect(load,[]);
+  const load=()=>api("GET","/sitework").then(rows=>{const list=Array.isArray(rows)?rows:[];setSites(list);setGlobalSiteWorks?.(list);}).catch(()=>setSites([])).finally(()=>setLoading(false));
+  useEffect(()=>{load();},[]);
   const approvalOf=site=>site.completionApprovalStatus||(site.status==="completed"?"approved":"");
   const submitted=sites.filter(site=>approvalOf(site));
   const filtered=submitted.filter(site=>{
