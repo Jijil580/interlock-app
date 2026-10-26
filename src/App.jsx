@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  ArrowLeft, BarChart3, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
+  ArrowLeft, BarChart3, Bell, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
   HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings, ShieldCheck,
   ShoppingCart, Smartphone, Store, Truck, UserRoundPlus, UsersRound,
   WalletCards, LogOut, Printer, Pencil, Trash2, BookOpen,
@@ -85,6 +85,34 @@ const workerTypeOf = (w) => {
 const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "inactive";
 const isAdminLike = (role) => role === "admin" || role === "user";
 const effectiveRoleOf = (role) => role === "user" ? "admin" : role;
+
+const reportReadKey = (user) => `interlock-report-read:${user?._id || user?.username || user?.name || user?.role || "user"}`;
+function useReportReadState(user) {
+  const key = reportReadKey(user);
+  const [readIds, setReadIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(key) || "[]").map(String)); }
+    catch { return new Set(); }
+  });
+  const readIdsRef = useRef(readIds);
+  useEffect(() => {
+    let stored = new Set();
+    try { stored = new Set(JSON.parse(localStorage.getItem(key) || "[]").map(String)); } catch {}
+    readIdsRef.current = stored;
+    setReadIds(stored);
+  }, [key]);
+  const markReportsRead = (ids) => {
+    const next = new Set(readIdsRef.current);
+    (Array.isArray(ids) ? ids : [ids]).filter(Boolean).forEach(id => next.add(String(id)));
+    readIdsRef.current = next;
+    setReadIds(next);
+    try { localStorage.setItem(key, JSON.stringify([...next])); } catch {}
+  };
+  return { isUnread: id => Boolean(id) && !readIds.has(String(id)), markReportsRead };
+}
+
+function UnreadReportIcon({ unread }) {
+  return unread ? <span title="Unread report" aria-label="Unread report" className="inline-flex items-center text-amber-600"><Bell size={15} strokeWidth={2.5} /></span> : null;
+}
 
 const LANGUAGE_OPTIONS = [
   { value:"en", label:"English" },
@@ -1818,6 +1846,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
 
 // ─── SITE REPORT (WorkerReport) ───────────────────────────────────────────────
 function WorkerReport({ user }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
   const [reports, setReports] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2019,13 +2048,13 @@ function WorkerReport({ user }) {
           return (
             <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 cursor-pointer" onClick={()=>setViewModal(r)}>
-                  <div className="flex items-center gap-2 flex-wrap"><span className="font-black text-gray-900">{r.workerName}</span><Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>{allSigned&&<Badge color="green">✅ Signed</Badge>}</div>
+                <div className="flex-1 cursor-pointer" onClick={()=>{markReportsRead(r._id);setViewModal(r);}}>
+                  <div className="flex items-center gap-2 flex-wrap"><UnreadReportIcon unread={isUnread(r._id)}/><span className="font-black text-gray-900">{r.workerName}</span><Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>{allSigned&&<Badge color="green">✅ Signed</Badge>}</div>
                   <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
                   <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}{r.materialType?` · 🧱 ${r.materialType}`:""}</div>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>setEditModal({...r})} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
+                  {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>{markReportsRead(r._id);setEditModal({...r});}} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
                   <button onClick={()=>downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
                 </div>
               </div>
@@ -2093,6 +2122,7 @@ function WorkerReport({ user }) {
 
 // ─── DAILY REPORT (Supervisor) ────────────────────────────────────────────────
 function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
   const [siteWorks, setSiteWorks] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [reports, setReports] = useState([]);
@@ -2404,6 +2434,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const openDailyReportView = (report) => {
     if (!report?._id) return;
+    markReportsRead(report._id);
     setSelectedSite(null);
     setAddModal(false);
     setViewModal(normalizeDailyReport(report));
@@ -2411,6 +2442,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const editDailyReport = (report, forcedSection = "") => {
     if (!report?._id) return;
+    markReportsRead(report._id);
     setSelectedSite(null);
     setViewModal(null);
     setForm(normalizeDailyReport(report));
@@ -2446,7 +2478,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const reportActions = (report, section = "") => (
     <div className="grid grid-cols-3 gap-1 w-full sm:w-auto shrink-0">
-      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap">View Report</button>
+      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap inline-flex items-center justify-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>View Report</button>
       <button type="button" onClick={()=>editDailyReport(report,section)} className="bg-blue-100 text-blue-800 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Edit Report</button>
       <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-100 text-red-700 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Delete Report</button>
     </div>
@@ -2490,7 +2522,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
             <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
             {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalPayments||0)} paid</option>)}
           </select>
@@ -2612,9 +2644,9 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
             <div className="text-xs font-black text-gray-500 uppercase">All Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
             {groupedReports.length===0&&<EmptyState icon="Report" text="No reports yet" />}
             {groupedReports.map(r=>(
-              <div key={r.date} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
+              <div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
-                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
+                  <div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
                   <div className="text-right"><div className="font-black text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recv</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
                 </div>
               </div>
@@ -6046,6 +6078,7 @@ function Users({ currentUser, allUsers, setAllUsers }) {
 
 // ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
 function AdminSiteReport({ user, onEditReport }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6091,6 +6124,7 @@ function AdminSiteReport({ user, onEditReport }) {
   },[editReport]);
 
   const openDayReportEditor = (report, reports) => {
+    markReportsRead(reports.filter(row=>row.date===report.date).map(row=>row._id));
     const clone = row=>({...row,workerEntries:(row.workerEntries||[]).map(item=>({...item})),payments:(row.payments||[]).map(item=>({...item}))});
     const dayRows = reports.filter(row=>row.date===report.date).map(clone);
     setEditDayReports(dayRows);
@@ -6257,12 +6291,12 @@ function AdminSiteReport({ user, onEditReport }) {
         )}
 
         <SectionBox title={`Submitted Report Entries (${sr.length})`} icon="RP" color="purple">
-          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900">{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>onEditReport?.(report)} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit in Original Form</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
+          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900 inline-flex items-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>{markReportsRead(report._id);onEditReport?.(report);}} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit in Original Form</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
         </SectionBox>
 
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
             <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
             {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
@@ -6333,7 +6367,7 @@ function AdminSiteReport({ user, onEditReport }) {
             {allComplaints.length>0&&<SectionBox title="Complaints" icon="⚠️" color="red">{allComplaints.map((r,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{r.date} · {r.complaints}</div>{r.actionTaken&&<div className="text-gray-400">Action: {r.actionTaken}</div>}</div>)}</SectionBox>}
             <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
             {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted" />}
-            {groupedReports.map(r=><div key={r.date} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2"><div className="flex items-center justify-between"><div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge></div></div></div>)}
+            {groupedReports.map(r=><div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer"><div className="flex items-center justify-between"><div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge></div></div></div>)}
           </div>
         )}
         {editReport&&<Modal title="Edit Site Report Entry" onClose={()=>setEditReport(null)} wide>
@@ -6406,7 +6440,7 @@ function AdminSiteReport({ user, onEditReport }) {
           return(
             <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
               <div className="flex items-start justify-between">
-                <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div><div className="text-xs text-gray-400">📅 {s.startDate||"—"} · {sr.length} reports</div></div>
+                <div><div className="font-black text-gray-900 inline-flex items-center gap-1">{s.customerName}<UnreadReportIcon unread={sr.some(report=>isUnread(report._id))}/></div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div><div className="text-xs text-gray-400">📅 {s.startDate||"—"} · {sr.length} reports</div></div>
                 <div className="text-right"><Badge color={displayStatus==="completed"?"green":"amber"}>{displayStatus}</Badge><div className="text-xs text-green-600 font-bold mt-1">Received: {CURRENCY}{fmt(received)}</div><div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="mt-2 text-xs font-black text-blue-700">Open & Manage Reports →</div></div>
               </div>
             </div>
@@ -7106,6 +7140,7 @@ function AdminWorkerReport({ user, initialTab }) {
 
 // ─── SUPERVISOR SITE REPORT ───────────────────────────────────────────────────
 function SupervisorSiteReport({ user }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -7195,7 +7230,7 @@ function SupervisorSiteReport({ user }) {
         </div>
         <div className="bg-white rounded-2xl border shadow-sm p-3">
           <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
-          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
             <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
             {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
           </select>
@@ -7244,9 +7279,9 @@ function SupervisorSiteReport({ user }) {
             <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
             {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted yet" />}
             {groupedReports.map(r=>(
-              <div key={r.date} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
+              <div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
                 <div className="flex items-center justify-between">
-                  <div><div className="font-black">📅 {r.date}</div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
+                  <div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
                   <div className="text-right">
                     {+(r.totalReceived||0)>0&&<div className="font-black text-blue-700 text-xs">+{CURRENCY}{fmt(r.totalReceived)}</div>}
                     <div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div>
@@ -7282,7 +7317,7 @@ function SupervisorSiteReport({ user }) {
             <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-black text-gray-900">{s.customerName}</div>
+                  <div className="font-black text-gray-900 inline-flex items-center gap-1">{s.customerName}<UnreadReportIcon unread={sr.some(row=>isUnread(row._id))}/></div>
                   <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div>
                   <div className="text-xs text-gray-400">{sr.length} daily reports</div>
                 </div>
@@ -9107,9 +9142,10 @@ function CashFlowHub({ user, setPage }) {
   );
 }
 
-function AdminControlHub({ setPage }) {
+function AdminControlHub({ setPage, pendingApprovalCount = 0 }) {
   const tiles = [
     { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, tone:"amber" },
+    { id:"completedworks", title:"Completed Works", sub:"Review site completion requests awaiting Admin approval", icon:CalendarCheck, tone:"teal", badge:pendingApprovalCount },
     { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:Smartphone, tone:"blue" },
     { id:"users", title:"Users", sub:"Create and manage application users", icon:UsersRound, tone:"teal" },
     { id:"salarymanagement", title:"Salary Management", sub:"Set monthly salary, incentive and absent days", icon:WalletCards, tone:"violet" },
@@ -9120,7 +9156,7 @@ function AdminControlHub({ setPage }) {
     <div className="space-y-4">
       <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[112px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tones[tile.tone]}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[112px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tones[tile.tone]}`}><UiIcon icon={tile.icon}/></span><span className="flex-1"><span className="flex items-center gap-1 font-black text-slate-900">{tile.title}{tile.badge>0&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800"><Bell size={12}/>{tile.badge}</span>}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}
       </div>
     </div>
   );
@@ -9538,7 +9574,7 @@ function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
     <div className="grid grid-cols-3 gap-2">{[{id:"pending",label:"Pending",count:counts.pending,on:"bg-amber-600 text-white border-amber-700",off:"bg-amber-50 border-amber-200 text-amber-700"},{id:"approved",label:"Completed",count:counts.approved,on:"bg-green-600 text-white border-green-700",off:"bg-green-50 border-green-200 text-green-700"},{id:"rejected",label:"Rejected",count:counts.rejected,on:"bg-red-600 text-white border-red-700",off:"bg-red-50 border-red-200 text-red-700"}].map(tab=><button key={tab.id} onClick={()=>setFilter(tab.id)} className={`rounded-lg border p-3 text-center ${filter===tab.id?tab.on:tab.off}`}><div className="text-xl font-black">{tab.count}</div><div className="text-xs font-bold">{tab.label}</div></button>)}</div>
     {filtered.length===0?<EmptyState icon="CW" text="No completed-work requests found"/>:<div className="grid md:grid-cols-2 gap-3">{filtered.map(site=>{const approval=approvalOf(site);const canUserApprove=user.role==="user"&&approval==="pending_user";const canAdminApprove=user.role==="admin"&&approval==="pending_admin";const canReject=(user.role==="user"&&approval==="pending_user")||(user.role==="admin"&&['pending_user','pending_admin'].includes(approval));return <div key={site._id} className="bg-white border rounded-lg shadow-sm p-4 space-y-3">
       <div className="flex justify-between gap-3"><div><div className="font-black text-lg">{site.customerName||"Unnamed Site"}</div><div className="text-xs text-gray-500">Number: {site.phone||"-"}</div><div className="text-xs text-gray-500">{site.siteLocation||"-"}</div></div><Badge color={approval==="approved"?"green":approval==="rejected"?"red":"blue"}>{approval==="pending_user"?"User Approval Pending":approval==="pending_admin"?"Admin Approval Pending":approval==="approved"?"Completed":"Rejected"}</Badge></div>
-      <div className="grid grid-cols-2 gap-2 text-xs"><div className="bg-emerald-50 rounded-lg p-2"><div className="text-gray-500">Total Amount</div><div className="text-lg font-black text-emerald-700">{CURRENCY}{fmt(+(site.totalCost||site.totalAmount)||0)}</div></div><div className="bg-blue-50 rounded-lg p-2"><div className="text-gray-500">Submitted By</div><div className="font-black text-blue-700">{site.completionSubmittedBy||site.addedBy||"-"}</div><div className="text-gray-400">{site.completionSubmittedAt?new Date(site.completionSubmittedAt).toLocaleString("en-IN"):"Legacy completed site"}</div></div></div>
+       <div className="grid grid-cols-2 gap-2 text-xs"><div className="bg-emerald-50 rounded-lg p-2"><div className="text-gray-500">Total Amount</div><div className="text-lg font-black text-emerald-700">{CURRENCY}{fmt(+(site.totalCost||site.totalAmount)||0)}</div></div><div className="bg-blue-50 rounded-lg p-2"><div className="text-gray-500">Submitted for approval by</div><div className="font-black text-blue-700">{site.completionSubmittedBy||site.addedBy||"-"}</div><div className="text-gray-400">{site.completionSubmittedAt?new Date(site.completionSubmittedAt).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"short"}):"Submission time unavailable"}</div></div></div>
       {site.userApprovedBy&&<div className="text-xs text-blue-700">User approved by <b>{site.userApprovedBy}</b>{site.userApprovedAt?` on ${new Date(site.userApprovedAt).toLocaleString("en-IN")}`:""}</div>}
       {site.adminApprovedBy&&<div className="text-xs text-green-700">Final approval by <b>{site.adminApprovedBy}</b>{site.adminApprovedAt?` on ${new Date(site.adminApprovedAt).toLocaleString("en-IN")}`:""}</div>}
       {approval==="rejected"&&<div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2"><b>Rejected by {site.completionRejectedBy||site.completionRejectedRole||"reviewer"}:</b> {site.completionRejectionReason||"-"}</div>}
@@ -9547,11 +9583,14 @@ function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
   </div>;
 }
 
-function OfficeHub({ setPage }) {
+function OfficeHub({ setPage, pendingApprovalCount = 0 }) {
   const groups = [
+    { title:"Company Setup", heading:"bg-violet-100 text-violet-800 border-violet-200", items:[
+      { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
+    ]},
     { title:"Site Operations", heading:"bg-sky-100 text-sky-800 border-sky-200", items:[
       { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-white/70 border-sky-200", surface:"bg-sky-50/80 border-sky-200 hover:border-sky-300" },
-      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
+      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, badge:pendingApprovalCount, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
       { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
     ]},
     { title:"Sales & Inventory", heading:"bg-cyan-100 text-cyan-800 border-cyan-200", items:[
@@ -9576,7 +9615,7 @@ function OfficeHub({ setPage }) {
   return (
     <div className="space-y-6">
       <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
-      {groups.map(group=><section key={group.title} className="space-y-3"><h3 className={`inline-flex rounded-md border px-3 py-2 text-xs font-black uppercase ${group.heading}`}>{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`group min-h-[104px] rounded-lg border p-4 text-left flex items-start gap-3 shadow-sm hover:shadow-md transition-all ${tile.surface}`}><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-600 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
+      {groups.map(group=><section key={group.title} className="space-y-3"><h3 className={`inline-flex rounded-md border px-3 py-2 text-xs font-black uppercase ${group.heading}`}>{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`group min-h-[104px] rounded-lg border p-4 text-left flex items-start gap-3 shadow-sm hover:shadow-md transition-all ${tile.surface}`}><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span className="flex-1"><span className="flex items-center gap-1 font-black text-slate-900">{tile.title}{tile.badge>0&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800"><Bell size={12}/>{tile.badge}</span>}</span><span className="block text-xs leading-relaxed text-slate-600 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
     </div>
   );
 }
@@ -10031,6 +10070,8 @@ export default function App() {
     !nestedNavPages.includes(item.id) &&
     (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
   );
+  const approvalStage = currentUser.role === "user" ? "pending_user" : currentUser.role === "admin" ? "pending_admin" : "";
+  const pendingApprovalCount = approvalStage ? siteWorks.filter(site=>site.completionApprovalStatus===approvalStage).length : 0;
   const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
   const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
   const pageMeta = {
@@ -10099,9 +10140,9 @@ export default function App() {
       case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="admin" />:null;
       case "loadingoperations": return isAdminLike(currentUser.role)?<LoadingOperations user={currentUser}/>:null;
       case "completedworks": return isAdminLike(currentUser.role)?<CompletedSiteApprovals user={currentUser} setGlobalSiteWorks={setSiteWorks}/>:null;
-      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} />:null;
+      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} pendingApprovalCount={pendingApprovalCount} />:null;
       case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
-      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} />:null;
+      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} pendingApprovalCount={pendingApprovalCount} />:null;
       case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={navigateTo} />:null;
       case "salaryadvance": return isAdminLike(currentUser.role)?<AdvanceSalary user={currentUser} />:null;
       case "salaryproduction": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Production Worker" />:null;
@@ -10142,7 +10183,7 @@ export default function App() {
           {nav.map(item=>(
             <button key={item.id} onClick={()=>navigateTo(item.id)}
               className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-sm font-bold transition-all ${page===item.id?"bg-blue-500 text-white shadow-md":"text-blue-100/75 hover:bg-white/10 hover:text-white"}`}>
-              <span className="w-5 h-5 flex items-center justify-center shrink-0"><UiIcon icon={NAV_ICON_MAP[item.id] || item.icon} size={18}/></span>{tr(item.label, language)}
+              <span className="w-5 h-5 flex items-center justify-center shrink-0"><UiIcon icon={NAV_ICON_MAP[item.id] || item.icon} size={18}/></span><span className="flex-1 text-left">{tr(item.label, language)}</span>{pendingApprovalCount>0&&(item.id==="officehub"||item.id==="admincontrol")&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-black text-slate-950"><Bell size={12}/>{pendingApprovalCount}</span>}
             </button>
           ))}
         </nav>
