@@ -9801,6 +9801,9 @@ export default function App() {
   const [successToast, setSuccessToast] = useState("");
   const [page, setPage] = useState("dashboard");
   const pageHistory = useRef([]);
+  const pageRef = useRef("dashboard");
+  const appHistoryInitialized = useRef(false);
+  const appUrl = useRef("");
   const mainScrollRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [stock, setStock] = useState([]);
@@ -9826,6 +9829,55 @@ export default function App() {
   useEffect(()=>{
     document.documentElement.lang = language;
   },[language]);
+
+  useEffect(()=>{
+    pageRef.current = page;
+  },[page]);
+
+  useEffect(()=>{
+    if (!currentUser || currentUser._pendingDevice) return;
+    const roleHome = currentUser.role === "driver" ? "driversubmit" : currentUser.role === "supervisor" ? "sitework" : currentUser.role === "user" ? "officehub" : "dashboard";
+    const url = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    appUrl.current = url;
+    if (!appHistoryInitialized.current) {
+      const rootState = { __appNavigation:true, appPage:roleHome, appStack:[] };
+      pageHistory.current = [];
+      window.history.replaceState({...rootState, appRoot:"base"}, "", url);
+      window.history.pushState({...rootState, appRoot:"sentinel"}, "", url);
+      appHistoryInitialized.current = true;
+    }
+
+    const onPopState = (event) => {
+      const state = event.state;
+      if (!appHistoryInitialized.current) return;
+      if (state?.__appNavigation && state.appRoot === "base") {
+        if (window.confirm("Do you want to exit the app?")) {
+          appHistoryInitialized.current = false;
+          pageHistory.current = [];
+          window.history.back();
+        } else {
+          window.history.pushState({...state, appRoot:"sentinel"}, "", appUrl.current || url);
+        }
+        return;
+      }
+      if (state?.__appNavigation) {
+        pageHistory.current = Array.isArray(state.appStack) ? state.appStack : [];
+        pageRef.current = state.appPage || roleHome;
+        setPage(pageRef.current);
+        setSidebarOpen(false);
+        return;
+      }
+      if (window.confirm("Do you want to exit the app?")) {
+        appHistoryInitialized.current = false;
+        pageHistory.current = [];
+      } else {
+        window.history.pushState({__appNavigation:true, appRoot:"sentinel", appPage:roleHome, appStack:[]}, "", appUrl.current || url);
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  },[currentUser]);
 
   useEffect(() => {
     const show = (event) => {
@@ -9862,6 +9914,8 @@ export default function App() {
   const logout = () => {
     setCurrentUser(null);
     pageHistory.current = [];
+    appHistoryInitialized.current = false;
+    pageRef.current = "dashboard";
     setPage("dashboard");
     setSidebarOpen(false);
     setLoading(false);
@@ -9879,11 +9933,15 @@ export default function App() {
 
   const navigateTo = (nextPage) => {
     if (!nextPage) return;
-    setPage(currentPage => {
-      if (currentPage === nextPage) return currentPage;
-      pageHistory.current.push(currentPage);
-      return nextPage;
-    });
+    const currentPage = pageRef.current;
+    if (currentPage === nextPage) return;
+    const nextStack = [...pageHistory.current, currentPage];
+    pageHistory.current = nextStack;
+    pageRef.current = nextPage;
+    if (appHistoryInitialized.current) {
+      window.history.pushState({__appNavigation:true, appPage:nextPage, appStack:nextStack}, "", appUrl.current || window.location.href);
+    }
+    setPage(nextPage);
     setSidebarOpen(false);
   };
 
@@ -9939,9 +9997,21 @@ export default function App() {
   const navPage = nav.find(item=>item.id===page) || (NAV[effectiveRoleOf(currentUser.role)]||[]).find(item=>item.id===page) || Object.values(NAV).flat().find(item=>item.id===page);
   const currentPageMeta = pageMeta[page] || navPage || {label:"Management",icon:""};
   const goBack = () => {
+    const state = window.history.state;
+    if (appHistoryInitialized.current && state?.__appNavigation && state.appRoot !== "base") {
+      window.history.back();
+      setSidebarOpen(false);
+      return;
+    }
     let previous = pageHistory.current.pop();
     while (previous === page && pageHistory.current.length) previous = pageHistory.current.pop();
-    setPage(previous || roleHome);
+    if (previous) {
+      pageRef.current = previous;
+      setPage(previous);
+    } else if (window.confirm("Do you want to exit the app?")) {
+      appHistoryInitialized.current = false;
+      window.history.back();
+    }
     setSidebarOpen(false);
   };
 
