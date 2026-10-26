@@ -5134,7 +5134,7 @@ function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, cus
 }
 
 // ─── SALES ────────────────────────────────────────────────────────────────────
-function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY, setPage }) {
+function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [modal, setModal] = useState(false);
   const [editSale, setEditSale] = useState(null);
   const [interlockTypes, setInterlockTypes] = useState([]);
@@ -5526,11 +5526,6 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY, set
         <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
         <button onClick={() => { setEditSale(null); setForm(emptyForm); setSelectedCustomerId(""); setModal(true); setSaveError(""); setCustomerPreview(null); setCustomerMode("existing"); setSaveToMaster(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
       </div>
-      {isAdminLike(user.role)&&<button type="button" onClick={()=>setPage?.("loadingoperations")} className="group w-full min-h-[104px] rounded-lg border border-violet-200 bg-violet-50/80 p-4 text-left flex items-start gap-3 shadow-sm hover:border-violet-300 hover:shadow-md transition-all">
-        <span className="w-11 h-11 rounded-lg border border-violet-200 bg-white/70 text-violet-700 flex items-center justify-center shrink-0"><UiIcon icon={Truck}/></span>
-        <span><span className="block font-black text-slate-900">Loading &amp; Unloading</span><span className="block text-xs leading-relaxed text-slate-600 mt-1">Open the existing sale-linked dispatch and worker charge ledger</span></span>
-      </button>}
-
       {/* Quick Search */}
       <div className="bg-white rounded-2xl border shadow-sm p-3">
         <div className="flex gap-2">
@@ -9969,7 +9964,7 @@ export default function App() {
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
-      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} setPage={navigateTo} />;
+      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
       case "quotations": return <QuotationModule user={currentUser} />;
       case "driversubmit": return <DriverSubmitReport user={currentUser} />;
       case "driverreports": return <DriverReports user={currentUser} />;
