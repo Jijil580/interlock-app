@@ -472,8 +472,8 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0, onEditPayment, onDelete
   const baseCost = (+(site.workSize || 0)) * (+(site.ratePerUnit || 0));
   const siteCost = +(site.totalCost || site.totalAmount || 0);
   const directPayments = directSitePaymentRows(site, dailyReceived);
-  const received = dailyReceived + directPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
-  const pending = Math.max(0, siteCost - received);
+  const received = Math.max(dailyReceived + directPayments.reduce((a,p)=>a+(+(p.amount)||0),0), +(site.totalReceived)||0);
+  const pending = Math.max(0, siteCost - received - (+(site.completionDiscount) || 0));
   const dispatchOperations = site.dispatchOperations || [];
   const loadedPieces = dispatchOperations.filter(row=>row.operation==="load").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
   const unloadedPieces = dispatchOperations.filter(row=>row.operation==="unload").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
@@ -501,6 +501,7 @@ function SiteWorkDetailsPanel({ site, dailyReceived = 0, onEditPayment, onDelete
         {+(site.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(site.laborCost)}</span></div>}
         <div className="flex justify-between border-t pt-1"><span className="font-black">Total Site Cost</span><span className="font-black text-green-700">{CURRENCY}{fmt(siteCost)}</span></div>
         <div className="flex justify-between"><span>Total Received</span><span className="font-bold text-blue-700">{CURRENCY}{fmt(received)}</span></div>
+        {+(site.completionDiscount||0)>0&&<div className="flex justify-between"><span className="font-bold text-amber-700">Completion Discount</span><span className="font-bold text-amber-700">{CURRENCY}{fmt(site.completionDiscount)}</span></div>}
         <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(pending)}</span></div>
       </div>
       {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={`${p.source}-${p.paymentIndex??i}`} className="flex items-center justify-between gap-3 border-t py-2"><div><span className="font-bold">{p.date||"-"} · {p.mode||p.paymentMode||"-"}</span><div className="text-gray-400">{p.source}</div></div><div className="flex items-center gap-2"><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span>{p.editable&&onEditPayment&&<button type="button" title="Edit payment" onClick={()=>onEditPayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700"><Pencil size={14}/></button>}{p.editable&&onDeletePayment&&<button type="button" title="Delete payment" onClick={()=>onDeletePayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700"><Trash2 size={14}/></button>}</div></div>)}</div>}
@@ -1312,7 +1313,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     selectedWorkers:[], startDate:today(), endDate:"", status:"running",
     workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
     extraWork:[], extraMaterials:[],
-    materialCost:"", laborCost:"", totalCost:"",
+    materialCost:"", laborCost:"", totalCost:"", completionDiscount:0, completionDiscountNote:"",
     payments:[], totalReceived:0, pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
   };
 
@@ -1375,6 +1376,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       +(s.laborCost||0)>0?`Labour   : ${CURRENCY}${fmt(s.laborCost)}`:"",
       `TOTAL    : ${CURRENCY}${fmt(+(s.totalCost||s.totalAmount||0))}`,
       `Received : ${CURRENCY}${fmt(s.totalReceived||s.paidAmount||0)}`,
+      +(s.completionDiscount||0)>0?`Completion Discount: ${CURRENCY}${fmt(s.completionDiscount)}`:"",
       `PENDING  : ${CURRENCY}${fmt(s.pendingAmount||0)}`,
       "────────────────────────────────",
       `Payment  : ${s.paymentMode||"—"} | ${s.paymentStatus||"—"}`,
@@ -1503,6 +1505,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
                 {+(viewItem.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.laborCost)}</span></div>}
                 <div className="flex justify-between border-t pt-1 mt-1"><span className="font-black">TOTAL</span><span className="font-black text-green-700 text-lg">{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
                 <div className="flex justify-between"><span>Total Amount Received</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewItem.totalReceived||viewItem.paidAmount||0)}</span></div>
+                {+(viewItem.completionDiscount||0)>0&&<div className="flex justify-between text-amber-700"><span className="font-bold">Completion Discount</span><span className="font-bold">{CURRENCY}{fmt(viewItem.completionDiscount)}</span></div>}
                 <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
               </div>
             </SectionBox>
@@ -1532,14 +1535,18 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
   const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:""});
   const [payEntry, setPayEntry] = useState({date:today(), amount:"", mode:"Cash", remarks:""});
   const [saving, setSaving] = useState(false);
-  const receivedTotal = (items = f.payments || []) => items.reduce((a,p)=>a+(+(p.amount)||0),0);
-  const paymentStatusFor = (total, received) => Math.max(0,total-received)===0&&total>0 ? "paid" : received>0 ? "partial" : "pending";
+  const sitePaymentTotal = (items = f.payments || []) => items.reduce((a,p)=>a+(+(p.amount)||0),0);
+  const externalReceived = () => Math.max(0,(+(f.totalReceived)||0)-sitePaymentTotal());
+  const receivedTotal = (items = f.payments || []) => sitePaymentTotal(items)+externalReceived();
+  const completionDiscount = (site=f) => +(site.completionDiscount)||0;
+  const paymentStatusFor = (total, received, discount=completionDiscount()) => Math.max(0,total-received-discount)===0&&total>0 ? "paid" : received>0 ? "partial" : "pending";
 
   const updateCalc = (updates) => {
     const nf = {...f,...updates};
     const total = calcTotal(nf);
     const received = receivedTotal(nf.payments || []);
-    const pending = Math.max(0, total-received);
+    const discount = completionDiscount(nf);
+    const pending = Math.max(0, total-received-discount);
     setF({...nf, baseWorkCost:String(+(nf.workSize||0)*(+(nf.ratePerUnit||0))), totalCost:String(total), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(total, received)});
   };
 
@@ -1549,7 +1556,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const updated = [...(f.extraWork||[]), {...ewForm,total}];
     const totalCost = calcTotal({...f,extraWork:updated});
     const received = receivedTotal();
-    const pending = Math.max(0, totalCost-received);
+    const pending = Math.max(0, totalCost-received-completionDiscount());
     setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
     setEwForm({name:"",qty:"1",rate:""});
   };
@@ -1558,7 +1565,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const updated = f.extraWork.filter((_,j)=>j!==i);
     const totalCost = calcTotal({...f,extraWork:updated});
     const received = receivedTotal();
-    const pending = Math.max(0, totalCost-received);
+    const pending = Math.max(0, totalCost-received-completionDiscount());
     setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
   };
 
@@ -1568,7 +1575,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const updated = [...(f.extraMaterials||[]), {...emForm,total}];
     const totalCost = calcTotal({...f,extraMaterials:updated});
     const received = receivedTotal();
-    const pending = Math.max(0, totalCost-received);
+    const pending = Math.max(0, totalCost-received-completionDiscount());
     setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
     setEmForm({name:"",qty:"",unit:"nos",rate:""});
   };
@@ -1577,7 +1584,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const updated = f.extraMaterials.filter((_,j)=>j!==i);
     const totalCost = calcTotal({...f,extraMaterials:updated});
     const received = receivedTotal();
-    const pending = Math.max(0, totalCost-received);
+    const pending = Math.max(0, totalCost-received-completionDiscount());
     setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
   };
 
@@ -1586,13 +1593,16 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
     const payments = [...(f.payments||[]), {...payEntry, amount:+payEntry.amount, source:"Site Work"}];
     const total = calcTotal(f);
     const received = receivedTotal(payments);
-    setF({...f, payments, totalReceived:received, pendingAmount:String(Math.max(0,total-received)), paymentStatus:paymentStatusFor(total, received)});
+    setF({...f, payments, totalReceived:received, pendingAmount:String(Math.max(0,total-received-completionDiscount())), paymentStatus:paymentStatusFor(total, received)});
     setPayEntry({date:today(), amount:"", mode:"Cash", remarks:""});
   };
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(f);
+    const total = calcTotal(f);
+    const received = receivedTotal();
+    const discount = f.status === "completed" ? Math.min(Math.max(0,total-received),completionDiscount()) : 0;
+    await onSave({...f,completionDiscount:discount,pendingAmount:String(Math.max(0,total-received-discount)),paymentStatus:paymentStatusFor(total,received,discount)});
     setSaving(false);
   };
 
@@ -1769,6 +1779,18 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
             <Select label="Payment Mode" value={f.paymentMode||"Cash"} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setF({...f,paymentMode:e.target.value})} />
             <Select label="Payment Status" value={f.paymentStatus||"pending"} options={["pending","partial","paid"]} onChange={e=>setF({...f,paymentStatus:e.target.value})} />
           </div>
+          {f.status==="completed"&&<div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <div className="text-xs font-black text-amber-800">Waive remaining balance after completion</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label={`Completion Discount (${CURRENCY})`} type="number" min="0" max={Math.max(0,calcTotal()-receivedTotal())} value={f.completionDiscount||""} onChange={e=>{
+                const discount=Math.min(Math.max(0,calcTotal()-receivedTotal()),Math.max(0,+(e.target.value)||0));
+                const pending=Math.max(0,calcTotal()-receivedTotal()-discount);
+                setF({...f,completionDiscount:String(discount),pendingAmount:String(pending),paymentStatus:paymentStatusFor(calcTotal(),receivedTotal(),discount)});
+              }} placeholder="0" />
+              <Input label="Discount Note" value={f.completionDiscountNote||""} onChange={e=>setF({...f,completionDiscountNote:e.target.value})} placeholder="Reason / approval reference" />
+            </div>
+            <div className="text-xs text-amber-800">Pending after discount: <b>{CURRENCY}{fmt(Math.max(0,calcTotal()-receivedTotal()-completionDiscount()))}</b></div>
+          </div>}
         </SectionBox>
 
         <SectionBox title="Timeline & Status" icon="📅" color="gray">
