@@ -1305,6 +1305,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   const [workers, setWorkers] = useState([]);
   const [extraWorkTypes, setExtraWorkTypes] = useState([]);
   const [materialTypes, setMaterialTypes] = useState([]);
+  const [masterDataError, setMasterDataError] = useState("");
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -1323,9 +1324,24 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       setWorkers(Array.isArray(w)?w:[]);
       setExtraWorkTypes(Array.isArray(e)?e:[]);
       setMaterialTypes(Array.isArray(m)?m:[]);
+      setMasterDataError(Array.isArray(i)?"":"Unable to load Interlock Master Data. Check your connection and retry.");
       setLoading(false);
     });
   },[]);
+
+  const openNewSite = async () => {
+    setMasterDataError("");
+    setShowAdd(true);
+    const [types, workersList, extraTypes, materials] = await Promise.all([
+      api("GET", "/masterdata/interlock"), api("GET", "/workers"),
+      api("GET", "/masterdata/extrawork"), api("GET", "/masterdata/materials"),
+    ]);
+    setInterlockTypes(Array.isArray(types) ? types : []);
+    setWorkers(Array.isArray(workersList) ? workersList : []);
+    setExtraWorkTypes(Array.isArray(extraTypes) ? extraTypes : []);
+    setMaterialTypes(Array.isArray(materials) ? materials : []);
+    setMasterDataError(Array.isArray(types) ? "" : "Unable to load Interlock Master Data. Check your connection and retry.");
+  };
 
   const calcTotal = (f) => {
     const base = +(f.workSize||0) * +(f.ratePerUnit||0);
@@ -1431,7 +1447,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-black text-gray-900">🏗️ Create New Site Work</h2>
         {(isAdminLike(user.role)||user.role==="supervisor")&&(
-          <button onClick={()=>setShowAdd(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
+          <button onClick={openNewSite} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
         )}
       </div>
 
@@ -1488,7 +1504,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
         ))}
       </div>
 
-      {showAdd&&<SiteWorkForm title="New Site" initData={emptyForm} onSave={save} onClose={()=>setShowAdd(false)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} calcTotal={calcTotal} />}
+      {showAdd&&<SiteWorkForm title="New Site" initData={emptyForm} onSave={save} onClose={()=>setShowAdd(false)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} masterDataError={masterDataError} onRetryMasterData={openNewSite} calcTotal={calcTotal} />}
       {editItem&&<SiteWorkForm title="Edit Site" initData={editItem} onSave={saveEdit} onClose={()=>setEditItem(null)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} calcTotal={calcTotal} />}
 
       {viewItem&&(
@@ -1561,7 +1577,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
   );
 }
 
-function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, workers, extraWorkTypes, materialTypes, calcTotal }) {
+function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, workers, extraWorkTypes, materialTypes, masterDataError = "", onRetryMasterData, calcTotal }) {
   const [f, setF] = useState({...initData});
   const [ewForm, setEwForm] = useState({name:"",qty:"1",rate:""});
   const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:""});
@@ -1662,7 +1678,7 @@ function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, worker
               <option value="">-- Select Interlock Type --</option>
               {interlockTypes.map(i=><option key={i._id} value={i._id}>{[i.name,i.category,i.color,i.shape,i.size&&`${i.size} inch`,i.thickness&&`${i.thickness} inch thick`].filter(Boolean).join(" / ")}</option>)}
             </select>
-            {interlockTypes.length===0&&<div className="mt-1 text-xs font-semibold text-red-600">No interlock types found in Master Data.</div>}
+            {masterDataError ? <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-red-600"><span>{masterDataError}</span><button type="button" onClick={onRetryMasterData} className="underline">Retry</button></div> : interlockTypes.length===0&&<div className="mt-1 text-xs font-semibold text-amber-700">No interlock types found in Master Data. Add them under Master Data → Interlock Types.</div>}
           </div>
           <Input label="Color / Specification" value={f.interlockColor||""} onChange={e=>setF({...f,interlockColor:e.target.value})} placeholder="e.g. Grey, Natural" />
           <div className="grid grid-cols-3 gap-2">
