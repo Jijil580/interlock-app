@@ -5144,6 +5144,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [modal, setModal] = useState(false);
   const [editSale, setEditSale] = useState(null);
   const [interlockTypes, setInterlockTypes] = useState([]);
+  const [workers, setWorkers] = useState([]);
   const [customerMaster, setCustomerMaster] = useState([]);
   const [customerMode, setCustomerMode] = useState("existing");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -5161,17 +5162,27 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
   const [customerPayForm, setCustomerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
   const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
 
-  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash" };
+  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash", workerCharges: [] };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
-    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([d, h, c]) => {
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers"), api("GET", "/workers")]).then(([d, h, c, w]) => {
       const interlocks = Array.isArray(d) ? d.map(x => ({ ...x, productType: "interlock" })) : [];
       const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
       setInterlockTypes([...interlocks, ...hollow]);
       setCustomerMaster(Array.isArray(c) ? c : []);
+      setWorkers((Array.isArray(w) ? w : []).filter(worker => String(worker.status || "Active").toLowerCase() !== "inactive"));
     });
   }, []);
+
+  const updateSaleWorkerCharge = (operation, changes) => setForm(current => {
+    const entries = current.workerCharges || [];
+    const existing = entries.find(entry => entry.operation === operation) || { operation, workerId: "", rate: "" };
+    const nextEntry = { ...existing, ...changes };
+    const workerCharges = entries.filter(entry => entry.operation !== operation);
+    if (nextEntry.enabled) workerCharges.push(nextEntry);
+    return { ...current, workerCharges };
+  });
 
   const isHollow = (sale = form) => sale?.productType === "hollowbrick";
   const isOther = (sale = form) => sale?.productType === "other";
@@ -5287,6 +5298,11 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
     if (!mobile || mobile.length < 10) { setSaveError("Mobile number is required (10 digits)"); return; }
     if (!form.customer) { setSaveError("Customer name is required"); return; }
     if (!form.product) { setSaveError("Select a product"); return; }
+    const selectedWorkerCharges = (form.workerCharges || []).filter(entry => entry.enabled);
+    if (selectedWorkerCharges.some(entry => !entry.workerId || +(entry.rate || 0) <= 0)) {
+      setSaveError("Select a worker and enter a charge per unit for each selected loading/unloading task");
+      return;
+    }
     const total = calcTotal();
     const amountPaid = +(form.amountPaid || 0);
     const payload = {
@@ -5296,6 +5312,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       amountPaid, amountPending: Math.max(0, total - amountPaid),
       quantity: +form.quantity, price: +form.price, addedBy: user.name,
       saveToCustomerMaster: customerMode === "new" ? saveToMaster : true,
+      workerCharges: (form.workerCharges || []).filter(entry => entry.enabled).map(({ operation, workerId, rate }) => ({ operation, workerId, rate: +(rate || 0) })),
     };
     const audit = editSale ? requestAuditReason("edit", "sale report", user) : null;
     if (editSale && !audit) return;
@@ -5344,6 +5361,7 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
       amountPaid: String(sale.amountPaid ?? ""),
       cgstPercent: String(sale.cgstPercent ?? ""),
       sgstPercent: String(sale.sgstPercent ?? ""),
+      workerCharges: (sale.workerCharges || []).map(entry => ({ ...entry, enabled: true, rate: String(entry.rate ?? "") })),
     });
     setCustomerMode("new");
     setSelectedCustomerId("");
@@ -5840,6 +5858,28 @@ function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
                 <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
               </>}
               <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
+            </div>
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-3">
+              <div>
+                <div className="text-sm font-black text-violet-900">Loading / Unloading Worker Earnings</div>
+                <div className="text-xs text-violet-700">Optional. Recorded in the worker ledger only; not included on the customer bill.</div>
+              </div>
+              {[{ operation: "load", label: "Loading" }, { operation: "unload", label: "Unloading" }].map(({ operation, label }) => {
+                const charge = (form.workerCharges || []).find(entry => entry.operation === operation);
+                const earning = (+(form.quantity || 0)) * (+(charge?.rate || 0));
+                return <div key={operation} className="rounded-lg border border-violet-100 bg-white p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                    <input type="checkbox" checked={!!charge?.enabled} onChange={e => updateSaleWorkerCharge(operation, { enabled: e.target.checked })} />
+                    Add {label} charge
+                  </label>
+                  {charge?.enabled && <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                    <Select label={`${label} Worker`} value={charge.workerId || ""} options={[{ value: "", label: "Select worker" }, ...workers.map(worker => ({ value: String(worker._id), label: `${worker.name} (${workerTypeOf(worker)})` }))]} onChange={e => updateSaleWorkerCharge(operation, { workerId: e.target.value })} />
+                    <Input label={`Charge per ${form.unit || "unit"} (${CURRENCY})`} type="number" min="0" step="any" value={charge.rate || ""} onChange={e => updateSaleWorkerCharge(operation, { rate: e.target.value })} placeholder="0" />
+                    <div className="rounded-lg bg-violet-50 px-3 py-2.5 text-sm"><div className="text-xs text-violet-600">Worker earning</div><b className="text-violet-900">{CURRENCY}{fmt(earning)}</b><span className="ml-1 text-xs text-slate-500">({fmt(form.quantity || 0)} × {CURRENCY}{fmt(charge.rate || 0)})</span></div>
+                  </div>}
+                </div>;
+              })}
+              {workers.length === 0 && <div className="text-xs font-semibold text-amber-800">No active workers found. Add workers before assigning these charges.</div>}
             </div>
             <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
