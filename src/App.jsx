@@ -1317,6 +1317,10 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     payments:[], totalReceived:0, pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
   };
 
+  const visibleSiteWorks = user.role === "supervisor"
+    ? siteWorks.filter(site => String(site.addedBy || "").trim().toLowerCase() === String(user.name || "").trim().toLowerCase())
+    : siteWorks;
+
   const save = async (f) => {
     if (!f.customerName) return;
     const item = await api("POST", "/sitework", {...f, advancePaid:undefined, addedBy:user.name});
@@ -1344,7 +1348,7 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
     window.alert("Site completion submitted. User approval is pending.");
   };
 
-  const filtered = siteWorks.filter(s=>{
+  const filtered = visibleSiteWorks.filter(s=>{
     const matchFilter = filter==="all" || s.status===filter;
     const matchSearch = !search || (s.customerName||"").toLowerCase().includes(search.toLowerCase()) || (s.siteLocation||"").toLowerCase().includes(search.toLowerCase());
     return matchFilter && matchSearch;
@@ -1408,15 +1412,15 @@ function SiteWork({ siteWorks, setSiteWorks, user }) {
       <div className="flex gap-1 overflow-x-auto pb-1">
         {["all","running","pending","completed","cancelled"].map(s=>(
           <button key={s} onClick={()=>setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${filter===s?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
-            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?siteWorks.length:siteWorks.filter(x=>x.status===s).length})
+            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?visibleSiteWorks.length:visibleSiteWorks.filter(x=>x.status===s).length})
           </button>
         ))}
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
-        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{visibleSiteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(visibleSiteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(visibleSiteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
       </div>
 
       <div className="space-y-3">
