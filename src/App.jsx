@@ -2136,7 +2136,9 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const normalizedText = (value) => String(value || "").trim().toLowerCase();
   const sameText = (left, right) => normalizedText(left) === normalizedText(right);
-  const reportBelongsToSite = (report, site) => String(report.siteId || "") === String(site._id || "") || sameText(report.siteName, site.customerName);
+  const reportBelongsToSite = (report, site) => report.siteId
+    ? String(report.siteId) === String(site._id)
+    : sameText(report.siteName, site.customerName);
   const mySites = siteWorks.filter(s=>isAdminLike(user.role)||sameText(s.addedBy,user.name));
   const planned = mySites.filter(s=>s.status==="pending");
   const running = mySites.filter(s=>s.status==="running");
@@ -2170,7 +2172,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   const visibleReports = reports.filter(r=>{
     if (isAdminLike(user.role)) return true;
     const allowedSite = mySites.some(s=>reportBelongsToSite(r,s));
-    return sameText(r.addedBy,user.name) || allowedSite;
+    return user.role === "supervisor" ? allowedSite : sameText(r.addedBy,user.name) || allowedSite;
   });
   const siteNameMap = new Map();
   [...mySites.map(site=>site.customerName),...visibleReports.map(report=>report.siteName)].filter(Boolean).forEach(name=>{
@@ -7073,14 +7075,21 @@ function SupervisorSiteReport({ user }) {
 
   useEffect(()=>{
     Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
-      setSiteWorks((Array.isArray(sw)?sw:[]).filter(s=>s.addedBy===user.name));
-      setDailyReports((Array.isArray(dr)?dr:[]).filter(r=>r.addedBy===user.name));
+      const ownSites = (Array.isArray(sw)?sw:[]).filter(s=>String(s.addedBy||"").trim().toLowerCase()===String(user.name||"").trim().toLowerCase());
+      const ownSiteIds = new Set(ownSites.map(s=>String(s._id)));
+      const ownSiteNames = new Set(ownSites.map(s=>String(s.customerName||"").trim().toLowerCase()));
+      setSiteWorks(ownSites);
+      setDailyReports((Array.isArray(dr)?dr:[]).filter(r=>r.siteId
+        ? ownSiteIds.has(String(r.siteId))
+        : ownSiteNames.has(String(r.siteName||"").trim().toLowerCase())));
       setLoading(false);
     });
   },[]);
 
   const getSiteReports = (site) =>
-    dailyReports.filter(r=>r.siteName===site.customerName||r.siteId===site._id)
+    dailyReports.filter(r=>r.siteId
+      ? String(r.siteId)===String(site._id)
+      : String(r.siteName||"").trim().toLowerCase()===String(site.customerName||"").trim().toLowerCase())
       .sort((a,b)=>b.date.localeCompare(a.date));
 
   const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
