@@ -417,9 +417,14 @@ const mergeDailyReportsByDate = (reports = []) => {
 
 async function api(method, path, body) {
   try {
+    const token = localStorage.getItem("pk3_ai_token");
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const deviceId = localStorage.getItem("pk_device_id");
+    if (deviceId) headers["X-Device-Id"] = deviceId;
     const res = await fetch(`${API}${path}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json();
@@ -894,6 +899,7 @@ function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
       });
       const data = await res.json();
       if (res.ok && data.role) {
+        if (data.aiToken) localStorage.setItem("pk3_ai_token", data.aiToken);
         // Check device approval (skip for admin)
         if (!isAdminLike(data.role)) {
           const deviceInfo = getDeviceInfo();
