@@ -1,0 +1,10245 @@
+import { useState, useEffect, useRef } from "react";
+import BusinessAssistant from "./BusinessAssistant.jsx";
+import {
+  ArrowLeft, BarChart3, Bell, Blocks, Building2, CalendarCheck, ClipboardList, FileSearch, FileText, Factory,
+  HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings, ShieldCheck,
+  ShoppingCart, Smartphone, Store, Truck, UserRoundPlus, UsersRound,
+  WalletCards, LogOut, Printer, Pencil, Trash2, BookOpen, Sparkles,
+  ArrowLeftRight
+} from "lucide-react";
+
+const API = `${(import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "")}/api`;
+const COMPANY = {
+  companyName: import.meta.env.VITE_COMPANY_NAME || "PK Interlock 3",
+  shortName: import.meta.env.VITE_COMPANY_SHORT_NAME || "PK Interlock 3",
+  logo: "/icons/interlock-logo.png",
+  address: import.meta.env.VITE_COMPANY_ADDRESS || "",
+  state: import.meta.env.VITE_COMPANY_STATE || "Kerala",
+  stateCode: import.meta.env.VITE_COMPANY_STATE_CODE || "32",
+  gstin: import.meta.env.VITE_COMPANY_GSTIN || "",
+  phone1: import.meta.env.VITE_COMPANY_PHONE1 || "",
+  phone2: import.meta.env.VITE_COMPANY_PHONE2 || "",
+  invoiceTitle: "TAX INVOICE",
+  invoicePrefix: "INV",
+  signatureName: import.meta.env.VITE_COMPANY_SIGNATURE_NAME || "PK Interlock 3",
+  bankName: "",
+  bankAccount: "",
+  bankIfsc: "",
+  terms: "Certified that the particulars given above are true and correct.",
+};
+const POWERED_BY = "Powered by LUMIER TECHNOLOGIES";
+const COPYRIGHT_TEXT = `© ${new Date().getFullYear()} LUMIER TECHNOLOGIES. All rights reserved.`;
+const CURRENCY = "₹";
+const fmt = (n) => (+(n)||0).toLocaleString("en-IN");
+const today = () => new Date().toISOString().split("T")[0];
+const withUnit = (value, unit) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return new RegExp(`${unit}(?:es)?$`, "i").test(text) ? text : `${text} ${unit}`;
+};
+const cleanDisplayUnits = (value) => String(value || "")
+  .replace(/\binch\s+inch\b/gi, "inch")
+  .replace(/\binch\s+thick\s+inch\s+thick\b/gi, "inch thick");
+
+function UiIcon({ icon: Icon, size = 20, className = "" }) {
+  if (typeof Icon === "function" || (typeof Icon === "object" && Icon)) {
+    return <Icon size={size} strokeWidth={2} className={className} aria-hidden="true" />;
+  }
+  return <span className={className} aria-hidden="true">{Icon}</span>;
+}
+
+const NAV_ICON_MAP = {
+  cashflowhub: Landmark, admincontrol: ShieldCheck, officehub: Building2,
+  dashboard: BarChart3, reports: FileText, sitework: Building2,
+  dailyreport: ClipboardList, mysitereports: FileSearch, sitereport: Building2,
+  workerreport: ClipboardList, workerreport2: HardHat, workplan: CalendarCheck,
+  quotations: FileText, driversubmit: Truck, driverreports: Truck,
+};
+const findMasterItem = (row, masters = []) => masters.find(m => (
+  (row?.itemId && m._id === row.itemId) ||
+  ((m.name || "").toLowerCase() === String(row?.itemName || row?.product || row?.name || row?.item || "").toLowerCase() &&
+   (!row?.color || !m.color || String(m.color).toLowerCase() === String(row.color).toLowerCase()))
+));
+const itemSqftPerPiece = (row, masters = []) => +(row?.sqftPerPiece || findMasterItem(row, masters)?.sqftPerPiece || 0);
+const itemCount = (row) => +(row?.producedQty ?? row?.quantity ?? row?.qty ?? 0) || 0;
+const itemSqft = (row, masters = []) => +(row?.sqftQty ?? row?.sqftQuantity ?? 0) || (itemCount(row) * itemSqftPerPiece(row, masters));
+const qtyWithSqft = (row, masters = [], unitFallback = "piece") => {
+  const unit = row?.unit || row?.unitType || unitFallback;
+  const sqft = itemSqft(row, masters);
+  return `${fmt(itemCount(row))} ${unit}${sqft ? ` / ${fmt(sqft)} sqft` : ""}`;
+};
+const directSitePaymentRows = (site, dailyReceived = 0) => {
+  const payments = (site?.payments || []).map((p, paymentIndex) => ({ ...p, paymentIndex, editable:true, date: String(p.date || site?.startDate || "").slice(0,10), source: "Site Work" }));
+  const cashTransactions = (site?.cashTransactionPayments || []).map(p => ({ ...p, source:p.source || "Cash Transactions" }));
+  const storedLegacy = +(site?.legacyReceived) || 0;
+  const legacyPayments = storedLegacy > 0 ? [{ date:site?.startDate || today(), amount:storedLegacy, mode:site?.paymentMode || "Cash", source:"Initial Site Work" }] : [];
+  if (payments.length || cashTransactions.length || legacyPayments.length) return [...payments, ...legacyPayments, ...cashTransactions];
+  const legacy = Math.max(0, (+(site?.totalReceived ?? site?.paidAmount ?? 0) || 0) - (+(dailyReceived) || 0));
+  return legacy > 0 ? [{ date: site?.startDate || today(), amount: legacy, mode: site?.paymentMode || "Cash", source: "Initial Site Work" }] : [];
+};
+const workerTypeOf = (w) => {
+  const raw = String(w?.workerType || w?.workerCategory || "").toLowerCase();
+  if (raw.includes("production")) return "Production Worker";
+  return "Site Worker";
+};
+const isActiveWorker = (w) => String(w?.status || "Active").toLowerCase() !== "inactive";
+const isAdminLike = (role) => role === "admin" || role === "user";
+const effectiveRoleOf = (role) => role === "user" ? "admin" : role;
+
+const reportReadKey = (user) => `interlock-report-read:${user?._id || user?.username || user?.name || user?.role || "user"}`;
+function useReportReadState(user) {
+  const key = reportReadKey(user);
+  const [readIds, setReadIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(key) || "[]").map(String)); }
+    catch { return new Set(); }
+  });
+  const readIdsRef = useRef(readIds);
+  useEffect(() => {
+    let stored = new Set();
+    try { stored = new Set(JSON.parse(localStorage.getItem(key) || "[]").map(String)); } catch {}
+    readIdsRef.current = stored;
+    setReadIds(stored);
+  }, [key]);
+  const markReportsRead = (ids) => {
+    const next = new Set(readIdsRef.current);
+    (Array.isArray(ids) ? ids : [ids]).filter(Boolean).forEach(id => next.add(String(id)));
+    readIdsRef.current = next;
+    setReadIds(next);
+    try { localStorage.setItem(key, JSON.stringify([...next])); } catch {}
+  };
+  return { isUnread: id => Boolean(id) && !readIds.has(String(id)), markReportsRead };
+}
+
+function UnreadReportIcon({ unread }) {
+  return unread ? <span title="Unread report" aria-label="Unread report" className="inline-flex items-center text-amber-600"><Bell size={15} strokeWidth={2.5} /></span> : null;
+}
+
+const LANGUAGE_OPTIONS = [
+  { value:"en", label:"English" },
+  { value:"hi", label:"हिन्दी" },
+  { value:"ta", label:"தமிழ்" },
+  { value:"te", label:"తెలుగు" },
+  { value:"kn", label:"ಕನ್ನಡ" },
+  { value:"ml", label:"മലയാളം" },
+];
+const LANGUAGE_TEXT = {
+  "Language": { hi:"भाषा", ta:"மொழி", te:"భాష", kn:"ಭಾಷೆ" },
+  "Management System": { hi:"प्रबंधन प्रणाली", ta:"மேலாண்மை அமைப்பு", te:"నిర్వహణ వ్యవస్థ", kn:"ನಿರ್ವಹಣಾ ವ್ಯವಸ್ಥೆ" },
+  "Username": { hi:"उपयोगकर्ता नाम", ta:"பயனர் பெயர்", te:"వినియోగదారు పేరు", kn:"ಬಳಕೆದಾರ ಹೆಸರು" },
+  "Password": { hi:"पासवर्ड", ta:"கடவுச்சொல்", te:"పాస్‌వర్డ్", kn:"ಪಾಸ್‌ವರ್ಡ್" },
+  "Enter username": { hi:"उपयोगकर्ता नाम दर्ज करें", ta:"பயனர் பெயரை உள்ளிடவும்", te:"వినియోగదారు పేరు నమోదు చేయండి", kn:"ಬಳಕೆದಾರ ಹೆಸರನ್ನು ನಮೂದಿಸಿ" },
+  "Enter password": { hi:"पासवर्ड दर्ज करें", ta:"கடவுச்சொல்லை உள்ளிடவும்", te:"పాస్‌వర్డ్ నమోదు చేయండి", kn:"ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ" },
+  "Sign In": { hi:"साइन इन करें", ta:"உள்நுழைக", te:"సైన్ ఇన్", kn:"ಸೈನ್ ಇನ್" },
+  "Signing in...": { hi:"साइन इन हो रहा है...", ta:"உள்நுழைகிறது...", te:"సైన్ ఇన్ అవుతోంది...", kn:"ಸೈನ್ ಇನ್ ಆಗುತ್ತಿದೆ..." },
+  "Back": { hi:"वापस", ta:"பின்செல்", te:"వెనుకకు", kn:"ಹಿಂದೆ" },
+  "Logout": { hi:"लॉग आउट", ta:"வெளியேறு", te:"లాగ్ అవుట్", kn:"ಲಾಗ್ ಔಟ್" },
+  "Cash Flow": { hi:"नकद प्रवाह", ta:"பணப்புழக்கம்", te:"నగదు ప్రవాహం", kn:"ನಗದು ಹರಿವು" },
+  "Admin Panel": { hi:"एडमिन पैनल", ta:"நிர்வாகப் பலகம்", te:"అడ్మిన్ ప్యానెల్", kn:"ಅಡ್ಮಿನ್ ಪ್ಯಾನೆಲ್" },
+  "Office": { hi:"कार्यालय", ta:"அலுவலகம்", te:"కార్యాలయం", kn:"ಕಚೇರಿ" },
+  "Dashboard": { hi:"डैशबोर्ड", ta:"டாஷ்போர்டு", te:"డ్యాష్‌బోర్డ్", kn:"ಡ್ಯಾಶ್‌ಬೋರ್ಡ್" },
+  "Reports": { hi:"रिपोर्ट", ta:"அறிக்கைகள்", te:"నివేదికలు", kn:"ವರದಿಗಳು" },
+  "Company Expense": { hi:"कंपनी खर्च", ta:"நிறுவனச் செலவு", te:"కంపెనీ ఖర్చు", kn:"ಕಂಪನಿ ವೆಚ್ಚ" },
+  "Company Purchase": { hi:"कंपनी खरीद", ta:"நிறுவனக் கொள்முதல்", te:"కంపెనీ కొనుగోలు", kn:"ಕಂಪನಿ ಖರೀದಿ" },
+  "Create New Site Work": { hi:"नया साइट कार्य बनाएं", ta:"புதிய தளப் பணியை உருவாக்கு", te:"కొత్త సైట్ పనిని సృష్టించండి", kn:"ಹೊಸ ಸೈಟ್ ಕೆಲಸ ರಚಿಸಿ" },
+  "Production Site": { hi:"उत्पादन साइट", ta:"உற்பத்தித் தளம்", te:"ఉత్పత్తి సైట్", kn:"ಉತ್ಪಾದನಾ ತಾಣ" },
+  "Production Site Entry": { hi:"उत्पादन साइट प्रविष्टि", ta:"உற்பத்தித் தள பதிவு", te:"ఉత్పత్తి సైట్ నమోదు", kn:"ಉತ್ಪಾದನಾ ತಾಣ ನಮೂದು" },
+  "Master Data": { hi:"मास्टर डेटा", ta:"முதன்மைத் தரவு", te:"మాస్టర్ డేటా", kn:"ಮಾಸ್ಟರ್ ಡೇಟಾ" },
+  "Suppliers": { hi:"आपूर्तिकर्ता", ta:"விநியோகஸ்தர்கள்", te:"సరఫరాదారులు", kn:"ಪೂರೈಕೆದಾರರು" },
+  "Workers": { hi:"श्रमिक", ta:"தொழிலாளர்கள்", te:"కార్మికులు", kn:"ಕಾರ್ಮಿಕರು" },
+  "Add Worker": { hi:"श्रमिक जोड़ें", ta:"தொழிலாளரைச் சேர்", te:"కార్మికుడిని జోడించండి", kn:"ಕಾರ್ಮಿಕರನ್ನು ಸೇರಿಸಿ" },
+  "Attendance": { hi:"उपस्थिति", ta:"வருகை", te:"హాజరు", kn:"ಹಾಜರಾತಿ" },
+  "Daily Report": { hi:"दैनिक रिपोर्ट", ta:"தினசரி அறிக்கை", te:"రోజువారీ నివేదిక", kn:"ದೈನಂದಿನ ವರದಿ" },
+  "Supervisor Report": { hi:"सुपरवाइजर रिपोर्ट", ta:"மேற்பார்வையாளர் அறிக்கை", te:"సూపర్‌వైజర్ నివేదిక", kn:"ಮೇಲ್ವಿಚಾರಕರ ವರದಿ" },
+  "Site Reports": { hi:"साइट रिपोर्ट", ta:"தள அறிக்கைகள்", te:"సైట్ నివేదికలు", kn:"ಸೈಟ್ ವರದಿಗಳು" },
+  "My Site Reports": { hi:"मेरी साइट रिपोर्ट", ta:"எனது தள அறிக்கைகள்", te:"నా సైట్ నివేదికలు", kn:"ನನ್ನ ಸೈಟ್ ವರದಿಗಳು" },
+  "Site Report": { hi:"साइट रिपोर्ट", ta:"தள அறிக்கை", te:"సైట్ నివేదిక", kn:"ಸೈಟ್ ವರದಿ" },
+  "Worker Reports": { hi:"श्रमिक रिपोर्ट", ta:"தொழிலாளர் அறிக்கைகள்", te:"కార్మికుల నివేదికలు", kn:"ಕಾರ್ಮಿಕರ ವರದಿಗಳು" },
+  "Worker Ledger": { hi:"श्रमिक खाता", ta:"தொழிலாளர் பேரேடு", te:"కార్మికుల లెడ్జర్", kn:"ಕಾರ್ಮಿಕರ ಲೆಡ್ಜರ್" },
+  "Driver Reports": { hi:"ड्राइवर रिपोर्ट", ta:"ஓட்டுநர் அறிக்கைகள்", te:"డ్రైవర్ నివేదికలు", kn:"ಚಾಲಕರ ವರದಿಗಳು" },
+  "Submit Report": { hi:"रिपोर्ट जमा करें", ta:"அறிக்கையைச் சமர்ப்பி", te:"నివేదిక సమర్పించండి", kn:"ವರದಿ ಸಲ್ಲಿಸಿ" },
+  "Purchases": { hi:"खरीद", ta:"கொள்முதல்", te:"కొనుగోళ్లు", kn:"ಖರೀದಿಗಳು" },
+  "Stock": { hi:"स्टॉक", ta:"இருப்பு", te:"స్టాక్", kn:"ದಾಸ್ತಾನು" },
+  "Raw Material": { hi:"कच्चा माल", ta:"மூலப்பொருள்", te:"ముడి పదార్థం", kn:"ಕಚ್ಚಾ ವಸ್ತು" },
+  "Sales": { hi:"बिक्री", ta:"விற்பனை", te:"అమ్మకాలు", kn:"ಮಾರಾಟ" },
+  "Quotations": { hi:"कोटेशन", ta:"விலைமதிப்பீடுகள்", te:"కొటేషన్లు", kn:"ಕೊಟೇಶನ್‌ಗಳು" },
+  "Devices": { hi:"डिवाइस", ta:"சாதனங்கள்", te:"పరికరాలు", kn:"ಸಾಧನಗಳು" },
+  "Users": { hi:"उपयोगकर्ता", ta:"பயனர்கள்", te:"వినియోగదారులు", kn:"ಬಳಕೆದಾರರು" },
+  "Admin": { hi:"एडमिन", ta:"நிர்வாகி", te:"అడ్మిన్", kn:"ಅಡ್ಮಿನ್" },
+  "User": { hi:"उपयोगकर्ता", ta:"பயனர்", te:"వినియోగదారు", kn:"ಬಳಕೆದಾರ" },
+  "Supervisor": { hi:"सुपरवाइजर", ta:"மேற்பார்வையாளர்", te:"సూపర్‌వైజర్", kn:"ಮೇಲ್ವಿಚಾರಕ" },
+  "Driver": { hi:"ड्राइवर", ta:"ஓட்டுநர்", te:"డ్రైవర్", kn:"ಚಾಲಕ" },
+  "Work Planning": { hi:"कार्य योजना", ta:"பணித் திட்டமிடல்", te:"పని ప్రణాళిక", kn:"ಕೆಲಸದ ಯೋಜನೆ" },
+  "Salary": { hi:"वेतन", ta:"சம்பளம்", te:"జీతం", kn:"ಸಂಬಳ" },
+  "Advance Salary": { hi:"अग्रिम वेतन", ta:"முன்பணச் சம்பளம்", te:"అడ్వాన్స్ జీతం", kn:"ಮುಂಗಡ ಸಂಬಳ" },
+  "Production Worker Salary": { hi:"उत्पादन श्रमिक वेतन", ta:"உற்பத்தித் தொழிலாளர் சம்பளம்", te:"ఉత్పత్తి కార్మికుల జీతం", kn:"ಉತ್ಪಾದನಾ ಕಾರ್ಮಿಕರ ಸಂಬಳ" },
+  "Site Worker Salary": { hi:"साइट श्रमिक वेतन", ta:"தளத் தொழிலாளர் சம்பளம்", te:"సైట్ కార్మికుల జీతం", kn:"ಸೈಟ್ ಕಾರ್ಮಿಕರ ಸಂಬಳ" },
+  "Driver Salary": { hi:"ड्राइवर वेतन", ta:"ஓட்டுநர் சம்பளம்", te:"డ్రైవర్ జీతం", kn:"ಚಾಲಕರ ಸಂಬಳ" },
+  "Supervisor Salary": { hi:"सुपरवाइजर वेतन", ta:"மேற்பார்வையாளர் சம்பளம்", te:"సూపర్‌వైజర్ జీతం", kn:"ಮೇಲ್ವಿಚಾರಕರ ಸಂಬಳ" },
+  "Office User Salary": { hi:"कार्यालय उपयोगकर्ता वेतन", ta:"அலுவலகப் பயனர் சம்பளம்", te:"ఆఫీస్ వినియోగదారు జీతం", kn:"ಕಚೇರಿ ಬಳಕೆದಾರರ ಸಂಬಳ" },
+  "Office Daily Report": { hi:"कार्यालय दैनिक रिपोर्ट", ta:"அலுவலக தினசரி அறிக்கை", te:"ఆఫీస్ రోజువారీ నివేదిక", kn:"ಕಚೇರಿ ದೈನಂದಿನ ವರದಿ" },
+  "Date": { hi:"तारीख", ta:"தேதி", te:"తేదీ", kn:"ದಿನಾಂಕ" },
+  "From Date": { hi:"आरंभ तारीख", ta:"தொடக்க தேதி", te:"ప్రారంభ తేదీ", kn:"ಆರಂಭ ದಿನಾಂಕ" },
+  "To Date": { hi:"अंतिम तारीख", ta:"முடிவு தேதி", te:"ముగింపు తేదీ", kn:"ಅಂತಿಮ ದಿನಾಂಕ" },
+  "Month": { hi:"महीना", ta:"மாதம்", te:"నెల", kn:"ತಿಂಗಳು" },
+  "Name": { hi:"नाम", ta:"பெயர்", te:"పేరు", kn:"ಹೆಸರು" },
+  "Worker Name": { hi:"श्रमिक का नाम", ta:"தொழிலாளர் பெயர்", te:"కార్మికుడి పేరు", kn:"ಕಾರ್ಮಿಕರ ಹೆಸರು" },
+  "Driver Name": { hi:"ड्राइवर का नाम", ta:"ஓட்டுநர் பெயர்", te:"డ్రైవర్ పేరు", kn:"ಚಾಲಕರ ಹೆಸರು" },
+  "Site Name": { hi:"साइट का नाम", ta:"தளத்தின் பெயர்", te:"సైట్ పేరు", kn:"ಸೈಟ್ ಹೆಸರು" },
+  "Customer Name": { hi:"ग्राहक का नाम", ta:"வாடிக்கையாளர் பெயர்", te:"కస్టమర్ పేరు", kn:"ಗ್ರಾಹಕರ ಹೆಸರು" },
+  "Supplier Name": { hi:"आपूर्तिकर्ता का नाम", ta:"விநியோகஸ்தர் பெயர்", te:"సరఫరాదారు పేరు", kn:"ಪೂರೈಕೆದಾರರ ಹೆಸರು" },
+  "Mobile Number": { hi:"मोबाइल नंबर", ta:"கைபேசி எண்", te:"మొబైల్ నంబర్", kn:"ಮೊಬೈಲ್ ಸಂಖ್ಯೆ" },
+  "Phone": { hi:"फोन", ta:"தொலைபேசி", te:"ఫోన్", kn:"ದೂರವಾಣಿ" },
+  "Address": { hi:"पता", ta:"முகவரி", te:"చిరునామా", kn:"ವಿಳಾಸ" },
+  "Category": { hi:"श्रेणी", ta:"வகை", te:"వర్గం", kn:"ವರ್ಗ" },
+  "Product": { hi:"उत्पाद", ta:"தயாரிப்பு", te:"ఉత్పత్తి", kn:"ಉತ್ಪನ್ನ" },
+  "Item Name": { hi:"वस्तु का नाम", ta:"பொருளின் பெயர்", te:"వస్తువు పేరు", kn:"ವಸ್ತುವಿನ ಹೆಸರು" },
+  "Quantity": { hi:"मात्रा", ta:"அளவு", te:"పరిమాణం", kn:"ಪ್ರಮಾಣ" },
+  "Unit": { hi:"इकाई", ta:"அலகு", te:"యూనిట్", kn:"ಘಟಕ" },
+  "Rate": { hi:"दर", ta:"விலை", te:"రేటు", kn:"ದರ" },
+  "Amount": { hi:"राशि", ta:"தொகை", te:"మొత్తం", kn:"ಮೊತ್ತ" },
+  "Total Amount": { hi:"कुल राशि", ta:"மொத்தத் தொகை", te:"మొత్తం మొత్తం", kn:"ಒಟ್ಟು ಮೊತ್ತ" },
+  "Payment Given": { hi:"दिया गया भुगतान", ta:"வழங்கிய தொகை", te:"ఇచ్చిన చెల్లింపు", kn:"ನೀಡಿದ ಪಾವತಿ" },
+  "Payment Mode": { hi:"भुगतान का तरीका", ta:"பணம் செலுத்தும் முறை", te:"చెల్లింపు విధానం", kn:"ಪಾವತಿ ವಿಧಾನ" },
+  "Paid": { hi:"भुगतान", ta:"செலுத்தியது", te:"చెల్లించబడింది", kn:"ಪಾವತಿಸಲಾಗಿದೆ" },
+  "Pending": { hi:"बकाया", ta:"நிலுவை", te:"పెండింగ్", kn:"ಬಾಕಿ" },
+  "Total Pending": { hi:"कुल बकाया", ta:"மொத்த நிலுவை", te:"మొత్తం పెండింగ్", kn:"ಒಟ್ಟು ಬಾಕಿ" },
+  "Status": { hi:"स्थिति", ta:"நிலை", te:"స్థితి", kn:"ಸ್ಥಿತಿ" },
+  "Notes": { hi:"टिप्पणियां", ta:"குறிப்புகள்", te:"గమనికలు", kn:"ಟಿಪ್ಪಣಿಗಳು" },
+  "Note": { hi:"टिप्पणी", ta:"குறிப்பு", te:"గమనిక", kn:"ಟಿಪ್ಪಣಿ" },
+  "Remarks": { hi:"टिप्पणी", ta:"குறிப்புகள்", te:"వ్యాఖ్యలు", kn:"ಟಿಪ್ಪಣಿಗಳು" },
+  "Search": { hi:"खोजें", ta:"தேடு", te:"వెతకండి", kn:"ಹುಡುಕಿ" },
+  "All": { hi:"सभी", ta:"அனைத்தும்", te:"అన్నీ", kn:"ಎಲ್ಲಾ" },
+  "Today": { hi:"आज", ta:"இன்று", te:"ఈ రోజు", kn:"ಇಂದು" },
+  "Daily View": { hi:"दैनिक दृश्य", ta:"தினசரி பார்வை", te:"రోజువారీ వీక్షణ", kn:"ದೈನಂದಿನ ನೋಟ" },
+  "Monthly View": { hi:"मासिक दृश्य", ta:"மாதாந்திர பார்வை", te:"నెలవారీ వీక్షణ", kn:"ಮಾಸಿಕ ನೋಟ" },
+  "Active": { hi:"सक्रिय", ta:"செயலில்", te:"సక్రియం", kn:"ಸಕ್ರಿಯ" },
+  "Inactive": { hi:"निष्क्रिय", ta:"செயலற்றது", te:"నిష్క్రియం", kn:"ನಿಷ್ಕ್ರಿಯ" },
+  "Cash": { hi:"नकद", ta:"ரொக்கம்", te:"నగదు", kn:"ನಗದು" },
+  "Bank Transfer": { hi:"बैंक ट्रांसफर", ta:"வங்கி பரிமாற்றம்", te:"బ్యాంక్ బదిలీ", kn:"ಬ್ಯಾಂಕ್ ವರ್ಗಾವಣೆ" },
+  "Cheque": { hi:"चेक", ta:"காசோலை", te:"చెక్", kn:"ಚೆಕ್" },
+  "Other": { hi:"अन्य", ta:"மற்றவை", te:"ఇతర", kn:"ಇತರೆ" },
+  "Save": { hi:"सहेजें", ta:"சேமி", te:"సేవ్", kn:"ಉಳಿಸಿ" },
+  "Submit": { hi:"जमा करें", ta:"சமர்ப்பி", te:"సమర్పించండి", kn:"ಸಲ್ಲಿಸಿ" },
+  "Add": { hi:"जोड़ें", ta:"சேர்", te:"జోడించండి", kn:"ಸೇರಿಸಿ" },
+  "Edit": { hi:"संपादित करें", ta:"திருத்து", te:"సవరించండి", kn:"ತಿದ್ದು" },
+  "Delete": { hi:"हटाएं", ta:"நீக்கு", te:"తొలగించండి", kn:"ಅಳಿಸಿ" },
+  "View": { hi:"देखें", ta:"பார்", te:"చూడండి", kn:"ನೋಡಿ" },
+  "Print": { hi:"प्रिंट", ta:"அச்சிடு", te:"ప్రింట్", kn:"ಮುದ್ರಿಸಿ" },
+  "Make Payment": { hi:"भुगतान करें", ta:"பணம் செலுத்து", te:"చెల్లింపు చేయండి", kn:"ಪಾವತಿ ಮಾಡಿ" },
+  "Mark Payment Done": { hi:"भुगतान पूर्ण करें", ta:"பணம் செலுத்தியதாகக் குறி", te:"చెల్లింపు పూర్తయినట్లు గుర్తించండి", kn:"ಪಾವತಿ ಪೂರ್ಣವೆಂದು ಗುರುತಿಸಿ" },
+  "Loading...": { hi:"लोड हो रहा है...", ta:"ஏற்றுகிறது...", te:"లోడ్ అవుతోంది...", kn:"ಲೋಡ್ ಆಗುತ್ತಿದೆ..." },
+  "No records found": { hi:"कोई रिकॉर्ड नहीं मिला", ta:"பதிவுகள் இல்லை", te:"రికార్డులు కనబడలేదు", kn:"ಯಾವುದೇ ದಾಖಲೆಗಳು ಕಂಡುಬಂದಿಲ್ಲ" },
+  "Saved successfully": { hi:"सफलतापूर्वक सहेजा गया", ta:"வெற்றிகரமாகச் சேமிக்கப்பட்டது", te:"విజయవంతంగా సేవ్ చేయబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ಉಳಿಸಲಾಗಿದೆ" },
+  "Updated successfully": { hi:"सफलतापूर्वक अपडेट किया गया", ta:"வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது", te:"విజయవంతంగా నవీకరించబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ನವೀಕರಿಸಲಾಗಿದೆ" },
+  "Deleted successfully": { hi:"सफलतापूर्वक हटाया गया", ta:"வெற்றிகரமாக நீக்கப்பட்டது", te:"విజయవంతంగా తొలగించబడింది", kn:"ಯಶಸ್ವಿಯಾಗಿ ಅಳಿಸಲಾಗಿದೆ" },
+};
+Object.assign(LANGUAGE_TEXT, {
+  "Enter username and password": { hi:"उपयोगकर्ता नाम और पासवर्ड दर्ज करें", ta:"பயனர் பெயர் மற்றும் கடவுச்சொல்லை உள்ளிடவும்", te:"వినియోగదారు పేరు మరియు పాస్‌వర్డ్ నమోదు చేయండి", kn:"ಬಳಕೆದಾರ ಹೆಸರು ಮತ್ತು ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ" },
+  "Invalid credentials": { hi:"गलत लॉगिन विवरण", ta:"தவறான உள்நுழைவு விவரங்கள்", te:"చెల్లని లాగిన్ వివరాలు", kn:"ತಪ್ಪಾದ ಲಾಗಿನ್ ವಿವರಗಳು" },
+  "Server error, please try again": { hi:"सर्वर त्रुटि, कृपया फिर प्रयास करें", ta:"சேவையகப் பிழை, மீண்டும் முயற்சிக்கவும்", te:"సర్వర్ లోపం, మళ్లీ ప్రయత్నించండి", kn:"ಸರ್ವರ್ ದೋಷ, ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ" },
+  "+ Add": { hi:"+ जोड़ें", ta:"+ சேர்", te:"+ జోడించండి", kn:"+ ಸೇರಿಸಿ" },
+  "+ Entry": { hi:"+ प्रविष्टि", ta:"+ பதிவு", te:"+ నమోదు", kn:"+ ನಮೂದು" },
+  "Cancel": { hi:"रद्द करें", ta:"ரத்து செய்", te:"రద్దు చేయండి", kn:"ರದ್ದುಮಾಡಿ" },
+  "Close": { hi:"बंद करें", ta:"மூடு", te:"మూసివేయండి", kn:"ಮುಚ್ಚಿ" },
+  "Update": { hi:"अपडेट करें", ta:"புதுப்பி", te:"నవీకరించండి", kn:"ನವೀಕರಿಸಿ" },
+  "Save Changes": { hi:"परिवर्तन सहेजें", ta:"மாற்றங்களைச் சேமி", te:"మార్పులను సేవ్ చేయండి", kn:"ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ" },
+  "View Details": { hi:"विवरण देखें", ta:"விவரங்களைப் பார்", te:"వివరాలు చూడండి", kn:"ವಿವರಗಳನ್ನು ನೋಡಿ" },
+  "Print Ledger": { hi:"खाता प्रिंट करें", ta:"பேரேட்டை அச்சிடு", te:"లెడ్జర్ ప్రింట్ చేయండి", kn:"ಲೆಡ್ಜರ್ ಮುದ್ರಿಸಿ" },
+});
+const MALAYALAM_TEXT = {
+  "Language":"ഭാഷ",
+  "Management System":"മാനേജ്മെന്റ് സിസ്റ്റം",
+  "Username":"ഉപയോക്തൃനാമം",
+  "Password":"പാസ്‌വേഡ്",
+  "Enter username":"ഉപയോക്തൃനാമം നൽകുക",
+  "Enter password":"പാസ്‌വേഡ് നൽകുക",
+  "Sign In":"ലോഗിൻ ചെയ്യുക",
+  "Signing in...":"ലോഗിൻ ചെയ്യുന്നു...",
+  "Enter username and password":"ഉപയോക്തൃനാമവും പാസ്‌വേഡും നൽകുക",
+  "Invalid credentials":"ലോഗിൻ വിവരങ്ങൾ തെറ്റാണ്",
+  "Server error, please try again":"സെർവർ പിശക്, വീണ്ടും ശ്രമിക്കുക",
+  "Back":"തിരികെ",
+  "Logout":"ലോഗ് ഔട്ട്",
+  "Cash Flow":"പണപ്രവാഹം",
+  "Admin Panel":"അഡ്മിൻ പാനൽ",
+  "Office":"ഓഫീസ്",
+  "Dashboard":"ഡാഷ്ബോർഡ്",
+  "Reports":"റിപ്പോർട്ടുകൾ",
+  "Company Expense":"കമ്പനി ചെലവ്",
+  "Company Purchase":"കമ്പനി വാങ്ങൽ",
+  "Create New Site Work":"പുതിയ സൈറ്റ് വർക്ക് സൃഷ്ടിക്കുക",
+  "Production Site":"പ്രൊഡക്ഷൻ സൈറ്റ്",
+  "Production Site Entry":"പ്രൊഡക്ഷൻ സൈറ്റ് എൻട്രി",
+  "Master Data":"മാസ്റ്റർ ഡാറ്റ",
+  "Suppliers":"വിതരണക്കാർ",
+  "Workers":"തൊഴിലാളികൾ",
+  "Add Worker":"തൊഴിലാളിയെ ചേർക്കുക",
+  "Attendance":"ഹാജർ",
+  "Daily Report":"ദൈനംദിന റിപ്പോർട്ട്",
+  "Supervisor Report":"സൂപ്പർവൈസർ റിപ്പോർട്ട്",
+  "Site Reports":"സൈറ്റ് റിപ്പോർട്ടുകൾ",
+  "My Site Reports":"എന്റെ സൈറ്റ് റിപ്പോർട്ടുകൾ",
+  "Site Report":"സൈറ്റ് റിപ്പോർട്ട്",
+  "Worker Reports":"തൊഴിലാളി റിപ്പോർട്ടുകൾ",
+  "Worker Ledger":"തൊഴിലാളി ലെഡ്ജർ",
+  "Driver Reports":"ഡ്രൈവർ റിപ്പോർട്ടുകൾ",
+  "Submit Report":"റിപ്പോർട്ട് സമർപ്പിക്കുക",
+  "Purchases":"വാങ്ങലുകൾ",
+  "Stock":"സ്റ്റോക്ക്",
+  "Raw Material":"അസംസ്കൃത വസ്തു",
+  "Sales":"വിൽപ്പന",
+  "Quotations":"ക്വട്ടേഷനുകൾ",
+  "Devices":"ഉപകരണങ്ങൾ",
+  "Users":"ഉപയോക്താക്കൾ",
+  "Admin":"അഡ്മിൻ",
+  "User":"ഉപയോക്താവ്",
+  "Supervisor":"സൂപ്പർവൈസർ",
+  "Driver":"ഡ്രൈവർ",
+  "Work Planning":"ജോലി ആസൂത്രണം",
+  "Salary":"ശമ്പളം",
+  "Advance Salary":"മുൻകൂർ ശമ്പളം",
+  "Production Worker Salary":"പ്രൊഡക്ഷൻ തൊഴിലാളി ശമ്പളം",
+  "Site Worker Salary":"സൈറ്റ് തൊഴിലാളി ശമ്പളം",
+  "Driver Salary":"ഡ്രൈവർ ശമ്പളം",
+  "Supervisor Salary":"സൂപ്പർവൈസർ ശമ്പളം",
+  "Office User Salary":"ഓഫീസ് ഉപയോക്തൃ ശമ്പളം",
+  "Office Daily Report":"ഓഫീസ് ദൈനംദിന റിപ്പോർട്ട്",
+  "Date":"തീയതി",
+  "From Date":"ആരംഭ തീയതി",
+  "To Date":"അവസാന തീയതി",
+  "Month":"മാസം",
+  "Name":"പേര്",
+  "Worker Name":"തൊഴിലാളിയുടെ പേര്",
+  "Driver Name":"ഡ്രൈവറുടെ പേര്",
+  "Site Name":"സൈറ്റിന്റെ പേര്",
+  "Customer Name":"ഉപഭോക്താവിന്റെ പേര്",
+  "Supplier Name":"വിതരണക്കാരന്റെ പേര്",
+  "Mobile Number":"മൊബൈൽ നമ്പർ",
+  "Phone":"ഫോൺ",
+  "Address":"വിലാസം",
+  "Category":"വിഭാഗം",
+  "Product":"ഉൽപ്പന്നം",
+  "Item Name":"ഇനത്തിന്റെ പേര്",
+  "Quantity":"അളവ്",
+  "Unit":"യൂണിറ്റ്",
+  "Rate":"നിരക്ക്",
+  "Amount":"തുക",
+  "Total Amount":"ആകെ തുക",
+  "Payment Given":"നൽകിയ പണം",
+  "Payment Mode":"പണമടച്ച രീതി",
+  "Paid":"അടച്ചത്",
+  "Pending":"കുടിശ്ശിക",
+  "Total Pending":"ആകെ കുടിശ്ശിക",
+  "Status":"നില",
+  "Notes":"കുറിപ്പുകൾ",
+  "Note":"കുറിപ്പ്",
+  "Remarks":"അഭിപ്രായങ്ങൾ",
+  "Search":"തിരയുക",
+  "All":"എല്ലാം",
+  "Today":"ഇന്ന്",
+  "Daily View":"ദൈനംദിന കാഴ്ച",
+  "Monthly View":"പ്രതിമാസ കാഴ്ച",
+  "Active":"സജീവം",
+  "Inactive":"നിഷ്ക്രിയം",
+  "Cash":"പണം",
+  "Bank Transfer":"ബാങ്ക് ട്രാൻസ്ഫർ",
+  "Cheque":"ചെക്ക്",
+  "Other":"മറ്റുള്ളവ",
+  "Save":"സേവ് ചെയ്യുക",
+  "Submit":"സമർപ്പിക്കുക",
+  "Add":"ചേർക്കുക",
+  "+ Add":"+ ചേർക്കുക",
+  "+ Entry":"+ എൻട്രി",
+  "Edit":"തിരുത്തുക",
+  "Delete":"നീക്കുക",
+  "View":"കാണുക",
+  "Print":"പ്രിന്റ് ചെയ്യുക",
+  "Cancel":"റദ്ദാക്കുക",
+  "Close":"അടയ്ക്കുക",
+  "Update":"പുതുക്കുക",
+  "Save Changes":"മാറ്റങ്ങൾ സേവ് ചെയ്യുക",
+  "View Details":"വിശദാംശങ്ങൾ കാണുക",
+  "Print Ledger":"ലെഡ്ജർ പ്രിന്റ് ചെയ്യുക",
+  "Make Payment":"പണം നൽകുക",
+  "Mark Payment Done":"പണമടച്ചതായി രേഖപ്പെടുത്തുക",
+  "Loading...":"ലോഡ് ചെയ്യുന്നു...",
+  "No records found":"രേഖകളൊന്നും കണ്ടെത്തിയില്ല",
+  "Saved successfully":"വിജയകരമായി സേവ് ചെയ്തു",
+  "Updated successfully":"വിജയകരമായി പുതുക്കി",
+  "Deleted successfully":"വിജയകരമായി നീക്കി",
+};
+Object.entries(MALAYALAM_TEXT).forEach(([key,value])=>{
+  LANGUAGE_TEXT[key] = { ...(LANGUAGE_TEXT[key] || {}), ml:value };
+});
+let ACTIVE_LANGUAGE = "en";
+const tr = (value, language = ACTIVE_LANGUAGE) => {
+  if (typeof value !== "string" || language === "en") return value;
+  const direct = LANGUAGE_TEXT[value]?.[language];
+  if (direct) return direct;
+  const required = value.endsWith(" *") ? " *" : "";
+  const base = required ? value.slice(0,-2) : value;
+  const baseTranslation = LANGUAGE_TEXT[base]?.[language];
+  if (baseTranslation) return `${baseTranslation}${required}`;
+  for (const english of Object.keys(LANGUAGE_TEXT)) {
+    if (base.startsWith(`${english} (`)) return `${LANGUAGE_TEXT[english]?.[language] || english}${base.slice(english.length)}${required}`;
+  }
+  return value;
+};
+
+const mergeDailyReportsByDate = (reports = []) => {
+  const map = new Map();
+  reports.forEach((r) => {
+    const key = r.date || "";
+    const current = map.get(key) || {
+      ...r,
+      _ids: [], reportCount: 0, workerEntries: [], payments: [], completedToday: 0,
+      totalCompleted: r.totalCompleted || "", totalPayments: 0, totalReceived: 0,
+      materials: [], extraWorks: [], complaintsList: [], notesList: [], sourceReports: [],
+    };
+    current._ids.push(r._id);
+    current.reportCount += 1;
+    current.sourceReports.push(r);
+    current.workerEntries = [...(current.workerEntries || []), ...(r.workerEntries || [])];
+    current.payments = [...(current.payments || []), ...(r.payments || [])];
+    current.completedToday = (+(current.completedToday) || 0) + (+(r.completedToday) || 0);
+    current.totalPayments = (+(current.totalPayments) || 0) + (+(r.totalPayments) || 0);
+    current.totalReceived = (+(current.totalReceived) || 0) + (+(r.totalReceived) || 0);
+    if (r.totalCompleted) current.totalCompleted = r.totalCompleted;
+    if (r.materialsUnloaded) current.materials.push(r);
+    if (r.extraWorkDesc) current.extraWorks.push(r);
+    if (r.complaints) current.complaintsList.push(r);
+    if (r.dayNotes) current.notesList.push(r);
+    current.workersCount = current.workerEntries.length;
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+};
+
+async function api(method, path, body) {
+  try {
+    const res = await fetch(`${API}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (res.ok && method !== "GET" && !path.includes("/devices/check")) {
+      const label = method === "POST" ? "Saved successfully" : method === "PUT" ? "Updated successfully" : method === "DELETE" ? "Deleted successfully" : "Success";
+      window.dispatchEvent(new CustomEvent("app-success", { detail: data?.successMessage || data?.message || label }));
+    }
+    return data;
+  } catch { return {}; }
+}
+
+function requestAuditReason(action, label, user) {
+  const reason = window.prompt(`Enter reason to ${action} this ${label}:`);
+  if (!reason || !reason.trim()) {
+    window.alert("Reason is required.");
+    return null;
+  }
+  return {
+    auditReason: reason.trim(),
+    reasonType: action,
+    auditBy: user?.name || "",
+    auditRole: user?.role || "",
+  };
+}
+
+// ─── UI COMPONENTS ─────────────────────────────────────────────────────────────
+function Badge({ children, color = "gray" }) {
+  const c = { green:"bg-green-100 text-green-700 border-green-200", red:"bg-red-100 text-red-700 border-red-200", yellow:"bg-yellow-100 text-yellow-700 border-yellow-200", blue:"bg-blue-100 text-blue-700 border-blue-200", gray:"bg-gray-100 text-gray-600 border-gray-200", orange:"bg-orange-100 text-orange-700 border-orange-200", purple:"bg-purple-100 text-purple-700 border-purple-200", teal:"bg-teal-100 text-teal-700 border-teal-200", amber:"bg-amber-100 text-amber-700 border-amber-200" };
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${c[color]||c.gray}`}>{typeof children === "string" ? tr(children) : children}</span>;
+}
+
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/45 backdrop-blur-sm p-0 sm:p-3">
+      <div className={`app-modal bg-white rounded-t-2xl sm:rounded-lg shadow-xl border border-slate-300 w-full ${wide?"max-w-2xl":"max-w-lg"} max-h-[94dvh] sm:max-h-[92vh] overflow-y-auto`}>
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 sticky top-0 bg-slate-900 z-10">
+          <h3 className="font-black text-white text-base leading-tight">{tr(title)}</h3>
+          <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white text-2xl leading-none flex items-center justify-center">×</button>
+        </div>
+        <div className="app-modal-body px-4 sm:px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Input({ label, ...props }) {
+  const localizedProps = { ...props, placeholder:props.placeholder ? tr(props.placeholder) : props.placeholder };
+  return (
+    <div>
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
+      <input className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...localizedProps} />
+    </div>
+  );
+}
+
+function Textarea({ label, ...props }) {
+  const localizedProps = { ...props, placeholder:props.placeholder ? tr(props.placeholder) : props.placeholder };
+  return (
+    <div>
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
+      <textarea className="w-full min-h-24 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white resize-none" rows={3} {...localizedProps} />
+    </div>
+  );
+}
+
+function Select({ label, options, ...props }) {
+  return (
+    <div>
+      {label && <label className="block text-xs font-bold text-slate-600 mb-1">{tr(label)}</label>}
+      <select className="w-full min-h-11 border border-slate-300 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 bg-white" {...props}>
+        {options.map((o) => <option key={o.value??o} value={o.value??o}>{tr(o.label??o)}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function SiteWorkDetailsPanel({ site, dailyReceived = 0, onEditPayment, onDeletePayment }) {
+  if (!site) return null;
+  const baseCost = (+(site.workSize || 0)) * (+(site.ratePerUnit || 0));
+  const siteCost = +(site.totalCost || site.totalAmount || 0);
+  const directPayments = directSitePaymentRows(site, dailyReceived);
+  const received = Math.max(dailyReceived + directPayments.reduce((a,p)=>a+(+(p.amount)||0),0), +(site.totalReceived)||0);
+  const pending = Math.max(0, siteCost - received - (+(site.completionDiscount) || 0));
+  const dispatchOperations = site.dispatchOperations || [];
+  const loadedPieces = dispatchOperations.filter(row=>row.operation==="load").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
+  const unloadedPieces = dispatchOperations.filter(row=>row.operation==="unload").reduce((sum,row)=>sum+(+(row.quantity)||0),0);
+  return (
+    <SectionBox title="Site Work Details" icon="Site" color="amber">
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div><div className="text-xs text-gray-400">Customer</div><div className="font-bold">{site.customerName||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{site.phone||"-"}</div></div>
+        <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{site.siteLocation||site.location||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Interlock Type</div><div className="font-bold">{site.interlockType||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Color / Spec</div><div className="font-bold">{site.interlockColor||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Work Size</div><div className="font-bold">{site.workSize||0} {site.workUnit||"sqft"}</div></div>
+        <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{fmt(site.ratePerUnit||0)}/{site.workUnit||"sqft"}</div></div>
+        <div><div className="text-xs text-gray-400">Start Date</div><div className="font-bold">{site.startDate||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">End Date</div><div className="font-bold">{site.endDate||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Status</div><div className="font-bold">{site.status||"-"}</div></div>
+        <div><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{site.addedBy||"-"}</div></div>
+      </div>
+      {(site.selectedWorkers||[]).length>0&&<div className="mt-2"><div className="text-xs text-gray-400 mb-1">Assigned Workers</div><div className="flex flex-wrap gap-1">{(site.selectedWorkers||[]).map(w=><Badge key={w} color="teal">{w}</Badge>)}</div></div>}
+      <div className="mt-3 space-y-1 text-sm">
+        <div className="flex justify-between"><span>Base Cost</span><span className="font-bold">{CURRENCY}{fmt(baseCost)}</span></div>
+        {(site.extraWork||[]).map((e,i)=><div key={`ew-${i}`} className="flex justify-between text-xs pl-2"><span>Extra Work: {e.name} ({e.qty||1} x {CURRENCY}{fmt(e.rate||0)})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total||0)}</span></div>)}
+        {(site.extraMaterials||[]).map((e,i)=><div key={`em-${i}`} className="flex justify-between text-xs pl-2"><span>Extra Material: {e.name} ({e.qty||0} {e.unit||""} x {CURRENCY}{fmt(e.rate||0)})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total||0)}</span></div>)}
+        {+(site.materialCost||0)>0&&<div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(site.materialCost)}</span></div>}
+        {+(site.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(site.laborCost)}</span></div>}
+        <div className="flex justify-between border-t pt-1"><span className="font-black">Total Site Cost</span><span className="font-black text-green-700">{CURRENCY}{fmt(siteCost)}</span></div>
+        <div className="flex justify-between"><span>Total Received</span><span className="font-bold text-blue-700">{CURRENCY}{fmt(received)}</span></div>
+        {+(site.completionDiscount||0)>0&&<div className="flex justify-between"><span className="font-bold text-amber-700">Completion Discount</span><span className="font-bold text-amber-700">{CURRENCY}{fmt(site.completionDiscount)}</span></div>}
+        <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(pending)}</span></div>
+      </div>
+      {directPayments.length>0&&<div className="mt-2 text-xs"><div className="font-bold text-blue-700 mb-1">Site Work Payments</div>{directPayments.map((p,i)=><div key={`${p.source}-${p.paymentIndex??i}`} className="flex items-center justify-between gap-3 border-t py-2"><div><span className="font-bold">{p.date||"-"} · {p.mode||p.paymentMode||"-"}</span><div className="text-gray-400">{p.source}</div></div><div className="flex items-center gap-2"><span className="font-bold">{CURRENCY}{fmt(p.amount)}</span>{p.editable&&onEditPayment&&<button type="button" title="Edit payment" onClick={()=>onEditPayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-700"><Pencil size={14}/></button>}{p.editable&&onDeletePayment&&<button type="button" title="Delete payment" onClick={()=>onDeletePayment(p)} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700"><Trash2 size={14}/></button>}</div></div>)}</div>}
+      {dispatchOperations.length>0&&<div className="mt-3 border-t pt-3 space-y-2">
+        <div className="font-black text-sm text-violet-700">Material Loading & Unloading Ledger</div>
+        <div className="grid grid-cols-2 gap-2 text-xs text-center"><div className="rounded-lg bg-blue-50 border border-blue-200 p-2"><div className="font-black text-blue-700">{fmt(loadedPieces)} pieces</div><div className="text-gray-500">Loaded</div></div><div className="rounded-lg bg-green-50 border border-green-200 p-2"><div className="font-black text-green-700">{fmt(unloadedPieces)} pieces</div><div className="text-gray-500">Unloaded</div></div></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Action</th><th className="p-2 text-left">Product Details</th><th className="p-2 text-left">Worker</th><th className="p-2 text-right">Pieces</th><th className="p-2 text-right">Worker Charge</th></tr></thead><tbody>{dispatchOperations.map(row=><tr key={row._id} className="border-t"><td className="p-2">{row.date||"-"}<div className="text-gray-400">{row.time||""}</div></td><td className={`p-2 font-black ${row.operation==="load"?"text-blue-700":"text-green-700"}`}>{row.operation==="load"?"Loaded":"Unloaded"}</td><td className="p-2 font-bold">{row.product||"-"}<div className="font-normal text-gray-500">{[row.productType==="hollowbrick"?"Hollow Brick":"Interlock",row.category,row.color,row.size,row.thickness].filter(Boolean).join(" / ")}</div></td><td className="p-2">{row.workerName||"-"}<div className="text-gray-400">{row.workerType==="production-worker"?"Production Worker":"Site Worker"}</div></td><td className="p-2 text-right font-black">{fmt(row.quantity)} {row.unit||"piece"}</td><td className="p-2 text-right font-black text-amber-700">{CURRENCY}{fmt(row.totalAmount||0)}</td></tr>)}</tbody></table></div>
+      </div>}
+      {site.note&&<div className="mt-2 text-sm"><div className="text-xs text-gray-400">Note</div><div>{site.note}</div></div>}
+    </SectionBox>
+  );
+}
+
+function StatCard({ label, value, sub, icon, color, solid = false }) {
+  const c = {
+    amber:"bg-amber-50 text-amber-700 border-amber-200",
+    blue:"bg-blue-50 text-blue-700 border-blue-200",
+    green:"bg-emerald-50 text-emerald-700 border-emerald-200",
+    red:"bg-red-50 text-red-700 border-red-200",
+    purple:"bg-violet-50 text-violet-700 border-violet-200",
+    teal:"bg-teal-50 text-teal-700 border-teal-200",
+    gray:"bg-slate-50 text-slate-600 border-slate-200"
+  };
+  const solidColors = {
+    amber:"bg-amber-50 border-amber-200",
+    blue:"bg-blue-50 border-blue-200",
+    green:"bg-emerald-50 border-emerald-200",
+    red:"bg-rose-50 border-rose-200",
+    purple:"bg-violet-50 border-violet-200",
+    teal:"bg-teal-50 border-teal-200",
+    gray:"bg-slate-50 border-slate-200"
+  };
+  return (
+    <div className={`${solid ? `${solidColors[color]||solidColors.amber} min-h-[118px] shadow-sm hover:shadow-md` : "bg-white border-slate-200 shadow-sm"} rounded-xl border p-4 flex items-start gap-3 transition-shadow`}>
+      <div className={`w-10 h-10 rounded-lg border ${c[color]||c.amber} flex items-center justify-center text-sm font-black shrink-0`}>{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-base sm:text-xl font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis text-slate-950" title={String(value??"")}>{value}</div>
+        <div className="text-[11px] font-black uppercase text-slate-600">{tr(label)}</div>
+        {sub && <div className="text-xs mt-0.5 text-slate-500">{tr(sub)}</div>}
+      </div>
+    </div>
+  );
+}
+
+function DashboardDonut({ incoming = 0, outgoing = 0 }) {
+  const total = Math.max(0, +incoming || 0) + Math.max(0, +outgoing || 0);
+  const incomingShare = total ? Math.round((Math.max(0, +incoming || 0) / total) * 100) : 50;
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-5">
+      <div className="relative w-36 h-36 shrink-0 rounded-full shadow-inner" style={{background:total?`conic-gradient(#10b981 0 ${incomingShare}%, #f43f5e ${incomingShare}% 100%)`:"#e2e8f0"}}>
+        <div className="absolute inset-[18px] rounded-full bg-white flex flex-col items-center justify-center shadow-sm">
+          <div className="text-xl font-black text-slate-950">{CURRENCY}{fmt(total)}</div>
+          <div className="text-[10px] font-black uppercase text-slate-400">Cash Movement</div>
+        </div>
+      </div>
+      <div className="w-full space-y-3">
+        <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-bold text-slate-700"><i className="w-3 h-3 rounded-full bg-emerald-500"/>Cash In</span><strong className="text-emerald-700">{CURRENCY}{fmt(incoming)}</strong></div>
+        <div className="flex items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm font-bold text-slate-700"><i className="w-3 h-3 rounded-full bg-rose-500"/>Cash Out</span><strong className="text-rose-700">{CURRENCY}{fmt(outgoing)}</strong></div>
+        <div className="border-t border-slate-100 pt-3 flex items-center justify-between gap-3"><span className="text-xs font-bold text-slate-500">Net Balance</span><strong className={(+incoming-(+outgoing))>=0?"text-emerald-700":"text-rose-700"}>{CURRENCY}{fmt((+incoming||0)-(+outgoing||0))}</strong></div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardBars({ rows = [] }) {
+  const max = Math.max(1, ...rows.map(row => Math.max(0, +row.value || 0)));
+  return <div className="space-y-4">{rows.map(row=><div key={row.label} className="space-y-1.5"><div className="flex items-center justify-between gap-3 text-xs"><span className="font-bold text-slate-600">{row.label}</span><strong className="text-slate-950">{row.display}</strong></div><div className="h-3 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${row.color}`} style={{width:`${Math.max(0,+row.value||0)?Math.max(3,((Math.max(0,+row.value||0)/max)*100)):0}%`}}/></div></div>)}</div>;
+}
+
+function Loader() {
+  return <div className="flex items-center justify-center py-16"><div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>;
+}
+
+function EmptyState({ icon, text }) {
+  return <div className="bg-white rounded-lg border border-dashed border-slate-300 p-10 text-center shadow-sm"><div className="text-3xl mb-2 opacity-70">{icon}</div><div className="text-slate-500 font-semibold">{tr(text)}</div></div>;
+}
+
+function SectionBox({ title, icon, color = "gray", children }) {
+  const c = {
+    gray:{ border:"border-slate-200", header:"bg-slate-100 text-slate-700" },
+    blue:{ border:"border-blue-200", header:"bg-blue-50 text-blue-800" },
+    green:{ border:"border-emerald-200", header:"bg-emerald-50 text-emerald-800" },
+    amber:{ border:"border-amber-200", header:"bg-amber-50 text-amber-800" },
+    red:{ border:"border-red-200", header:"bg-red-50 text-red-800" },
+    purple:{ border:"border-violet-200", header:"bg-violet-50 text-violet-800" },
+    teal:{ border:"border-teal-200", header:"bg-teal-50 text-teal-800" },
+    orange:{ border:"border-orange-200", header:"bg-orange-50 text-orange-800" }
+  };
+  const theme = c[color] || c.gray;
+  return (
+    <section className={`bg-white border ${theme.border} rounded-lg overflow-hidden shadow-sm`}>
+      <div className={`${theme.header} px-4 py-2.5 text-xs font-black uppercase border-b ${theme.border}`}>{icon} {tr(title)}</div>
+      <div className="p-4 space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function LanguageSelector({ value, onChange, dark = false, compact = false }) {
+  return (
+    <label className={`flex items-center gap-2 ${compact ? "" : "w-full"}`} title={tr("Language", value)}>
+      {!compact&&<span className={`text-xs font-bold ${dark?"text-slate-300":"text-slate-600"}`}>{tr("Language", value)}</span>}
+      <select
+        aria-label={tr("Language", value)}
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        className={`${compact?"h-9 max-w-[118px] px-2":"min-h-11 flex-1 px-3"} rounded-lg border text-sm font-bold outline-none ${dark?"bg-slate-900 border-slate-700 text-white":"bg-white border-slate-300 text-slate-700 focus:border-blue-600"}`}
+      >
+        {LANGUAGE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function LocalizedContent({ language, children }) {
+  const rootRef = useRef(null);
+  const originalsRef = useRef(new WeakMap());
+  useEffect(()=>{
+    const root = rootRef.current;
+    if (!root) return;
+    const originals = originalsRef.current;
+    const variantsOf = source => [source, ...LANGUAGE_OPTIONS.map(option=>tr(source,option.value))];
+    const translateNode = (node, refreshSource = false) => {
+      if (!node || node.nodeType !== Node.TEXT_NODE || !node.nodeValue?.trim()) return;
+      let source = originals.get(node);
+      const current = node.nodeValue;
+      if (!source) {
+        source = current;
+        originals.set(node, source);
+      } else if (refreshSource && !variantsOf(source).includes(current)) {
+        source = current;
+        originals.set(node, source);
+      }
+      const translated = tr(source, language);
+      if (current !== translated) node.nodeValue = translated;
+    };
+    const translateTree = (target, refreshSource = false) => {
+      if (target.nodeType === Node.TEXT_NODE) return translateNode(target, refreshSource);
+      if (target.nodeType !== Node.ELEMENT_NODE) return;
+      if (["SCRIPT","STYLE"].includes(target.tagName)) return;
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) translateNode(node, refreshSource);
+    };
+    translateTree(root, false);
+    const observer = new MutationObserver(mutations=>mutations.forEach(mutation=>{
+      if (mutation.type === "characterData") translateNode(mutation.target, true);
+      mutation.addedNodes?.forEach(node=>translateTree(node, true));
+    }));
+    observer.observe(root,{subtree:true,childList:true,characterData:true});
+    return ()=>observer.disconnect();
+  },[language]);
+  return <div ref={rootRef} className="contents">{children}</div>;
+}
+
+
+// ─── DEVICE FINGERPRINT ───────────────────────────────────────────────────────
+function getDeviceId() {
+  let id = localStorage.getItem("pk_device_id");
+  if (!id) {
+    id = "dev_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem("pk_device_id", id);
+  }
+  return id;
+}
+
+function getDeviceInfo() {
+  const ua = navigator.userAgent;
+  const deviceId = getDeviceId();
+  let deviceName = "Unknown Device";
+  let browser = "Unknown Browser";
+
+  // Detect device
+  if (/iPhone/.test(ua)) deviceName = "iPhone";
+  else if (/iPad/.test(ua)) deviceName = "iPad";
+  else if (/Samsung|SM-/.test(ua)) deviceName = "Samsung Galaxy";
+  else if (/Redmi|Mi /.test(ua)) deviceName = "Xiaomi/Redmi";
+  else if (/OnePlus/.test(ua)) deviceName = "OnePlus";
+  else if (/Pixel/.test(ua)) deviceName = "Google Pixel";
+  else if (/Android/.test(ua)) deviceName = "Android Phone";
+  else if (/Windows/.test(ua)) deviceName = "Windows PC";
+  else if (/Mac/.test(ua)) deviceName = "Mac";
+
+  // Detect browser
+  if (/Chrome\//.test(ua) && !/Chromium|Edge/.test(ua)) browser = "Chrome";
+  else if (/Firefox/.test(ua)) browser = "Firefox";
+  else if (/Safari/.test(ua) && !/Chrome/.test(ua)) browser = "Safari";
+  else if (/Edge/.test(ua)) browser = "Edge";
+
+  const isMobile = /Mobi|Android|iPhone|iPad/.test(ua);
+
+  return { deviceId, deviceName, browser, isMobile, userAgent: ua.slice(0, 100), loginTime: new Date().toLocaleString("en-IN") };
+}
+
+// ─── DEVICE PENDING SCREEN ────────────────────────────────────────────────────
+function DevicePendingScreen({ username, deviceInfo, onRetry }) {
+  const [status, setStatus] = useState("pending"); // pending | approved | rejected
+  const [checking, setChecking] = useState(false);
+
+  const checkStatus = async () => {
+    setChecking(true);
+    const devices = await api("GET", "/devices");
+    const myDevice = Array.isArray(devices) && devices.find(d => d.deviceId === deviceInfo.deviceId && d.username === username);
+    if (myDevice?.status === "approved") setStatus("approved");
+    else if (myDevice?.status === "rejected") setStatus("rejected");
+    else setStatus("pending");
+    setChecking(false);
+    if (myDevice?.status === "approved") setTimeout(onRetry, 1000);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8 text-center">
+        {status === "approved" ? (
+          <>
+            <div className="text-6xl mb-4">✅</div>
+            <h2 className="text-xl font-black text-green-700 mb-2">Device Approved!</h2>
+            <p className="text-gray-500 text-sm">Logging you in...</p>
+          </>
+        ) : status === "rejected" ? (
+          <>
+            <div className="text-6xl mb-4">❌</div>
+            <h2 className="text-xl font-black text-red-600 mb-2">Access Denied</h2>
+            <p className="text-gray-500 text-sm mb-4">Admin has rejected this device. Contact your admin.</p>
+          </>
+        ) : (
+          <>
+            <div className="text-6xl mb-4">📱</div>
+            <h2 className="text-xl font-black text-gray-900 mb-2">New Device Detected</h2>
+            <p className="text-gray-500 text-sm mb-6">Waiting for admin approval to access the app.</p>
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-left mb-6 space-y-1">
+              <div className="text-xs font-bold text-amber-700 mb-2">📋 Device Details</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Device:</span> {deviceInfo.deviceName}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Browser:</span> {deviceInfo.browser}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Type:</span> {deviceInfo.isMobile ? "Mobile" : "Desktop"}</div>
+              <div className="text-xs text-gray-600"><span className="font-bold">Time:</span> {deviceInfo.loginTime}</div>
+            </div>
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"0ms"}}/>
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"150ms"}}/>
+              <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay:"300ms"}}/>
+            </div>
+          </>
+        )}
+        <button onClick={checkStatus} disabled={checking} className="w-full bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 disabled:opacity-60 mt-2">
+          {checking ? "Checking..." : "🔄 Check Approval Status"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DEVICE MANAGEMENT (Admin) ────────────────────────────────────────────────
+function DeviceManagement({ user }) {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("pending");
+
+  useEffect(() => {
+    api("GET", "/devices").then(d => {
+      setDevices(Array.isArray(d) ? d : []);
+      setLoading(false);
+    });
+  }, []);
+
+  const updateDevice = async (id, status) => {
+    await api("PUT", `/devices/${id}`, { status });
+    setDevices(p => p.map(d => d._id === id ? { ...d, status } : d));
+  };
+
+  const deleteDevice = async (id) => {
+    if (!window.confirm("Remove this device?")) return;
+    await api("DELETE", `/devices/${id}`);
+    setDevices(p => p.filter(d => d._id !== id));
+  };
+
+  const pending = devices.filter(d => d.status === "pending");
+  const approved = devices.filter(d => d.status === "approved");
+  const rejected = devices.filter(d => d.status === "rejected");
+
+  const filtered = filter === "pending" ? pending : filter === "approved" ? approved : rejected;
+
+  if (loading) return <Loader />;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📱 Device Management</h2>
+
+      {pending.length > 0 && (
+        <div className="bg-red-50 border border-red-300 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"/>
+            <div className="font-black text-red-700">🔔 {pending.length} Pending Approval{pending.length > 1 ? "s" : ""}</div>
+          </div>
+          <div className="text-xs text-red-600">New devices waiting for your approval!</div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{pending.length}</div><div className="text-xs text-gray-400">Pending</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{approved.length}</div><div className="text-xs text-gray-400">Approved</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{rejected.length}</div><div className="text-xs text-gray-400">Rejected</div></div>
+      </div>
+
+      <div className="flex gap-1">
+        {["pending","approved","rejected"].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${filter===f?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+            {f.charAt(0).toUpperCase()+f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-3">
+        {filtered.length === 0 && <EmptyState icon="📱" text={`No ${filter} devices`} />}
+        {filtered.map(d => (
+          <div key={d._id} className={`bg-white rounded-2xl border shadow-sm p-4 ${d.status==="pending"?"border-amber-300":d.status==="approved"?"border-green-200":"border-red-200"}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-gray-900">{d.name}</span>
+                  <Badge color={d.status==="approved"?"green":d.status==="pending"?"amber":"red"}>{d.status}</Badge>
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">👤 {d.username} · {d.role}</div>
+                <div className="text-xs text-gray-400">📱 {d.deviceName} · {d.browser}</div>
+                <div className="text-xs text-gray-400">🕐 {d.loginTime}</div>
+                <div className="text-xs text-gray-300 mt-0.5 font-mono">{d.deviceId?.slice(0,20)}...</div>
+              </div>
+            </div>
+            <div className="mt-3 flex gap-1">
+              {d.status !== "approved" && (
+                <button onClick={() => updateDevice(d._id, "approved")} className="flex-1 bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">✅ Approve</button>
+              )}
+              {d.status !== "rejected" && (
+                <button onClick={() => updateDevice(d._id, "rejected")} className="flex-1 bg-red-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-red-600">❌ Reject</button>
+              )}
+              <button onClick={() => deleteDevice(d._id)} className="bg-gray-100 text-gray-600 px-3 py-2 rounded-xl text-xs font-bold hover:bg-gray-200">🗑️</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── LOGIN ────────────────────────────────────────────────────────────────────
+function Login({ onLogin, branding = COMPANY, language, onLanguageChange }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [slowLoading, setSlowLoading] = useState(false);
+
+  const login = async () => {
+    if (!username || !password) return setError("Enter username and password");
+    setLoading(true); setSlowLoading(false); setError("");
+    const slowTimer = window.setTimeout(() => setSlowLoading(true), 4000);
+    try {
+      const res = await fetch(`${API}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.role) {
+        // Check device approval (skip for admin)
+        if (!isAdminLike(data.role)) {
+          const deviceInfo = getDeviceInfo();
+          // Register device if not exists
+          const devRes = await api("POST", "/devices/check", {
+            deviceId: deviceInfo.deviceId,
+            username: data.username,
+            name: data.name,
+            role: data.role,
+            deviceName: deviceInfo.deviceName,
+            browser: deviceInfo.browser,
+            loginTime: deviceInfo.loginTime,
+          });
+          if (devRes.status === "approved") {
+            onLogin(data);
+          } else if (devRes.status === "pending") {
+            onLogin({ ...data, devicePending: true, deviceInfo });
+          } else {
+            onLogin(data); // new device registered, pending
+          }
+        } else {
+          onLogin(data);
+        }
+      } else setError(data.message || "Invalid credentials");
+    } catch {
+      setError("Server error, please try again");
+    }
+    window.clearTimeout(slowTimer);
+    setSlowLoading(false);
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm p-8">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm"><img src={branding.logo || COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-1" /></div>
+          <h1 className="text-2xl font-black text-gray-900">{branding.shortName || branding.companyName || COMPANY.shortName}</h1>
+          <p className="text-slate-500 text-sm mt-1">{tr("Management System", language)}</p>
+        </div>
+        <div className="space-y-4">
+          <LanguageSelector value={language} onChange={onLanguageChange} />
+          <Input label="Username" value={username} onChange={e=>setUsername(e.target.value)} placeholder="Enter username" onKeyDown={e=>e.key==="Enter"&&login()} />
+          <Input label="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Enter password" onKeyDown={e=>e.key==="Enter"&&login()} />
+          {error && <div className="text-red-600 text-xs font-semibold bg-red-50 rounded-xl p-3">{tr(error, language)}</div>}
+          <button onClick={login} disabled={loading} className="w-full bg-amber-500 text-white py-3 rounded-lg font-black text-base hover:bg-amber-600 shadow-sm disabled:opacity-60">
+            {tr(loading ? "Signing in..." : "Sign In", language)}
+          </button>
+          {slowLoading && <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-500"><span className="w-3.5 h-3.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />Server is starting. This can take a few seconds.</div>}
+        </div>
+        <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+          <div className="text-[11px] font-bold text-gray-500">{POWERED_BY}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">{COPYRIGHT_TEXT}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function Dashboard({ stock, raw, production, sales, siteWorks, user }) {
+  const isAdmin = user.role === "admin";
+  const fixedToday = today();
+  const [view, setView] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(fixedToday);
+  const [selectedMonth, setSelectedMonth] = useState(fixedToday.slice(0, 7));
+  const [fromDate, setFromDate] = useState(fixedToday);
+  const [toDate, setToDate] = useState(fixedToday);
+  const [summary, setSummary] = useState({ totals: {}, productionItemSummary: [], recentSales: [], recentPurchases: [], recentProduction: [], recentSites: [] });
+  const [loading, setLoading] = useState(true);
+
+  const range = () => {
+    if (!isAdmin) return { from: fixedToday, to: fixedToday, label: "Today" };
+    if (view === "all") return { from: "", to: "", label: "All Time" };
+    if (view === "monthly") {
+      const [year, month] = selectedMonth.split("-");
+      const last = new Date(+year, +month, 0).getDate();
+      return { from: `${selectedMonth}-01`, to: `${selectedMonth}-${String(last).padStart(2, "0")}`, label: selectedMonth };
+    }
+    if (view === "range") return { from: fromDate, to: toDate, label: `${fromDate} to ${toDate}` };
+    return { from: selectedDate, to: selectedDate, label: selectedDate };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const r = range();
+    const params = new URLSearchParams({ role: effectiveRoleOf(user.role), fromDate: r.from, toDate: r.to });
+    setLoading(true);
+    api("GET", `/dashboard-summary?${params.toString()}`).then(data => {
+      if (!active) return;
+      setSummary(data?.totals ? data : { totals: {}, productionItemSummary: [], recentSales: [], recentPurchases: [], recentProduction: [], recentSites: [] });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, view, selectedDate, selectedMonth, fromDate, toDate]);
+
+  const total = summary.totals || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const currentRange = range();
+  const activityBars = [
+    { label:"Sales", value:total.salesAmount, display:money(total.salesAmount), color:"bg-blue-500" },
+    { label:"Purchases", value:total.purchaseAmount, display:money(total.purchaseAmount), color:"bg-amber-500" },
+    { label:"Production Value", value:total.productionValue, display:money(total.productionValue), color:"bg-violet-500" },
+    { label:"Site Value", value:total.siteValue, display:money(total.siteValue), color:"bg-emerald-500" },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="dashboard-welcome flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Good day, {user.name.split(" ")[0]}</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{isAdmin ? `Dashboard period: ${currentRange.label}` : "Today's office dashboard"}</p>
+        </div>
+        {isAdmin && (
+          <div className="bg-white border rounded-2xl shadow-sm p-3 grid grid-cols-2 sm:flex gap-2 items-end">
+            <Select label="View" value={view} options={[{value:"daily",label:"Daily"},{value:"monthly",label:"Monthly"},{value:"range",label:"Date Range"},{value:"all",label:"All Time"}]} onChange={e=>setView(e.target.value)} />
+            {view==="daily"&&<Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
+            {view==="monthly"&&<Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
+            {view==="range"&&<><Input label="From" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} /><Input label="To" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} /></>}
+          </div>
+        )}
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard solid label="Cash In" value={money(total.cashIn)} icon="IN" color="green" sub={`Sales ${money(total.salesReceived)} | Site ${money(total.siteReceived)}`} />
+            <StatCard solid label="Cash Out" value={money(total.cashOut)} icon="OUT" color="red" sub={`Purchase ${money(total.purchaseCashOut)} | Payroll ${money(total.payrollPaid)} | Other ${money(total.otherExpensePaid)}`} />
+            <StatCard solid label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
+            <StatCard solid label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} invoices`} />
+            <StatCard solid label="Purchases" value={money(total.purchaseAmount)} icon="P" color="amber" sub={`Pending ${money(total.purchasePending)}`} />
+            <StatCard solid label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft)} sqft | Value ${money(total.productionValue)}`} />
+            <StatCard solid label="Running Sites" value={total.runningSites||0} icon="SITE" color="purple" sub={`Completed ${total.completedSites||0}`} />
+            <StatCard solid label="Site Pending" value={money(total.sitePending)} icon="DUE" color="red" sub={`Site value ${money(total.siteValue)}`} />
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <SectionBox title="Cash Flow Overview" icon="CF" color="green">
+              <DashboardDonut incoming={total.cashIn} outgoing={total.cashOut} />
+            </SectionBox>
+            <SectionBox title="Business Activity" icon="BA" color="blue">
+              <DashboardBars rows={activityBars} />
+            </SectionBox>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-4">
+            <SectionBox title="Production Item-wise" icon="P" color="teal">
+              {(summary.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production in this period</div> : (
+                <div className="space-y-2">
+                  {summary.productionItemSummary.map((item,i)=>(
+                    <div key={i} className="flex justify-between gap-3 text-xs border-b border-teal-100 pb-1">
+                      <span><b>{item.item}</b>{item.color?` / ${item.color}`:""}</span>
+                      <span className="font-black text-teal-700">{qtyWithSqft(item)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionBox>
+
+            <SectionBox title="Stock Position" icon="ST" color="blue">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-blue-50 rounded-xl p-2"><div className="font-black text-blue-700">{total.stockItems||stock.length}</div><div className="text-xs text-gray-400">Items</div></div>
+                <div className="bg-green-50 rounded-xl p-2"><div className="font-black text-green-700">{fmt(total.stockQuantity)}</div><div className="text-xs text-gray-400">Qty</div></div>
+                <div className="bg-red-50 rounded-xl p-2"><div className="font-black text-red-600">{total.lowStockItems||0}</div><div className="text-xs text-gray-400">Low</div></div>
+              </div>
+            </SectionBox>
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-4">
+            <SectionBox title="Recent Sales" icon="S" color="green">
+              {(summary.recentSales||[]).length===0 ? <div className="text-xs text-gray-400">No sales</div> : summary.recentSales.map(s=>(
+                <div key={s._id} className="flex justify-between gap-2 text-xs border-b border-green-100 py-1"><span><b>{s.customer||"-"}</b><br />{s.product||s.interlockDetails||"-"}</span><span className="text-right font-black">{money(s.amountPaid)}<br /><span className="text-gray-400">{s.date}</span></span></div>
+              ))}
+            </SectionBox>
+            <SectionBox title="Recent Purchases" icon="P" color="amber">
+              {(summary.recentPurchases||[]).length===0 ? <div className="text-xs text-gray-400">No purchases</div> : summary.recentPurchases.map(p=>(
+                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-amber-100 py-1"><span><b>{p.supplierName||"-"}</b><br />{p.itemName||p.itemType||"-"}</span><span className="text-right font-black">{money(p.amountPaid)}<br /><span className="text-gray-400">{p.date}</span></span></div>
+              ))}
+            </SectionBox>
+            <SectionBox title="Recent Production" icon="PR" color="purple">
+              {(summary.recentProduction||[]).length===0 ? <div className="text-xs text-gray-400">No production</div> : summary.recentProduction.map(p=>(
+                <div key={p._id} className="flex justify-between gap-2 text-xs border-b border-purple-100 py-1"><span><b>{p.workerName||"-"}</b><br />{p.itemName||p.category||"-"}</span><span className="text-right font-black">{qtyWithSqft(p)}<br /><span className="text-gray-400">{p.date}</span></span></div>
+              ))}
+            </SectionBox>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function MasterData() {
+  const [tab, setTab] = useState("interlock");
+  const [data, setData] = useState({ interlock:[], hollowbricks:[], materials:[], labor:[], extrawork:[], customers:[], suppliers:[] });
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({});
+  const [saveError, setSaveError] = useState("");
+
+  const loadAll = () => Promise.all([
+    api("GET","/masterdata/interlock"),
+    api("GET","/masterdata/hollowbricks"),
+    api("GET","/masterdata/materials"),
+    api("GET","/masterdata/labor"),
+    api("GET","/masterdata/extrawork"),
+    api("GET","/customers"),
+    api("GET","/suppliers"),
+  ]).then(([i,h,m,l,e,c,s])=>{
+    setData({
+      interlock:Array.isArray(i)?i:[], hollowbricks:Array.isArray(h)?h:[], materials:Array.isArray(m)?m:[],
+      labor:Array.isArray(l)?l:[], extrawork:Array.isArray(e)?e:[],
+      customers:Array.isArray(c)?c:[], suppliers:Array.isArray(s)?s:[],
+    });
+    setLoading(false);
+  });
+
+  useEffect(() => { loadAll(); }, []);
+
+  const save = async () => {
+    setSaveError("");
+    const type = modal.type;
+    let ok = true;
+    if (type === "customers") {
+      if (!form.name || !form.mobile) { setSaveError("Name and mobile required"); return; }
+      if (modal.item?._id) {
+        const updated = await api("PUT", `/customers/${modal.item._id}`, form);
+        if (updated._id) setData(d=>({...d,customers:d.customers.map(x=>x._id===modal.item._id?updated:x)}));
+        else { setSaveError(updated.message||"Failed"); ok = false; }
+      } else {
+        const created = await api("POST", "/customers", form);
+        if (created._id) setData(d=>({...d,customers:[...d.customers,created]}));
+        else { setSaveError(created.message||"Failed"); ok = false; }
+      }
+    } else if (type === "suppliers") {
+      if (!form.name) { setSaveError("Supplier name required"); return; }
+      const payload = { ...form, address: form.address || form.location, phone: form.mobile || form.phone };
+      if (modal.item?._id) {
+        const updated = await api("PUT", `/suppliers/${modal.item._id}`, payload);
+        if (updated._id) setData(d=>({...d,suppliers:d.suppliers.map(x=>x._id===modal.item._id?updated:x)}));
+        else ok = false;
+      } else {
+        const created = await api("POST", "/suppliers", payload);
+        if (created._id) setData(d=>({...d,suppliers:[...d.suppliers,created]}));
+        else ok = false;
+      }
+    } else if (modal.item?._id) {
+      await api("PUT", `/masterdata/${type}/${modal.item._id}`, form);
+      setData(d=>({...d,[type]:d[type].map(x=>x._id===modal.item._id?{...x,...form}:x)}));
+    } else {
+      const created = await api("POST", `/masterdata/${type}`, form);
+      if (created._id) setData(d=>({...d,[type]:[...d[type],created]}));
+    }
+    if (ok) { setModal(null); setForm({}); }
+  };
+
+  const del = async (type, id) => {
+    if (!window.confirm("Delete this item?")) return;
+    if (type === "customers") await api("DELETE", `/customers/${id}`);
+    else if (type === "suppliers") await api("DELETE", `/suppliers/${id}`);
+    else await api("DELETE", `/masterdata/${type}/${id}`);
+    setData(d=>({...d,[type]:d[type].filter(x=>x._id!==id)}));
+  };
+
+  const openAdd = (type) => { setSaveError(""); setForm({}); setModal({type, item:null}); };
+  const openEdit = (type, item) => { setSaveError(""); setForm({...item, mobile: item.mobile || item.phone || ""}); setModal({type, item}); };
+
+  const tabs = [
+    { id:"interlock", label:"Interlock Types", icon:"🧱" },
+    { id:"materials", label:"Raw Materials", icon:"⚙️" },
+    { id:"labor", label:"Labor Rates", icon:"👷" },
+    { id:"extrawork", label:"Extra Work", icon:"➕" },
+    { id:"customers", label:"Customer Master", icon:"👤" },
+    { id:"suppliers", label:"Supplier Master", icon:"🏪" },
+  ];
+  tabs.splice(1, 0, { id:"hollowbricks", label:"Hollow Bricks", icon:"HB" });
+
+  const renderForm = () => {
+    const t = modal?.type;
+    if (t==="interlock") return <>
+      <Input label="Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Paving Block" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} placeholder="e.g. Paver, Kerb, Tile" />
+        <Input label="Shape" value={form.shape||""} onChange={e=>setForm({...form,shape:e.target.value})} placeholder="e.g. Rectangular" />
+        <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} placeholder="e.g. Grey" />
+        <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 8x4" />
+        <Input label="Thickness (inch)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 2.5" />
+        <Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value})} placeholder="e.g. 0.22" />
+        <Input label={`Default Rate / sqft (${CURRENCY})`} type="number" value={form.pricePerSqft||""} onChange={e=>setForm({...form,pricePerSqft:+e.target.value})} />
+      </div>
+      <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
+    </>;
+    if (t==="hollowbricks") return <>
+      <Input label="Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Hollow Brick" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="Category" value={form.category||"Hollow Brick"} onChange={e=>setForm({...form,category:e.target.value})} placeholder="Hollow Brick" />
+        <Input label="Size (inch)" value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 4 inch / 6 inch / 8 inch" />
+        <Input label="1 Box Count" type="number" value={form.boxCount||""} onChange={e=>setForm({...form,boxCount:+e.target.value})} placeholder="e.g. 60" />
+        <Input label={`Price / Piece (${CURRENCY})`} type="number" value={form.price||""} onChange={e=>setForm({...form,price:+e.target.value})} />
+        <Input label="Stock Qty" type="number" value={form.stock||""} onChange={e=>setForm({...form,stock:+e.target.value})} />
+      </div>
+      <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
+    </>;
+    if (t==="materials") return <>
+      <Input label="Material Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Cement" />
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Category" value={form.category||"Cement"} options={["Cement","Sand","Blocks","Kerb Stones","Chips","Transport","Other"]} onChange={e=>setForm({...form,category:e.target.value})} />
+        <Select label="Unit" value={form.unit||"bag"} options={["bag","kg","ton","litre","m³","load","nos","sqft","sqm"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+        <Input label={`Price per unit (${CURRENCY})`} type="number" value={form.price||""} onChange={e=>setForm({...form,price:+e.target.value})} />
+        <Input label="Stock Qty" type="number" value={form.stock||""} onChange={e=>setForm({...form,stock:+e.target.value})} />
+      </div>
+      <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+    </>;
+    if (t==="labor") return <>
+      <Input label="Labor Type *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Mason" />
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Rate Type" value={form.rateType||"day"} options={["day","sqft","sqm","hour","fixed"]} onChange={e=>setForm({...form,rateType:e.target.value})} />
+        <Input label={`Rate (${CURRENCY})`} type="number" value={form.rate||""} onChange={e=>setForm({...form,rate:+e.target.value})} />
+      </div>
+      <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
+    </>;
+    if (t==="extrawork") return <>
+      <Input label="Work Type *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Excavation" />
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Unit" value={form.unit||"sqft"} options={["sqft","sqm","m","load","fixed","day"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+        <Input label={`Rate (${CURRENCY})`} type="number" value={form.rate||""} onChange={e=>setForm({...form,rate:+e.target.value})} />
+      </div>
+      <Textarea label="Description" value={form.description||""} onChange={e=>setForm({...form,description:e.target.value})} />
+    </>;
+    if (t==="customers") return <>
+      <Input label="Customer Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Full name" />
+      <Input label="Mobile Number *" type="tel" value={form.mobile||""} onChange={e=>setForm({...form,mobile:e.target.value})} placeholder="10-digit mobile" />
+      <Input label="Address" value={form.address||""} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Address" />
+      <Input label="GST Number (optional)" value={form.gstNumber||""} onChange={e=>setForm({...form,gstNumber:e.target.value})} placeholder="GSTIN" />
+      <Textarea label="Notes" value={form.notes||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+    </>;
+    if (t==="suppliers") return <>
+      <Input label="Supplier Name *" value={form.name||""} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Supplier name" />
+      <Input label="Mobile Number" type="tel" value={form.mobile||form.phone||""} onChange={e=>setForm({...form,mobile:e.target.value})} placeholder="10-digit mobile" />
+      <Input label="Address" value={form.address||form.location||""} onChange={e=>setForm({...form,address:e.target.value})} placeholder="Address" />
+      <Input label="Material Type" value={form.materialType||""} onChange={e=>setForm({...form,materialType:e.target.value})} placeholder="e.g. Cement, Sand" />
+      <Input label="GST Number (optional)" value={form.gstNumber||""} onChange={e=>setForm({...form,gstNumber:e.target.value})} placeholder="GSTIN" />
+      <Textarea label="Notes" value={form.notes||form.note||""} onChange={e=>setForm({...form,notes:e.target.value})} />
+    </>;
+  };
+
+  if (loading) return <Loader />;
+
+  const current = data[tab] || [];
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">⚙️ Master Data</h2>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-colors ${tab===t.id?"bg-amber-500 text-white shadow":"bg-white border border-gray-200 text-gray-600"}`}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex justify-between items-center">
+        <div className="text-sm font-bold text-gray-700">{current.length} items</div>
+        <button onClick={()=>openAdd(tab)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>
+      </div>
+
+      <div className="space-y-2">
+        {current.length===0 && <EmptyState icon="📋" text={`No ${tabs.find(t=>t.id===tab)?.label} yet`} />}
+        {current.map(item=>(
+          <div key={item._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <div className="font-black text-gray-900">{item.name}</div>
+                {tab==="interlock" && <div className="text-xs text-gray-500 mt-0.5">{[item.shape,item.color,withUnit(item.size,"inch"),item.thickness&&`${withUnit(item.thickness,"inch")} thick`].filter(Boolean).join(" / ")}</div>}
+                {tab==="interlock" && <div className="text-xs text-amber-700 font-semibold mt-0.5">{item.sqftPerPiece&&`1 piece = ${fmt(item.sqftPerPiece)} sqft`} {item.pricePerSqft&&`· Rate: ${CURRENCY}${fmt(item.pricePerSqft)}/sqft`}</div>}
+                {tab==="materials" && <div className="text-xs text-gray-500 mt-0.5">{item.category} · {CURRENCY}{fmt(item.price)}/{item.unit} {item.stock>0&&`· Stock: ${item.stock}`}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-gray-500 mt-0.5">{[item.category,withUnit(item.size,"inch")].filter(Boolean).join(" / ")}</div>}
+                {tab==="hollowbricks" && <div className="text-xs text-amber-700 font-semibold mt-0.5">Rate: {CURRENCY}{fmt(item.price||0)} / piece {item.boxCount>0&&` / 1 box = ${fmt(item.boxCount)} pcs`} {item.stock>0&&` / Stock: ${fmt(item.stock)}`}</div>}
+                {tab==="labor" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.rateType}</div>}
+                {tab==="extrawork" && <div className="text-xs text-gray-500 mt-0.5">{CURRENCY}{fmt(item.rate)} per {item.unit}</div>}
+                {tab==="customers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile} · {item.address||"—"}</div>}
+                {tab==="customers" && <div className="text-xs text-amber-700 mt-0.5">Paid: {CURRENCY}{fmt(item.totalPaid||0)} · Pending: {CURRENCY}{fmt(item.totalPending||0)}</div>}
+                {tab==="suppliers" && <div className="text-xs text-gray-500 mt-0.5">📱 {item.mobile||item.phone||"—"} · {item.address||item.location||"—"}</div>}
+                {tab==="suppliers" && <div className="text-xs text-teal-700 mt-0.5">{item.materialType||""} · Paid: {CURRENCY}{fmt(item.totalPaid||0)} · Pending: {CURRENCY}{fmt(item.totalPending||0)}</div>}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button onClick={()=>openEdit(tab,item)} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button>
+                <button onClick={()=>del(tab,item._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <Modal title={`${modal.item?"Edit":"Add"} ${tabs.find(t=>t.id===modal.type)?.label}`} onClose={()=>{setModal(null);setForm({});setSaveError("");}}>
+          <div className="space-y-3">
+            {renderForm()}
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{modal.item?"Save Changes":"Add"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── SITE WORK (Enhanced) ─────────────────────────────────────────────────────
+function SiteWork({ siteWorks, setSiteWorks, user }) {
+  const [interlockTypes, setInterlockTypes] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [extraWorkTypes, setExtraWorkTypes] = useState([]);
+  const [materialTypes, setMaterialTypes] = useState([]);
+  const [masterDataError, setMasterDataError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [viewItem, setViewItem] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  useEffect(()=>{
+    Promise.all([
+      api("GET","/masterdata/interlock"),
+      api("GET","/workers"),
+      api("GET","/masterdata/extrawork"),
+      api("GET","/masterdata/materials"),
+    ]).then(([i,w,e,m])=>{
+      setInterlockTypes(Array.isArray(i)?i:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setExtraWorkTypes(Array.isArray(e)?e:[]);
+      setMaterialTypes(Array.isArray(m)?m:[]);
+      setMasterDataError(Array.isArray(i)?"":"Unable to load Interlock Master Data. Check your connection and retry.");
+      setLoading(false);
+    });
+  },[]);
+
+  const openNewSite = async () => {
+    setMasterDataError("");
+    setShowAdd(true);
+    const [types, workersList, extraTypes, materials] = await Promise.all([
+      api("GET", "/masterdata/interlock"), api("GET", "/workers"),
+      api("GET", "/masterdata/extrawork"), api("GET", "/masterdata/materials"),
+    ]);
+    setInterlockTypes(Array.isArray(types) ? types : []);
+    setWorkers(Array.isArray(workersList) ? workersList : []);
+    setExtraWorkTypes(Array.isArray(extraTypes) ? extraTypes : []);
+    setMaterialTypes(Array.isArray(materials) ? materials : []);
+    setMasterDataError(Array.isArray(types) ? "" : "Unable to load Interlock Master Data. Check your connection and retry.");
+  };
+
+  const calcTotal = (f) => {
+    const base = +(f.workSize||0) * +(f.ratePerUnit||0);
+    const ew = (f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const em = (f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const mat = +(f.materialCost||0);
+    const lab = +(f.laborCost||0);
+    return base + ew + em + mat + lab;
+  };
+
+  const emptyForm = {
+    customerName:"", phone:"", siteLocation:"", interlockItemId:"", interlockType:"", interlockColor:"",
+    selectedWorkers:[], startDate:today(), endDate:"", status:"running",
+    workUnit:"sqft", workSize:"", ratePerUnit:"", baseWorkCost:"",
+    extraWork:[], extraMaterials:[],
+    materialCost:"", laborCost:"", totalCost:"", completionDiscount:0, completionDiscountNote:"",
+    payments:[], totalReceived:0, pendingAmount:"", paymentStatus:"pending", paymentMode:"Cash", note:"",
+  };
+
+  const visibleSiteWorks = user.role === "supervisor"
+    ? siteWorks.filter(site => String(site.addedBy || "").trim().toLowerCase() === String(user.name || "").trim().toLowerCase())
+    : siteWorks;
+
+  const save = async (f) => {
+    if (!f.customerName) return;
+    const item = await api("POST", "/sitework", {...f, advancePaid:undefined, addedBy:user.name});
+    if (item._id) { setSiteWorks(p=>[item,...p]); setShowAdd(false); }
+  };
+
+  const saveEdit = async (f) => {
+    const item = await api("PUT", `/sitework/${f._id}`, {...f, advancePaid:undefined});
+    setSiteWorks(p=>p.map(x=>x._id===f._id?item:x));
+    setEditItem(null);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete this site?")) return;
+    await api("DELETE", `/sitework/${id}`);
+    setSiteWorks(p=>p.filter(x=>x._id!==id));
+  };
+
+  const submitCompletion = async (site) => {
+    if (!window.confirm(`Submit ${site.customerName} as completed for User and Admin approval?`)) return;
+    const updated = await api("POST", `/sitework/${site._id}/completion/submit`, { role:user.role, name:user.name });
+    if (!updated?._id) return window.alert(updated?.message || "Unable to submit completion");
+    setSiteWorks(list=>list.map(item=>item._id===updated._id?updated:item));
+    setViewItem(current=>current?._id===updated._id?updated:current);
+    window.alert("Site completion submitted. User approval is pending.");
+  };
+
+  const filtered = visibleSiteWorks.filter(s=>{
+    const matchFilter = filter==="all" || s.status===filter;
+    const matchSearch = !search || (s.customerName||"").toLowerCase().includes(search.toLowerCase()) || (s.siteLocation||"").toLowerCase().includes(search.toLowerCase());
+    return matchFilter && matchSearch;
+  });
+
+  const statusColor = {running:"amber",completed:"green",pending:"gray",cancelled:"red"};
+
+  const generateInvoice = (s) => {
+    const ewTotal = (s.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const emTotal = (s.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const lines = [
+      "════════════════════════════════",
+      "         PK INTERLOCK          ",
+      "          INVOICE / BILL        ",
+      "════════════════════════════════",
+      `Date     : ${today()}`,
+      `Customer : ${s.customerName||"—"}`,
+      `Phone    : ${s.phone||"—"}`,
+      `Location : ${s.siteLocation||"—"}`,
+      "────────────────────────────────",
+      `Type     : ${s.interlockType||"—"} ${s.interlockColor||""}`,
+      `Size     : ${s.workSize} ${s.workUnit}`,
+      `Rate     : ${CURRENCY}${s.ratePerUnit}/${s.workUnit}`,
+      `Base Cost: ${CURRENCY}${fmt(+(s.workSize||0)*(+(s.ratePerUnit||0)))}`,
+      "────────────────────────────────",
+      ...(s.extraWork||[]).length>0?["EXTRA WORK:",...(s.extraWork||[]).map(e=>`  ${e.name}: ${e.qty||1} x ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),`  Subtotal: ${CURRENCY}${fmt(ewTotal)}`,"────────────────────────────────"]:[],
+      ...(s.extraMaterials||[]).length>0?["EXTRA MATERIALS:",...(s.extraMaterials||[]).map(e=>`  ${e.name}: ${e.qty} ${e.unit} x ${CURRENCY}${e.rate} = ${CURRENCY}${fmt(e.total)}`),`  Subtotal: ${CURRENCY}${fmt(emTotal)}`,"────────────────────────────────"]:[],
+      +(s.materialCost||0)>0?`Material : ${CURRENCY}${fmt(s.materialCost)}`:"",
+      +(s.laborCost||0)>0?`Labour   : ${CURRENCY}${fmt(s.laborCost)}`:"",
+      `TOTAL    : ${CURRENCY}${fmt(+(s.totalCost||s.totalAmount||0))}`,
+      `Received : ${CURRENCY}${fmt(s.totalReceived||s.paidAmount||0)}`,
+      +(s.completionDiscount||0)>0?`Completion Discount: ${CURRENCY}${fmt(s.completionDiscount)}`:"",
+      `PENDING  : ${CURRENCY}${fmt(s.pendingAmount||0)}`,
+      "────────────────────────────────",
+      `Payment  : ${s.paymentMode||"—"} | ${s.paymentStatus||"—"}`,
+      `Start    : ${s.startDate||"—"} | End: ${s.endDate||"—"}`,
+      s.note?`Note     : ${s.note}`:"",
+      "════════════════════════════════",
+      "Thank you for choosing us",
+    ].filter(l=>l!=="");
+    const blob = new Blob([lines.join("\n")],{type:"text/plain"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download=`Invoice_${s.customerName}_${today()}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) return <Loader />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏗️ Create New Site Work</h2>
+        {(isAdminLike(user.role)||user.role==="supervisor")&&(
+          <button onClick={openNewSite} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ New Site</button>
+        )}
+      </div>
+
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search customer / location..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {["all","running","pending","completed","cancelled"].map(s=>(
+          <button key={s} onClick={()=>setFilter(s)} className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${filter===s?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+            {s.charAt(0).toUpperCase()+s.slice(1)} ({s==="all"?visibleSiteWorks.length:visibleSiteWorks.filter(x=>x.status===s).length})
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{visibleSiteWorks.filter(s=>s.status==="running").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(visibleSiteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(visibleSiteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+      </div>
+
+      <div className="space-y-3">
+        {filtered.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
+        {filtered.map(s=>(
+          <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 cursor-pointer" onClick={()=>setViewItem(s)}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-black text-gray-900">{s.customerName}</span>
+                  <Badge color={statusColor[s.status]||"gray"}>{s.status||"pending"}</Badge>
+                  {s.completionApprovalStatus&&s.completionApprovalStatus!=="approved"&&<Badge color={s.completionApprovalStatus==="rejected"?"red":"blue"}>{s.completionApprovalStatus==="pending_user"?"Awaiting User":s.completionApprovalStatus==="pending_admin"?"Awaiting Admin":"Completion Rejected"}</Badge>}
+                  <Badge color={s.paymentStatus==="paid"?"green":s.paymentStatus==="partial"?"amber":"red"}>{s.paymentStatus||"pending"}</Badge>
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">📍 {s.siteLocation||"—"} · 📅 {s.startDate}</div>
+                <div className="text-xs text-gray-400">🧱 {s.interlockType||"—"} · {s.workSize} {s.workUnit}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.totalCost||s.totalAmount)||0)}</div>
+                {+(s.pendingAmount||0)>0&&<div className="text-xs text-red-500 font-semibold">Pending: {CURRENCY}{fmt(s.pendingAmount)}</div>}
+              </div>
+            </div>
+            {(s.selectedWorkers||[]).length>0&&(
+              <div className="mt-1 flex gap-1 flex-wrap">
+                {(s.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}
+              </div>
+            )}
+            {s.completionApprovalStatus==="rejected"&&<div className="mt-2 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2"><b>Rejected:</b> {s.completionRejectionReason||"No reason provided"}. Please correct and resubmit.</div>}
+            <div className="mt-2 flex gap-1">
+              <button onClick={()=>setViewItem(s)} className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded-xl text-xs font-bold">👁️ View</button>
+              {(isAdminLike(user.role)||user.role==="supervisor")&&<button onClick={()=>setEditItem({...s})} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded-xl text-xs font-bold">✏️ Edit</button>}
+              <button onClick={()=>generateInvoice(s)} className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-700 py-1.5 rounded-xl text-xs font-bold">🧾 Invoice</button>
+              {user.role==="supervisor"&&s.status!=="completed"&&!['pending_user','pending_admin'].includes(s.completionApprovalStatus)&&<button onClick={()=>submitCompletion(s)} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1.5 rounded-xl text-xs font-bold">Submit Complete</button>}
+              {isAdminLike(user.role)&&<button onClick={()=>del(s._id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-1.5 rounded-xl text-xs font-bold">🗑️</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showAdd&&<SiteWorkForm title="New Site" initData={emptyForm} onSave={save} onClose={()=>setShowAdd(false)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} masterDataError={masterDataError} onRetryMasterData={openNewSite} calcTotal={calcTotal} />}
+      {editItem&&<SiteWorkForm title="Edit Site" initData={editItem} onSave={saveEdit} onClose={()=>setEditItem(null)} interlockTypes={interlockTypes} workers={workers} extraWorkTypes={extraWorkTypes} materialTypes={materialTypes} calcTotal={calcTotal} />}
+
+      {viewItem&&(
+        <Modal title="Site Details" onClose={()=>setViewItem(null)} wide>
+          <div className="space-y-3">
+            <div className="flex gap-2 flex-wrap">
+              <Badge color={statusColor[viewItem.status]||"gray"}>{viewItem.status}</Badge>
+              <Badge color={viewItem.paymentStatus==="paid"?"green":viewItem.paymentStatus==="partial"?"amber":"red"}>{viewItem.paymentStatus||"pending"}</Badge>
+              {viewItem.completionApprovalStatus&&<Badge color={viewItem.completionApprovalStatus==="approved"?"green":viewItem.completionApprovalStatus==="rejected"?"red":"blue"}>{viewItem.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
+              <button onClick={()=>generateInvoice(viewItem)} className="ml-auto bg-amber-50 text-amber-700 px-3 py-1 rounded-lg text-xs font-bold hover:bg-amber-100">🧾 Download Invoice</button>
+            </div>
+            <SectionBox title="Customer" icon="👤" color="blue">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><div className="text-xs text-gray-400">Name</div><div className="font-bold">{viewItem.customerName||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{viewItem.phone||"—"}</div></div>
+                <div className="col-span-2"><div className="text-xs text-gray-400">Location</div><div className="font-bold">{viewItem.siteLocation||"—"}</div></div>
+              </div>
+            </SectionBox>
+            <SectionBox title="Work" icon="🧱" color="amber">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><div className="text-xs text-gray-400">Type</div><div className="font-bold">{viewItem.interlockType||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Color</div><div className="font-bold">{viewItem.interlockColor||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">Size</div><div className="font-bold">{viewItem.workSize} {viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold">{CURRENCY}{viewItem.ratePerUnit}/{viewItem.workUnit}</div></div>
+                <div><div className="text-xs text-gray-400">Start</div><div className="font-bold">{viewItem.startDate||"—"}</div></div>
+                <div><div className="text-xs text-gray-400">End</div><div className="font-bold">{viewItem.endDate||"—"}</div></div>
+              </div>
+            </SectionBox>
+            {(viewItem.selectedWorkers||[]).length>0&&(
+              <SectionBox title="Workers" icon="👷" color="teal">
+                <div className="flex flex-wrap gap-1">{(viewItem.selectedWorkers||[]).map(w=><Badge key={w} color="teal">👷 {w}</Badge>)}</div>
+              </SectionBox>
+            )}
+            <SectionBox title="Costing Breakdown" icon="💰" color="green">
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between"><span>Base Cost ({viewItem.workSize} {viewItem.workUnit} x {CURRENCY}{viewItem.ratePerUnit})</span><span className="font-bold">{CURRENCY}{fmt(+(viewItem.workSize||0)*(+(viewItem.ratePerUnit||0)))}</span></div>
+                {(viewItem.extraWork||[]).length>0&&<>
+                  <div className="text-xs font-bold text-orange-600 mt-1">Extra Work:</div>
+                  {(viewItem.extraWork||[]).map((e,i)=><div key={i} className="flex justify-between pl-2 text-xs"><span>{e.name} ({e.qty||1} x {CURRENCY}{e.rate})</span><span className="font-bold text-orange-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+                </>}
+                {(viewItem.extraMaterials||[]).length>0&&<>
+                  <div className="text-xs font-bold text-purple-600 mt-1">Extra Materials:</div>
+                  {(viewItem.extraMaterials||[]).map((e,i)=><div key={i} className="flex justify-between pl-2 text-xs"><span>{e.name} ({e.qty} {e.unit} x {CURRENCY}{e.rate})</span><span className="font-bold text-purple-700">{CURRENCY}{fmt(e.total)}</span></div>)}
+                </>}
+                {+(viewItem.materialCost||0)>0&&<div className="flex justify-between"><span>Material Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.materialCost)}</span></div>}
+                {+(viewItem.laborCost||0)>0&&<div className="flex justify-between"><span>Labour Cost</span><span className="font-bold">{CURRENCY}{fmt(viewItem.laborCost)}</span></div>}
+                <div className="flex justify-between border-t pt-1 mt-1"><span className="font-black">TOTAL</span><span className="font-black text-green-700 text-lg">{CURRENCY}{fmt(+(viewItem.totalCost||viewItem.totalAmount||0))}</span></div>
+                <div className="flex justify-between"><span>Total Amount Received</span><span className="font-bold text-green-600">{CURRENCY}{fmt(viewItem.totalReceived||viewItem.paidAmount||0)}</span></div>
+                {+(viewItem.completionDiscount||0)>0&&<div className="flex justify-between text-amber-700"><span className="font-bold">Completion Discount</span><span className="font-bold">{CURRENCY}{fmt(viewItem.completionDiscount)}</span></div>}
+                <div className="flex justify-between"><span className="font-black text-red-600">Pending</span><span className="font-black text-red-600">{CURRENCY}{fmt(viewItem.pendingAmount||0)}</span></div>
+              </div>
+            </SectionBox>
+            {(viewItem.payments||[]).length>0&&(
+              <SectionBox title="Payment History" icon="💳" color="blue">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Date</th><th className="text-left p-1">Source</th><th className="text-left p-1">Mode</th><th className="text-right p-1">Amount</th></tr></thead>
+                  <tbody>{(viewItem.payments||[]).map((p,i)=><tr key={i} className="border-t"><td className="p-1">{p.date||"—"}</td><td className="p-1">Site Work</td><td className="p-1">{p.mode||viewItem.paymentMode||"—"}</td><td className="p-1 text-right font-bold text-green-700">{CURRENCY}{fmt(p.amount)}</td></tr>)}</tbody>
+                </table>
+              </SectionBox>
+            )}
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Payment Mode</div><div className="font-bold">{viewItem.paymentMode||"—"}</div></div>
+              <div className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">Added By</div><div className="font-bold">{viewItem.addedBy||"—"}</div></div>
+            </div>
+            {viewItem.note&&<SectionBox title="Note" icon="📝" color="gray"><div className="text-sm">{viewItem.note}</div></SectionBox>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function SiteWorkForm({ title, initData, onSave, onClose, interlockTypes, workers, extraWorkTypes, materialTypes, masterDataError = "", onRetryMasterData, calcTotal }) {
+  const [f, setF] = useState({...initData});
+  const [ewForm, setEwForm] = useState({name:"",qty:"1",rate:""});
+  const [emForm, setEmForm] = useState({name:"",qty:"",unit:"nos",rate:""});
+  const [payEntry, setPayEntry] = useState({date:today(), amount:"", mode:"Cash", remarks:""});
+  const [saving, setSaving] = useState(false);
+  const sitePaymentTotal = (items = f.payments || []) => items.reduce((a,p)=>a+(+(p.amount)||0),0);
+  const externalReceived = () => Math.max(0,(+(f.totalReceived)||0)-sitePaymentTotal());
+  const receivedTotal = (items = f.payments || []) => sitePaymentTotal(items)+externalReceived();
+  const completionDiscount = (site=f) => +(site.completionDiscount)||0;
+  const paymentStatusFor = (total, received, discount=completionDiscount()) => Math.max(0,total-received-discount)===0&&total>0 ? "paid" : received>0 ? "partial" : "pending";
+
+  const updateCalc = (updates) => {
+    const nf = {...f,...updates};
+    const total = calcTotal(nf);
+    const received = receivedTotal(nf.payments || []);
+    const discount = completionDiscount(nf);
+    const pending = Math.max(0, total-received-discount);
+    setF({...nf, baseWorkCost:String(+(nf.workSize||0)*(+(nf.ratePerUnit||0))), totalCost:String(total), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(total, received)});
+  };
+
+  const addEW = () => {
+    if (!ewForm.name||!ewForm.rate) return;
+    const total = +(ewForm.qty||1)*(+(ewForm.rate)||0);
+    const updated = [...(f.extraWork||[]), {...ewForm,total}];
+    const totalCost = calcTotal({...f,extraWork:updated});
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received-completionDiscount());
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
+    setEwForm({name:"",qty:"1",rate:""});
+  };
+
+  const removeEW = (i) => {
+    const updated = f.extraWork.filter((_,j)=>j!==i);
+    const totalCost = calcTotal({...f,extraWork:updated});
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received-completionDiscount());
+    setF(p=>({...p, extraWork:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
+  };
+
+  const addEM = () => {
+    if (!emForm.name||!emForm.qty) return;
+    const total = +(emForm.qty||0)*(+(emForm.rate)||0);
+    const updated = [...(f.extraMaterials||[]), {...emForm,total}];
+    const totalCost = calcTotal({...f,extraMaterials:updated});
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received-completionDiscount());
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
+    setEmForm({name:"",qty:"",unit:"nos",rate:""});
+  };
+
+  const removeEM = (i) => {
+    const updated = f.extraMaterials.filter((_,j)=>j!==i);
+    const totalCost = calcTotal({...f,extraMaterials:updated});
+    const received = receivedTotal();
+    const pending = Math.max(0, totalCost-received-completionDiscount());
+    setF(p=>({...p, extraMaterials:updated, totalCost:String(totalCost), totalReceived:received, pendingAmount:String(pending), paymentStatus:paymentStatusFor(totalCost, received)}));
+  };
+
+  const addPayment = () => {
+    if (!+(payEntry.amount || 0)) return;
+    const payments = [...(f.payments||[]), {...payEntry, amount:+payEntry.amount, source:"Site Work"}];
+    const total = calcTotal(f);
+    const received = receivedTotal(payments);
+    setF({...f, payments, totalReceived:received, pendingAmount:String(Math.max(0,total-received-completionDiscount())), paymentStatus:paymentStatusFor(total, received)});
+    setPayEntry({date:today(), amount:"", mode:"Cash", remarks:""});
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const total = calcTotal(f);
+    const received = receivedTotal();
+    const discount = f.status === "completed" ? Math.min(Math.max(0,total-received),completionDiscount()) : 0;
+    await onSave({...f,completionDiscount:discount,pendingAmount:String(Math.max(0,total-received-discount)),paymentStatus:paymentStatusFor(total,received,discount)});
+    setSaving(false);
+  };
+
+  return (
+    <Modal title={title} onClose={onClose} wide>
+      <div className="space-y-3">
+
+        <SectionBox title="Customer Details" icon="👤" color="blue">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Customer Name *" value={f.customerName||""} onChange={e=>setF({...f,customerName:e.target.value})} placeholder="Full name" />
+            <Input label="Phone" type="tel" value={f.phone||""} onChange={e=>setF({...f,phone:e.target.value})} placeholder="Number" />
+          </div>
+          <Input label="Site Location" value={f.siteLocation||""} onChange={e=>setF({...f,siteLocation:e.target.value})} placeholder="Address / area" />
+        </SectionBox>
+
+        <SectionBox title="Work Details" icon="🧱" color="amber">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Interlock Type</label>
+            <select value={f.interlockItemId || interlockTypes.find(i=>i.name===f.interlockType&&(!f.interlockColor||i.color===f.interlockColor))?._id || ""} onChange={e=>{
+              const it=interlockTypes.find(x=>x._id===e.target.value);
+              if (!it) return updateCalc({interlockItemId:"",interlockType:"",interlockColor:""});
+              const rate=f.workUnit==="sqm"?(it.pricePerSqm||""):(it.pricePerSqft||"");
+              updateCalc({interlockItemId:it._id,interlockType:it.name||"",interlockColor:it.color||"",ratePerUnit:rate?String(rate):f.ratePerUnit});
+            }} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50">
+              <option value="">-- Select Interlock Type --</option>
+              {interlockTypes.map(i=><option key={i._id} value={i._id}>{[i.name,i.category,i.color,i.shape,i.size&&`${i.size} inch`,i.thickness&&`${i.thickness} inch thick`].filter(Boolean).join(" / ")}</option>)}
+            </select>
+            {masterDataError ? <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-red-600"><span>{masterDataError}</span><button type="button" onClick={onRetryMasterData} className="underline">Retry</button></div> : interlockTypes.length===0&&<div className="mt-1 text-xs font-semibold text-amber-700">No interlock types found in Master Data. Add them under Master Data → Interlock Types.</div>}
+          </div>
+          <Input label="Color / Specification" value={f.interlockColor||""} onChange={e=>setF({...f,interlockColor:e.target.value})} placeholder="e.g. Grey, Natural" />
+          <div className="grid grid-cols-3 gap-2">
+            <Select label="Unit" value={f.workUnit||"sqft"} options={["sqft","sqm"]} onChange={e=>{
+              const it=interlockTypes.find(x=>x._id===f.interlockItemId);
+              const rate=e.target.value==="sqm"?(it?.pricePerSqm||""):(it?.pricePerSqft||"");
+              updateCalc({workUnit:e.target.value,ratePerUnit:rate?String(rate):f.ratePerUnit});
+            }} />
+            <Input label="Work Size" type="number" value={f.workSize||""} onChange={e=>updateCalc({workSize:e.target.value})} placeholder="0" />
+            <Input label={`Rate(${CURRENCY})`} type="number" value={f.ratePerUnit||""} onChange={e=>updateCalc({ratePerUnit:e.target.value})} placeholder="0" />
+          </div>
+          <div className="bg-white rounded-xl p-2 text-center border border-amber-200">
+            <div className="text-xs text-gray-400">Base Cost</div>
+            <div className="font-black text-amber-700 text-lg">{CURRENCY}{fmt(+(f.workSize||0)*(+(f.ratePerUnit||0)))}</div>
+          </div>
+        </SectionBox>
+
+        <SectionBox title="Select Workers" icon="👷" color="teal">
+          <div className="flex flex-wrap gap-1">
+            {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)).map(w=>(
+              <button key={w._id} type="button" onClick={()=>{
+                const sel=f.selectedWorkers||[];
+                setF({...f,selectedWorkers:sel.includes(w.name)?sel.filter(x=>x!==w.name):[...sel,w.name]});
+              }} className={`px-2 py-1 rounded-lg text-xs font-bold border transition-colors ${(f.selectedWorkers||[]).includes(w.name)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>
+                {w.name}
+              </button>
+            ))}
+            {workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)).length===0&&<div className="text-xs text-gray-400">No active site workers — add from Workers menu first</div>}
+          </div>
+        </SectionBox>
+
+        <SectionBox title="Extra Work" icon="➕" color="orange">
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Work Type (select or type)</label>
+              <input list="ew-list" value={ewForm.name} onChange={e=>{
+                const et=extraWorkTypes.find(x=>x.name===e.target.value);
+                setEwForm({...ewForm,name:e.target.value,rate:et?String(et.rate):ewForm.rate});
+              }} placeholder="e.g. Excavation, Leveling, Cutting..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-gray-50" />
+              <datalist id="ew-list">{extraWorkTypes.map(e=><option key={e._id} value={e.name}/>)}</datalist>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Qty" type="number" value={ewForm.qty} onChange={e=>setEwForm({...ewForm,qty:e.target.value})} placeholder="1" />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={ewForm.rate} onChange={e=>setEwForm({...ewForm,rate:e.target.value})} placeholder="0" />
+            </div>
+            {ewForm.name&&ewForm.rate&&(
+              <div className="flex justify-between bg-orange-50 rounded-xl px-3 py-2 text-xs">
+                <span className="text-gray-500">Preview cost:</span>
+                <span className="font-black text-orange-700">{CURRENCY}{fmt(+(ewForm.qty||1)*(+(ewForm.rate)||0))}</span>
+              </div>
+            )}
+            <button type="button" onClick={addEW} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add Extra Work to Total</button>
+          </div>
+          {(f.extraWork||[]).length>0&&(
+            <div className="mt-2 space-y-1">
+              {(f.extraWork||[]).map((e,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs">
+                  <span className="font-bold flex-1">{e.name}</span>
+                  <span className="mx-2 text-gray-500">{e.qty||1} x {CURRENCY}{e.rate}</span>
+                  <span className="font-black text-orange-700">{CURRENCY}{fmt(e.total)}</span>
+                  <button type="button" onClick={()=>removeEW(i)} className="text-red-400 hover:text-red-600 font-black ml-2 text-base leading-none">×</button>
+                </div>
+              ))}
+              <div className="text-xs font-black text-orange-700 text-right pr-1">
+                Extra Work Total: {CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}
+              </div>
+            </div>
+          )}
+        </SectionBox>
+
+        <SectionBox title="Extra Materials" icon="🧱" color="purple">
+          <div className="space-y-2">
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Material (select or type)</label>
+              <input list="em-list" value={emForm.name} onChange={e=>{
+                const mt=materialTypes.find(x=>x.name===e.target.value);
+                setEmForm({...emForm,name:e.target.value,unit:mt?mt.unit:emForm.unit,rate:mt?String(mt.price):emForm.rate});
+              }} placeholder="e.g. Cement, Sand, Chips..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-gray-50" />
+              <datalist id="em-list">{materialTypes.map(m=><option key={m._id} value={m.name}/>)}</datalist>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Qty" type="number" value={emForm.qty} onChange={e=>setEmForm({...emForm,qty:e.target.value})} placeholder="0" />
+              <Select label="Unit" value={emForm.unit||"nos"} options={["nos","bag","kg","ton","litre","sqft","sqm","load"]} onChange={e=>setEmForm({...emForm,unit:e.target.value})} />
+              <Input label={`Rate (${CURRENCY})`} type="number" value={emForm.rate} onChange={e=>setEmForm({...emForm,rate:e.target.value})} placeholder="0" />
+            </div>
+            {emForm.name&&emForm.qty&&(
+              <div className="flex justify-between bg-purple-50 rounded-xl px-3 py-2 text-xs">
+                <span className="text-gray-500">Preview cost:</span>
+                <span className="font-black text-purple-700">{CURRENCY}{fmt(+(emForm.qty||0)*(+(emForm.rate)||0))}</span>
+              </div>
+            )}
+            <button type="button" onClick={addEM} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add Material to Total</button>
+          </div>
+          {(f.extraMaterials||[]).length>0&&(
+            <div className="mt-2 space-y-1">
+              {(f.extraMaterials||[]).map((e,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs">
+                  <span className="font-bold flex-1">{e.name}</span>
+                  <span className="mx-2 text-gray-500">{e.qty} {e.unit} x {CURRENCY}{e.rate}</span>
+                  <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span>
+                  <button type="button" onClick={()=>removeEM(i)} className="text-red-400 hover:text-red-600 font-black ml-2 text-base leading-none">×</button>
+                </div>
+              ))}
+              <div className="text-xs font-black text-purple-700 text-right pr-1">
+                Materials Total: {CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}
+              </div>
+            </div>
+          )}
+        </SectionBox>
+
+        <SectionBox title="Costing Summary" icon="💰" color="green">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Other Material Cost" type="number" value={f.materialCost||""} onChange={e=>updateCalc({materialCost:e.target.value})} placeholder="0" />
+            <Input label="Labour Cost" type="number" value={f.laborCost||""} onChange={e=>updateCalc({laborCost:e.target.value})} placeholder="0" />
+          </div>
+          <div className="bg-white rounded-xl border border-green-200 p-3 space-y-1 text-sm">
+            <div className="flex justify-between text-gray-500"><span>Base Cost</span><span>{CURRENCY}{fmt(+(f.workSize||0)*(+(f.ratePerUnit||0)))}</span></div>
+            {(f.extraWork||[]).length>0&&<div className="flex justify-between text-orange-600"><span>Extra Work</span><span>{CURRENCY}{fmt((f.extraWork||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+            {(f.extraMaterials||[]).length>0&&<div className="flex justify-between text-purple-600"><span>Extra Materials</span><span>{CURRENCY}{fmt((f.extraMaterials||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+            {+(f.materialCost||0)>0&&<div className="flex justify-between text-gray-500"><span>Material Cost</span><span>{CURRENCY}{fmt(f.materialCost)}</span></div>}
+            {+(f.laborCost||0)>0&&<div className="flex justify-between text-gray-500"><span>Labour Cost</span><span>{CURRENCY}{fmt(f.laborCost)}</span></div>}
+            <div className="flex justify-between border-t pt-1 font-black text-green-700 text-base"><span>TOTAL</span><span>{CURRENCY}{fmt(+(f.totalCost||0))}</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-green-50 rounded-xl p-2 border border-green-200 text-center">
+              <div className="text-xs text-gray-400">Total Amount Received</div>
+              <div className="font-black text-green-700">{CURRENCY}{fmt(+(f.totalReceived||receivedTotal())||0)}</div>
+            </div>
+            <div className="bg-red-50 rounded-xl p-2 border border-red-200 text-center">
+              <div className="text-xs text-gray-400">Pending</div>
+              <div className="font-black text-red-600">{CURRENCY}{fmt(+(f.pendingAmount||0))}</div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-green-200 p-3 space-y-2">
+            <div className="text-xs font-black text-green-700">Site Payment Received</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={payEntry.date} onChange={e=>setPayEntry({...payEntry,date:e.target.value})} />
+              <Input label={`Amount (${CURRENCY})`} type="number" value={payEntry.amount} onChange={e=>setPayEntry({...payEntry,amount:e.target.value})} />
+              <Select label="Payment Mode" value={payEntry.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayEntry({...payEntry,mode:e.target.value})} />
+              <Input label="Remarks" value={payEntry.remarks} onChange={e=>setPayEntry({...payEntry,remarks:e.target.value})} />
+            </div>
+            <button type="button" onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold">+ Add Site Payment</button>
+            {(f.payments||[]).map((p,i)=><div key={i} className="flex justify-between text-xs border-t pt-1"><span>{p.date} · {p.mode}</span><span className="font-bold text-green-700">{CURRENCY}{fmt(p.amount)}</span></div>)}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Select label="Payment Mode" value={f.paymentMode||"Cash"} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e=>setF({...f,paymentMode:e.target.value})} />
+            <Select label="Payment Status" value={f.paymentStatus||"pending"} options={["pending","partial","paid"]} onChange={e=>setF({...f,paymentStatus:e.target.value})} />
+          </div>
+          {f.status==="completed"&&<div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <div className="text-xs font-black text-amber-800">Waive remaining balance after completion</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label={`Completion Discount (${CURRENCY})`} type="number" min="0" max={Math.max(0,calcTotal()-receivedTotal())} value={f.completionDiscount||""} onChange={e=>{
+                const discount=Math.min(Math.max(0,calcTotal()-receivedTotal()),Math.max(0,+(e.target.value)||0));
+                const pending=Math.max(0,calcTotal()-receivedTotal()-discount);
+                setF({...f,completionDiscount:String(discount),pendingAmount:String(pending),paymentStatus:paymentStatusFor(calcTotal(),receivedTotal(),discount)});
+              }} placeholder="0" />
+              <Input label="Discount Note" value={f.completionDiscountNote||""} onChange={e=>setF({...f,completionDiscountNote:e.target.value})} placeholder="Reason / approval reference" />
+            </div>
+            <div className="text-xs text-amber-800">Pending after discount: <b>{CURRENCY}{fmt(Math.max(0,calcTotal()-receivedTotal()-completionDiscount()))}</b></div>
+          </div>}
+        </SectionBox>
+
+        <SectionBox title="Timeline & Status" icon="📅" color="gray">
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Start Date" type="date" value={f.startDate||""} onChange={e=>setF({...f,startDate:e.target.value})} />
+            <Input label="End Date" type="date" value={f.endDate||""} onChange={e=>setF({...f,endDate:e.target.value})} />
+          </div>
+          <Select label="Status" value={f.status||"running"} options={f.status==="completed"?["completed"]:["pending","running","cancelled"]} onChange={e=>setF({...f,status:e.target.value})} />
+          <Textarea label="Note" value={f.note||""} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any additional notes..." />
+        </SectionBox>
+
+        <button type="button" onClick={handleSave} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 text-base disabled:opacity-60">
+          {saving?"Saving...":title==="New Site"?"Create Site":"Save Changes"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ─── SITE REPORT (WorkerReport) ───────────────────────────────────────────────
+function WorkerReport({ user }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
+  const [reports, setReports] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editModal, setEditModal] = useState(null);
+  const [viewModal, setViewModal] = useState(null);
+  const MATERIAL_TYPES = ["Interlock Paving","Kerbstone","Hollow Block","Solid Block","Coping Stone","Retaining Wall Block","Grass Block","Other"];
+  const emptyForm = { startingDate:today(), siteName:"", phoneNo:"", workerName:"", totalArea:"", workingCost:"", extraWorkItems:[], extraMaterialItems:[], totalWorkingArea:"", totalAmount:"", note:"", paymentMode:"Cash", upiId:"", bankName:"", bankBranch:"", bankAccount:"", amountReceivedBy:"", materialSupply:"", materialType:"", signatures:{supervisor:false,office:false,admin:false} };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/workerreport"),api("GET","/workers")]).then(([d,w])=>{
+      setReports(Array.isArray(d)?d:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const save = async () => {
+    if (!form.workerName) return;
+    const item = await api("POST","/workerreport",{...form,addedBy:user.name});
+    if (item._id) { setReports(p=>[item,...p]); setModal(false); setForm(emptyForm); }
+  };
+
+  const saveEdit = async () => {
+    await api("PUT",`/workerreport/${editModal._id}`,editModal);
+    setReports(p=>p.map(r=>r._id===editModal._id?{...r,...editModal}:r));
+    if (viewModal?._id===editModal._id) setViewModal({...viewModal,...editModal});
+    setEditModal(null);
+  };
+
+  const signReport = async (id, role) => {
+    const report = reports.find(r=>r._id===id);
+    const updatedSigs = {...(report.signatures||{}),[role]:true};
+    await api("PUT",`/workerreport/${id}`,{signatures:updatedSigs});
+    setReports(p=>p.map(r=>r._id===id?{...r,signatures:updatedSigs}:r));
+    if (viewModal?._id===id) setViewModal(v=>({...v,signatures:updatedSigs}));
+  };
+
+  const downloadReport = (r) => {
+    const payInfo = r.paymentMode==="GPay"||r.paymentMode==="UPI"?`UPI ID: ${r.upiId||"—"}`:r.paymentMode==="Bank"?`Bank: ${r.bankName||"—"} / Branch: ${r.bankBranch||"—"} / Acc: ${r.bankAccount||"—"}`:"";
+    const lines = ["PK INTERLOCK — SITE REPORT","════════════════════════",`Site: ${r.siteName||"—"}`,`Phone: ${r.phoneNo||"—"}`,`Date: ${r.startingDate}`,`Worker: ${r.workerName}`,"────────────────────────",`Total Area: ${r.totalArea} sqft`,`Working Cost: ${CURRENCY}${r.workingCost||0}`,`Extra Work: ${r.extraWork||"—"}`,`Extra Material: ${r.extraMaterial||"—"}`,`Total Working Area: ${r.totalWorkingArea} sqft`,`Total Amount: ${CURRENCY}${r.totalAmount||0}`,"────────────────────────",`Note: ${r.note||"—"}`,"────────────────────────","PAYMENTS",`Mode: ${r.paymentMode}`,payInfo,`Received By: ${r.amountReceivedBy||"—"}`,"────────────────────────",`Material Type: ${r.materialType||"—"}`,`Material Supply: ${r.materialSupply||"—"}`,"────────────────────────","SIGNATURES",`Supervisor: ${r.signatures?.supervisor?"✓ Signed":"Pending"}`,`Office: ${r.signatures?.office?"✓ Signed":"Pending"}`,`Admin: ${r.signatures?.admin?"✓ Signed":"Pending"}`,"════════════════════════"].filter(l=>l!=="");
+    const blob = new Blob([lines.join("\n")],{type:"text/plain"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download=`SiteReport_${r.workerName}_${r.startingDate}.txt`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const PaymentFields = ({f,setF})=><>
+    <Select label="Payment Mode" value={f.paymentMode} options={["Cash","Bank","GPay","UPI"]} onChange={e=>setF({...f,paymentMode:e.target.value,upiId:"",bankName:"",bankBranch:"",bankAccount:""})} />
+    {(f.paymentMode==="GPay"||f.paymentMode==="UPI")&&<Input label="UPI ID" value={f.upiId||""} onChange={e=>setF({...f,upiId:e.target.value})} placeholder="example@upi" />}
+    {f.paymentMode==="Bank"&&<><Input label="Bank Name" value={f.bankName||""} onChange={e=>setF({...f,bankName:e.target.value})} /><Input label="Branch" value={f.bankBranch||""} onChange={e=>setF({...f,bankBranch:e.target.value})} /><Input label="Account Number" value={f.bankAccount||""} onChange={e=>setF({...f,bankAccount:e.target.value})} /></>}
+    <Input label="Amount Received By" value={f.amountReceivedBy||""} onChange={e=>setF({...f,amountReceivedBy:e.target.value})} placeholder="Name" />
+  </>;
+
+  const calcWRTotal = (f) => {
+    const base = +(f.totalArea||0) * +(f.workingCost||0);
+    const ew = (f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    const em = (f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0);
+    return base + ew + em;
+  };
+
+  const [ewItem, setEwItem] = useState({name:"",cost:""});
+  const [emItem, setEmItem] = useState({name:"",qty:"",unit:"nos",rate:""});
+
+  const addEWItem = (f, setF) => {
+    if (!ewItem.name||!ewItem.cost) return;
+    const updated = [...(f.extraWorkItems||[]), {name:ewItem.name, cost:+ewItem.cost}];
+    const total = calcWRTotal({...f, extraWorkItems:updated});
+    setF({...f, extraWorkItems:updated, totalAmount:String(total)});
+    setEwItem({name:"",cost:""});
+  };
+
+  const addEMItem = (f, setF) => {
+    if (!emItem.name||!emItem.qty) return;
+    const itemTotal = +(emItem.qty||0)*(+(emItem.rate)||0);
+    const updated = [...(f.extraMaterialItems||[]), {...emItem, total:itemTotal}];
+    const total = calcWRTotal({...f, extraMaterialItems:updated});
+    setF({...f, extraMaterialItems:updated, totalAmount:String(total)});
+    setEmItem({name:"",qty:"",unit:"nos",rate:""});
+  };
+
+  const FormBody = ({f,setF})=>(
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="Site Name" value={f.siteName} onChange={e=>setF({...f,siteName:e.target.value})} placeholder="Site name" />
+        <Input label="Phone No" type="tel" value={f.phoneNo} onChange={e=>setF({...f,phoneNo:e.target.value})} placeholder="Contact" />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="Starting Date" type="date" value={f.startingDate} onChange={e=>setF({...f,startingDate:e.target.value})} />
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={f.workerName} onChange={e=>setF({...f,workerName:e.target.value})}>
+            <option value="">Select worker</option>
+            {workers.map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <SectionBox title="Area & Cost" icon="📐" color="blue">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Total Area (sqft)" type="number" value={f.totalArea||""} onChange={e=>{
+            const base=+(e.target.value||0)*(+(f.workingCost||0));
+            const ew=(f.extraWorkItems||[]).reduce((a,x)=>a+(+(x.cost)||0),0);
+            const em=(f.extraMaterialItems||[]).reduce((a,x)=>a+(+(x.total)||0),0);
+            setF({...f,totalArea:e.target.value,totalWorkingArea:e.target.value,totalAmount:String(base+ew+em)});
+          }} />
+          <Input label={`Rate per sqft (${CURRENCY})`} type="number" value={f.workingCost||""} onChange={e=>{
+            const base=+(f.totalArea||0)*(+(e.target.value||0));
+            const ew=(f.extraWorkItems||[]).reduce((a,x)=>a+(+(x.cost)||0),0);
+            const em=(f.extraMaterialItems||[]).reduce((a,x)=>a+(+(x.total)||0),0);
+            setF({...f,workingCost:e.target.value,totalAmount:String(base+ew+em)});
+          }} />
+        </div>
+        <div className="bg-white rounded-xl p-2 border border-blue-200 text-center">
+          <div className="text-xs text-gray-400">Base Cost ({f.totalArea||0} sqft × {CURRENCY}{f.workingCost||0})</div>
+          <div className="font-black text-blue-700 text-lg">{CURRENCY}{fmt(+(f.totalArea||0)*(+(f.workingCost||0)))}</div>
+        </div>
+      </SectionBox>
+
+      <SectionBox title="Extra Work" icon="➕" color="orange">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Work Name" value={ewItem.name} onChange={e=>setEwItem({...ewItem,name:e.target.value})} placeholder="e.g. Excavation" />
+          <Input label={`Cost (${CURRENCY})`} type="number" value={ewItem.cost} onChange={e=>setEwItem({...ewItem,cost:e.target.value})} placeholder="0" />
+        </div>
+        <button onClick={()=>addEWItem(f,setF)} className="w-full bg-orange-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-orange-600">+ Add Extra Work</button>
+        {(f.extraWorkItems||[]).map((e,i)=>(
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-orange-200 text-xs">
+            <span className="font-bold flex-1">{e.name}</span>
+            <span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost)}</span>
+            <button onClick={()=>{
+              const updated=(f.extraWorkItems||[]).filter((_,j)=>j!==i);
+              const total=calcWRTotal({...f,extraWorkItems:updated});
+              setF({...f,extraWorkItems:updated,totalAmount:String(total)});
+            }} className="text-red-400 hover:text-red-600 font-black ml-2 text-base">×</button>
+          </div>
+        ))}
+        {(f.extraWorkItems||[]).length>0&&<div className="text-xs font-black text-orange-700 text-right">Extra Work: {CURRENCY}{fmt((f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.cost)||0),0))}</div>}
+      </SectionBox>
+
+      <SectionBox title="Extra Material" icon="🧱" color="purple">
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Material Name" value={emItem.name} onChange={e=>setEmItem({...emItem,name:e.target.value})} placeholder="e.g. Cement" />
+          <Select label="Unit" value={emItem.unit} options={["nos","bag","kg","ton","litre","load","sqft"]} onChange={e=>setEmItem({...emItem,unit:e.target.value})} />
+          <Input label="Qty" type="number" value={emItem.qty} onChange={e=>setEmItem({...emItem,qty:e.target.value})} placeholder="0" />
+          <Input label={`Rate (${CURRENCY})`} type="number" value={emItem.rate} onChange={e=>setEmItem({...emItem,rate:e.target.value})} placeholder="0" />
+        </div>
+        {emItem.name&&emItem.qty&&<div className="bg-purple-50 rounded-xl px-3 py-2 text-xs flex justify-between"><span>Preview:</span><span className="font-black text-purple-700">{CURRENCY}{fmt(+(emItem.qty||0)*(+(emItem.rate)||0))}</span></div>}
+        <button onClick={()=>addEMItem(f,setF)} className="w-full bg-purple-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-purple-600">+ Add Extra Material</button>
+        {(f.extraMaterialItems||[]).map((e,i)=>(
+          <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-purple-200 text-xs">
+            <span className="font-bold flex-1">{e.name} ({e.qty} {e.unit})</span>
+            <span className="font-black text-purple-700">{CURRENCY}{fmt(e.total)}</span>
+            <button onClick={()=>{
+              const updated=(f.extraMaterialItems||[]).filter((_,j)=>j!==i);
+              const total=calcWRTotal({...f,extraMaterialItems:updated});
+              setF({...f,extraMaterialItems:updated,totalAmount:String(total)});
+            }} className="text-red-400 hover:text-red-600 font-black ml-2 text-base">×</button>
+          </div>
+        ))}
+        {(f.extraMaterialItems||[]).length>0&&<div className="text-xs font-black text-purple-700 text-right">Materials: {CURRENCY}{fmt((f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</div>}
+      </SectionBox>
+
+      <SectionBox title="Total Summary" icon="💰" color="green">
+        <div className="space-y-1 text-sm">
+          <div className="flex justify-between"><span className="text-gray-500">Base ({f.totalArea||0} sqft × {CURRENCY}{f.workingCost||0})</span><span className="font-bold">{CURRENCY}{fmt(+(f.totalArea||0)*(+(f.workingCost||0)))}</span></div>
+          {(f.extraWorkItems||[]).length>0&&<div className="flex justify-between text-orange-600"><span>Extra Work</span><span className="font-bold">{CURRENCY}{fmt((f.extraWorkItems||[]).reduce((a,e)=>a+(+(e.cost)||0),0))}</span></div>}
+          {(f.extraMaterialItems||[]).length>0&&<div className="flex justify-between text-purple-600"><span>Extra Materials</span><span className="font-bold">{CURRENCY}{fmt((f.extraMaterialItems||[]).reduce((a,e)=>a+(+(e.total)||0),0))}</span></div>}
+          <div className="flex justify-between border-t pt-1 font-black text-green-700 text-lg"><span>TOTAL</span><span>{CURRENCY}{fmt(+(f.totalAmount||0))}</span></div>
+        </div>
+      </SectionBox>
+
+      <Textarea label="📝 Note" value={f.note} onChange={e=>setF({...f,note:e.target.value})} placeholder="Any notes..." />
+      <SectionBox title="Payments" icon="💳" color="purple">
+        <PaymentFields f={f} setF={setF} />
+      </SectionBox>
+      <SectionBox title="Material Supply" icon="🧱" color="teal">
+        <Select label="Material Type" value={f.materialType||""} options={["",...MATERIAL_TYPES]} onChange={e=>setF({...f,materialType:e.target.value})} />
+        <Textarea label="Material Supply Details" value={f.materialSupply} onChange={e=>setF({...f,materialSupply:e.target.value})} placeholder="Materials supplied..." />
+      </SectionBox>
+    </div>
+  );
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏗️ Site Report</h2>
+        {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>{setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{reports.length}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(reports.reduce((a,r)=>a+(+(r.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Amount</div></div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{reports.filter(r=>r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin).length}</div><div className="text-xs text-gray-400">Signed</div></div>
+      </div>
+      <div className="space-y-3">
+        {reports.length===0&&<EmptyState icon="📋" text="No site reports yet" />}
+        {reports.map(r=>{
+          const allSigned=r.signatures?.supervisor&&r.signatures?.office&&r.signatures?.admin;
+          return (
+            <div key={r._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 cursor-pointer" onClick={()=>{markReportsRead(r._id);setViewModal(r);}}>
+                  <div className="flex items-center gap-2 flex-wrap"><UnreadReportIcon unread={isUnread(r._id)}/><span className="font-black text-gray-900">{r.workerName}</span><Badge color={r.paymentMode==="Cash"?"green":r.paymentMode==="Bank"?"blue":"purple"}>{r.paymentMode}</Badge>{allSigned&&<Badge color="green">✅ Signed</Badge>}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">🏗️ {r.siteName||"—"} · 📅 {r.startingDate}</div>
+                  <div className="text-xs text-gray-400">📞 {r.phoneNo||"—"}{r.materialType?` · 🧱 ${r.materialType}`:""}</div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {(user.role==="supervisor"||isAdminLike(user.role))&&<button onClick={()=>{markReportsRead(r._id);setEditModal({...r});}} className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 py-1.5 rounded-lg text-xs font-bold">✏️</button>}
+                  <button onClick={()=>downloadReport(r)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded-lg text-xs font-bold">⬇️</button>
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                <div className="bg-gray-50 rounded-lg p-1.5 text-center"><div className="font-black">{r.totalWorkingArea||"0"} sqft</div><div className="text-gray-400">Area</div></div>
+                <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(r.workingCost)||0)}</div><div className="text-gray-400">Cost</div></div>
+                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div><div className="text-gray-400">Total</div></div>
+              </div>
+              <div className="mt-2 flex gap-1">
+                {["supervisor","office","admin"].map(role=>(
+                  <div key={role} className={`flex-1 text-center py-1 rounded-lg text-xs font-bold border ${r.signatures?.[role]?"bg-green-50 border-green-300 text-green-700":"bg-gray-50 border-gray-200 text-gray-400"}`}>
+                    {r.signatures?.[role]?"✓":"○"} {role.charAt(0).toUpperCase()+role.slice(1)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {modal&&<Modal title="Add Site Report" onClose={()=>setModal(false)}><FormBody f={form} setF={setForm} /><div className="mt-3"><button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Submit Report</button></div></Modal>}
+      {editModal&&<Modal title="Edit Site Report" onClose={()=>setEditModal(null)}><FormBody f={editModal} setF={setEditModal} /><div className="mt-3"><button onClick={saveEdit} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold hover:bg-blue-600">Save Changes</button></div></Modal>}
+      {viewModal&&(
+        <Modal title="Site Report Details" onClose={()=>setViewModal(null)}>
+          <div className="space-y-3">
+            <div className="flex justify-between items-center"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><button onClick={()=>downloadReport(viewModal)} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold">Download</button></div>
+            <div className="grid grid-cols-2 gap-2">
+              {[["Site Name",viewModal.siteName],["Phone No",viewModal.phoneNo],["Starting Date",viewModal.startingDate],["Worker Name",viewModal.workerName],["Payment Mode",viewModal.paymentMode],["Received By",viewModal.amountReceivedBy]].map(([l,v])=>(
+                <div key={l} className="bg-gray-50 rounded-xl p-2"><div className="text-xs text-gray-400">{l}</div><div className="font-bold text-sm">{v||"—"}</div></div>
+              ))}
+              {(viewModal.paymentMode==="GPay"||viewModal.paymentMode==="UPI")&&viewModal.upiId&&<div className="col-span-2 bg-purple-50 rounded-xl p-2"><div className="text-xs text-gray-400">UPI ID</div><div className="font-bold">{viewModal.upiId}</div></div>}
+              {viewModal.paymentMode==="Bank"&&<div className="col-span-2 bg-blue-50 rounded-xl p-2 grid grid-cols-3 gap-1"><div><div className="text-xs text-gray-400">Bank</div><div className="font-bold text-xs">{viewModal.bankName||"—"}</div></div><div><div className="text-xs text-gray-400">Branch</div><div className="font-bold text-xs">{viewModal.bankBranch||"—"}</div></div><div><div className="text-xs text-gray-400">Account</div><div className="font-bold text-xs">{viewModal.bankAccount||"—"}</div></div></div>}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{viewModal.totalArea||"0"} sqft</div><div className="text-xs text-gray-400">Total Area</div></div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.workingCost)||0)}</div><div className="text-xs text-gray-400">Working Cost</div></div>
+              <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">Total Area</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(+(viewModal.totalAmount)||0)}</div><div className="text-xs text-gray-400">Total Amount</div></div>
+            </div>
+            {viewModal.materialType&&<div className="bg-teal-50 border border-teal-200 rounded-xl p-2"><div className="text-xs font-bold text-teal-600 mb-1">🧱 Material Type</div><div className="text-sm font-bold">{viewModal.materialType}</div></div>}
+            {viewModal.extraWork&&<div className="bg-orange-50 border border-orange-200 rounded-xl p-2"><div className="text-xs font-bold text-orange-600 mb-1">➕ Extra Work</div><div className="text-sm">{viewModal.extraWork}</div></div>}
+            {viewModal.extraMaterial&&<div className="bg-orange-50 border border-orange-200 rounded-xl p-2"><div className="text-xs font-bold text-orange-600 mb-1">🧱 Extra Material</div><div className="text-sm">{viewModal.extraMaterial}</div></div>}
+            {viewModal.note&&<div className="bg-gray-50 rounded-xl p-2"><div className="text-xs font-bold text-gray-500 mb-1">📝 Note</div><div className="text-sm">{viewModal.note}</div></div>}
+            {viewModal.materialSupply&&<div className="bg-teal-50 rounded-xl p-2"><div className="text-xs font-bold text-teal-600 mb-1">📦 Material Supply</div><div className="text-sm">{viewModal.materialSupply}</div></div>}
+            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div className="text-xs font-bold text-gray-600 uppercase mb-3">✍️ Signatures</div>
+              <div className="grid grid-cols-3 gap-2">
+                {["supervisor","office","admin"].map(role=>(
+                  <div key={role} className={`rounded-xl border p-2 text-center ${viewModal.signatures?.[role]?"bg-green-50 border-green-300":"bg-white border-gray-200"}`}>
+                    <div className="text-xl mb-1">{viewModal.signatures?.[role]?"✅":"⭕"}</div>
+                    <div className="text-xs font-bold capitalize">{role}</div>
+                    {!viewModal.signatures?.[role]&&(user.role===role||isAdminLike(user.role))&&<button onClick={()=>signReport(viewModal._id,role)} className="mt-1 bg-green-500 text-white px-2 py-0.5 rounded-lg text-xs font-bold w-full">Sign</button>}
+                    {viewModal.signatures?.[role]&&<div className="text-xs text-green-600 font-semibold mt-1">Signed ✓</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── SUPERVISOR DAILY REPORT ───────────────────────────────────────────────────
+
+// ─── DAILY REPORT (Supervisor) ────────────────────────────────────────────────
+function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("running");
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [addModal, setAddModal] = useState(false);
+  const [viewModal, setViewModal] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [siteSearch, setSiteSearch] = useState("");
+  const [entrySection, setEntrySection] = useState("site");
+  const [reportSection, setReportSection] = useState("site");
+  const [reportFilters, setReportFilters] = useState({date:"",siteName:"",workerName:"",type:""});
+
+  const emptyForm = {
+    siteName:"", siteId:"", date:today(), siteStatus:"running",
+    completedToday:"", totalCompleted:"", interlockType:"", dayNotes:"",
+    materialsUnloaded:"", materialQty:"", equipment:"", supplierName:"",
+    extraWorkDesc:"", extraWorkQty:"", extraWorkCost:"",
+    complaints:"", actionTaken:"",
+    workerEntries:[], // [{workerName, attendance, workDone, salary, paymentGiven, pending, remarks, workCategory, workArea, unit, rate, loadingCharge, unloadingCharge, paymentMode}]
+    payments:[], // [{type, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [workerEntry, setWorkerEntry] = useState({
+    workerName:"", attendance:"present", dutyArea:"", workDone:"",
+    workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
+    paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+  });
+  const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""};
+  const [payForm, setPayForm] = useState(emptyPayForm);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/workers"),api("GET","/dailyreport")]).then(([sw,w,dr])=>{
+      setSiteWorks(Array.isArray(sw)?sw:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setReports(Array.isArray(dr)?dr:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const normalizedText = (value) => String(value || "").trim().toLowerCase();
+  const sameText = (left, right) => normalizedText(left) === normalizedText(right);
+  const reportBelongsToSite = (report, site) => report.siteId
+    ? String(report.siteId) === String(site._id)
+    : sameText(report.siteName, site.customerName);
+  const mySites = siteWorks.filter(s=>isAdminLike(user.role)||sameText(s.addedBy,user.name));
+  const planned = mySites.filter(s=>s.status==="pending");
+  const running = mySites.filter(s=>s.status==="running");
+  const completed = mySites.filter(s=>s.status==="completed");
+  const getSiteReports = (site) => reports.filter(r=>reportBelongsToSite(r,site)).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const paymentType = (payment) => String(payment?.type || "").trim().toLowerCase();
+  const isSiteReceipt = (payment) => paymentType(payment) === "site payment received";
+  const isOfficeCash = (payment) => ["cash received from office", "cash given to office"].includes(paymentType(payment));
+  const isOfficeCashReceived = (payment) => paymentType(payment) === "cash received from office";
+  const isExpensePayment = (payment) => paymentType(payment) !== "worker payment" && !isSiteReceipt(payment) && !isOfficeCash(payment);
+  const paymentFormForSection = (section) => ({
+    ...emptyPayForm,
+    type: section === "site" ? "Site Payment Received" : section === "office" ? "Cash Received from Office" : "Material Payment"
+  });
+  const reportSectionsOf = (report) => {
+    if (["site","workers","expenses","office"].includes(report.entrySection)) return [report.entrySection];
+    if (Array.isArray(report.entrySections) && report.entrySections.length) return report.entrySections;
+    const sections = [];
+    const hasWorkers = (report.workerEntries||[]).length>0 || report.workersDetail || (report.workerPayments||[]).length>0;
+    const hasExpenses = (report.payments||[]).some(isExpensePayment) || report.expenses;
+    const hasSite = report.completedToday || report.totalCompleted || report.interlockType || report.materialsUnloaded || report.materialQty || report.equipment || report.supplierName || report.extraWorkDesc || report.extraWorkQty || report.extraWorkCost || report.newSite || report.runningSite || report.materialSupply || (report.payments||[]).some(isSiteReceipt) || (report.siteName&&(report.dayNotes||report.dayNote));
+    const hasOffice = report.complaints || report.actionTaken || report.complaintRemarks || (report.payments||[]).some(isOfficeCash) || (!report.siteName&&(report.dayNotes||report.dayNote));
+    if(hasSite) sections.push("site");
+    if(hasWorkers) sections.push("workers");
+    if(hasExpenses) sections.push("expenses");
+    if(hasOffice) sections.push("office");
+    if(!sections.length&&report.siteName) sections.push("site");
+    if(!sections.length) sections.push("office");
+    return sections;
+  };
+  const visibleReports = reports.filter(r=>{
+    if (isAdminLike(user.role)) return true;
+    const allowedSite = mySites.some(s=>reportBelongsToSite(r,s));
+    return user.role === "supervisor" ? allowedSite : sameText(r.addedBy,user.name) || allowedSite;
+  });
+  const siteNameMap = new Map();
+  [...mySites.map(site=>site.customerName),...visibleReports.map(report=>report.siteName)].filter(Boolean).forEach(name=>{
+    const key=normalizedText(name);
+    if(key&&!siteNameMap.has(key)) siteNameMap.set(key,String(name).trim());
+  });
+  const reportSiteOptions = [
+    {value:"",label:"All Sites"},
+    ...Array.from(siteNameMap.values()).sort((a,b)=>a.localeCompare(b)).map(name=>({value:name,label:name})),
+  ];
+  const filterText = (value, needle) => !needle || String(value||"").toLowerCase().includes(String(needle).toLowerCase());
+  const filteredReports = visibleReports.filter(r=>
+    (!reportFilters.date || r.date===reportFilters.date) &&
+    (!reportFilters.siteName || sameText(r.siteName,reportFilters.siteName))
+  );
+  const sectionReports = {
+    site:visibleReports.filter(r=>reportSectionsOf(r).includes("site")),
+    workers:visibleReports.filter(r=>reportSectionsOf(r).includes("workers")),
+    expenses:visibleReports.filter(r=>reportSectionsOf(r).includes("expenses")),
+    office:visibleReports.filter(r=>reportSectionsOf(r).includes("office")),
+  };
+  const filteredSectionReports = {
+    site:filteredReports.filter(r=>reportSectionsOf(r).includes("site")),
+    workers:filteredReports.filter(r=>reportSectionsOf(r).includes("workers")),
+    expenses:filteredReports.filter(r=>reportSectionsOf(r).includes("expenses")),
+    office:filteredReports.filter(r=>reportSectionsOf(r).includes("office")),
+  };
+  const sectionRows = {
+    site: filteredSectionReports.site
+      .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
+    workers: filteredSectionReports.workers.flatMap(r=>(r.workerEntries||[]).map((w,i)=>({...w,report:r,rowId:`${r._id}-w-${i}`})))
+      .filter(w=>filterText(w.workerName, reportFilters.workerName)&&filterText(w.workCategory, reportFilters.type))
+      .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
+    expenses: filteredSectionReports.expenses.flatMap(r=>(r.payments||[]).filter(isExpensePayment).map((p,i)=>({...p,report:r,rowId:`${r._id}-p-${i}`})))
+      .filter(p=>filterText(p.type, reportFilters.type))
+      .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
+    office: filteredSectionReports.office
+      .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
+  };
+
+  const addWorkerEntry = () => {
+    if (!workerEntry.workerName) return;
+    const normalize = (v) => String(v || "").trim().toLowerCase();
+    const duplicateInFormIndex = (form.workerEntries || []).findIndex(w =>
+      normalize(w.workerName) === normalize(workerEntry.workerName) &&
+      normalize(w.workCategory) === normalize(workerEntry.workCategory)
+    );
+    if (duplicateInFormIndex >= 0) {
+      const editExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
+      if (editExisting) {
+        const existing = form.workerEntries[duplicateInFormIndex];
+        setWorkerEntry({
+          ...existing,
+          workArea: String(existing.workArea || ""),
+          rate: String(existing.rate || ""),
+          loadingCharge: String(existing.loadingCharge || ""),
+          unloadingCharge: String(existing.unloadingCharge || ""),
+          salary: String(existing.salary || existing.amountEarned || ""),
+          paymentGiven: String(existing.paymentGiven || ""),
+          pending: String(existing.pending || "")
+        });
+        setForm(f => ({ ...f, workerEntries: f.workerEntries.filter((_, i) => i !== duplicateInFormIndex) }));
+      }
+      return;
+    }
+    const area = parseFloat(workerEntry.workArea) || 0;
+    const rate = parseFloat(workerEntry.rate) || 0;
+    const loadingCharge = parseFloat(workerEntry.loadingCharge) || 0;
+    const unloadingCharge = parseFloat(workerEntry.unloadingCharge) || 0;
+    const totalAmount = (area * rate) + loadingCharge + unloadingCharge;
+    const paid = parseFloat(workerEntry.paymentGiven) || 0;
+    const pending = Math.max(0, totalAmount - paid);
+
+    setForm(f=>({
+      ...f,
+      workerEntries:[
+        ...(f.workerEntries||[]),
+        {
+          ...workerEntry,
+          salary: totalAmount,
+          amountEarned: totalAmount,
+          paymentGiven: paid,
+          pending,
+          workArea: area,
+          rate,
+          loadingCharge,
+          unloadingCharge
+        }
+      ]
+    }));
+
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
+  };
+
+  const addPayment = () => {
+    if (!payForm.amount) return;
+    if (payForm.type === "Worker Payment") return;
+    setForm(f=>({...f, payments:[...(f.payments||[]),{...payForm,amount:+payForm.amount,pending:+payForm.pending||0,siteName:payForm.siteName||f.siteName}]}));
+    setPayForm(paymentFormForSection(entrySection));
+  };
+
+  const sectionReportPayload = (source, section) => {
+    if (source._id) return source;
+    const base = {
+      ...emptyForm,
+      entrySection: section,
+      siteName: source.siteName,
+      siteId: source.siteId,
+      date: source.date,
+      siteStatus: source.siteStatus,
+      interlockType: source.interlockType,
+    };
+    if (section === "site") return {
+      ...base,
+      completedToday: source.completedToday,
+      totalCompleted: source.totalCompleted,
+      dayNotes: source.dayNotes,
+      materialsUnloaded: source.materialsUnloaded,
+      materialQty: source.materialQty,
+      equipment: source.equipment,
+      supplierName: source.supplierName,
+      extraWorkDesc: source.extraWorkDesc,
+      extraWorkQty: source.extraWorkQty,
+      extraWorkCost: source.extraWorkCost,
+      payments: (source.payments || []).filter(isSiteReceipt),
+    };
+    if (section === "workers") return { ...base, workerEntries: source.workerEntries || [] };
+    if (section === "expenses") return { ...base, payments: (source.payments || []).filter(isExpensePayment) };
+    if (section === "office") return {
+      ...base,
+      dayNotes: source.dayNotes,
+      complaints: source.complaints,
+      actionTaken: source.actionTaken,
+      payments: (source.payments || []).filter(isOfficeCash),
+    };
+    return source;
+  };
+
+  const save = async () => {
+    if (!form.date) return;
+    if (entrySection === "site" && !form.siteName) {
+      window.alert("Please select or type site name.");
+      return;
+    }
+
+    const reportPayload = sectionReportPayload(form, entrySection);
+    const cleanPayments = (reportPayload.payments||[]).filter(p=>p.type!=="Worker Payment");
+    const workerPaidTotal = (reportPayload.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven)||0),0);
+    const totalPayments = cleanPayments.filter(p=>!isSiteReceipt(p)&&!isOfficeCashReceived(p)).reduce((a,p)=>a+(+(p.amount)||0),0) + workerPaidTotal;
+
+    // 3. Calculate site payment received & AUTO-UPDATE sitework
+    const sitePayments = cleanPayments.filter(isSiteReceipt);
+    const totalReceived = sitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const inferredSections = reportPayload.entrySections || [];
+    const entrySectionForSave = reportPayload.entrySection || (!reportPayload._id || inferredSections.length <= 1 ? entrySection : undefined);
+    const savePayload = {...reportPayload,payments:cleanPayments,totalPayments,totalReceived,...(entrySectionForSave?{entrySection:entrySectionForSave}:{})};
+    let item;
+    if (reportPayload._id) {
+      const audit = requestAuditReason("edit", "daily report", user);
+      if (!audit) return;
+      item = await api("PUT", `/dailyreport/${reportPayload._id}`, {...savePayload,addedBy:reportPayload.addedBy || user.name,...audit});
+    } else {
+      item = await api("POST","/dailyreport",{...savePayload,addedBy:user.name});
+    }
+    if(item._id){
+      setReports(p=>reportPayload._id ? p.map(r=>r._id===item._id?item:r) : [item,...p]);
+      if (form.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
+      setSelectedDate(item.date || form.date || null);
+      setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch("");
+    }
+    else if (item.message) window.alert(item.message);
+  };;
+
+  const openAdd = (site = null, section = "site") => {
+    setForm(site ? {...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"} : emptyForm);
+    setSiteSearch(site?.customerName || "");
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
+    setPayForm(paymentFormForSection(section));
+    setEntrySection(section);
+    setSelectedSite(null);
+    setAddModal(true);
+  };
+
+  const entryButtons = (compact = false) => (
+    <div className={`grid ${compact ? "grid-cols-4" : "grid-cols-2 sm:grid-cols-4"} gap-2`}>
+      {[
+        { id:"site", label:"Site", icon:"🏗️", color:"border-blue-700 bg-blue-600 text-white hover:bg-blue-700" },
+        { id:"workers", label:"Workers", icon:"👷", color:"border-teal-700 bg-teal-600 text-white hover:bg-teal-700" },
+        { id:"expenses", label:"Expenses", icon:"💸", color:"border-red-700 bg-red-600 text-white hover:bg-red-700" },
+        { id:"office", label:"Office", icon:"🏢", color:"border-violet-700 bg-violet-600 text-white hover:bg-violet-700" },
+      ].map(s=>(
+        <button
+          key={s.id}
+          type="button"
+          onClick={(e)=>{e.stopPropagation(); openAdd(null, s.id);}}
+          className={`${s.color} border rounded-lg aspect-square sm:aspect-[4/3] min-h-[92px] p-2 flex flex-col items-center justify-center gap-2 text-xs font-black shadow-sm hover:shadow-md transition-all`}
+        >
+          <span className="text-2xl" aria-hidden="true">{s.icon}</span>
+          <span>+ {s.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const workersForCurrentEntry = () => {
+    const site = mySites.find(s=>s._id===form.siteId);
+    const selectedNames = site?.selectedWorkers || [];
+    return workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(!form.siteId || selectedNames.includes(w.name)));
+  };
+
+  const normalizeDailyReport = (report = {}) => ({
+    ...emptyForm,
+    ...report,
+    date: String(report.date || report.createdAt || today()).slice(0,10),
+    siteName: report.siteName || report.runningSite || report.newSite || "",
+    dayNotes: report.dayNotes || report.dayNote || "",
+    materialsUnloaded: report.materialsUnloaded || report.materialSupply || "",
+    payments: (report.payments || []).filter(p => p.type !== "Worker Payment").map(p=>({...p})),
+    workerEntries: (report.workerEntries || []).map(row=>({...row}))
+  });
+
+  const openDailyReportView = (report) => {
+    if (!report?._id) return;
+    markReportsRead(report._id);
+    setSelectedSite(null);
+    setAddModal(false);
+    setViewModal(normalizeDailyReport(report));
+  };
+
+  const editDailyReport = (report, forcedSection = "") => {
+    if (!report?._id) return;
+    markReportsRead(report._id);
+    setSelectedSite(null);
+    setViewModal(null);
+    setForm(normalizeDailyReport(report));
+    setSiteSearch(report.siteName || "");
+    const editSection = forcedSection || report.entrySection || reportSectionsOf(report)[0] || "site";
+    setPayForm(paymentFormForSection(editSection));
+    setWorkerEntry({
+      workerName:"", attendance:"present", dutyArea:"", workDone:"",
+      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
+      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
+    });
+    setEntrySection(editSection);
+    setAddModal(true);
+  };
+
+  useEffect(()=>{
+    if (!initialEditReport?._id) return;
+    editDailyReport(initialEditReport, initialEditReport.entrySection || initialEditReport.entrySections?.[0] || "");
+    onInitialEditOpened?.();
+  },[initialEditReport?._id]);
+
+  const deleteDailyReport = async (report) => {
+    if (!report?._id) return;
+    const audit = requestAuditReason("delete", "daily report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/dailyreport/${report._id}`, audit);
+    if (deleted?.ok) {
+      setReports(p => p.filter(r => r._id !== report._id));
+      setViewModal(null);
+      if (form.siteId || report.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
+    } else if (deleted?.message) window.alert(deleted.message);
+  };
+
+  const reportActions = (report, section = "") => (
+    <div className="grid grid-cols-3 gap-1 w-full sm:w-auto shrink-0">
+      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap inline-flex items-center justify-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>View Report</button>
+      <button type="button" onClick={()=>editDailyReport(report,section)} className="bg-blue-100 text-blue-800 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Edit Report</button>
+      <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-100 text-red-700 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Delete Report</button>
+    </div>
+  );
+
+  if (loading) return <Loader />;
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const groupedReports = mergeDailyReportsByDate(sr);
+    const dateReport = selectedDate?groupedReports.find(r=>r.date===selectedDate):null;
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalPaid = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const allMats = sr.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = sr.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+    const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="font-black text-xl">{selectedSite.customerName}</div>
+              <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · 📞 {selectedSite.phone||"—"}</div>
+              <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · By: {selectedSite.addedBy||"—"}</div>
+            </div>
+            <Badge color={selectedSite.status==="completed"?"green":selectedSite.status==="running"?"amber":"gray"}>{selectedSite.status}</Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-4 gap-1 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{selectedSite.workSize||"—"}</div><div className="text-gray-400">Total sqft</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp}</div><div className="text-gray-400">Done</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Received</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalPayments||0)} paid</option>)}
+          </select>
+        </div>
+
+        {dateReport?(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate}</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+              <div className="bg-amber-50 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
+            </div>
+            {(dateReport.sourceReports||[]).length>0&&(
+              <SectionBox title="Reports Submitted This Date" icon="Report" color="blue">
+                {(dateReport.sourceReports||[]).map((r,i)=>(
+                  <div key={r._id||i} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs py-2 border-b border-blue-100">
+                    <span>Report {i+1} ? {r.workerEntries?.length||0} workers ? {CURRENCY}{fmt(r.totalPayments||0)} paid</span>
+                    {reportActions(r)}
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Worker Details" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="bg-white rounded-xl p-2 border border-teal-100 text-xs">
+                    <div className="flex justify-between"><span className="font-bold">{w.workerName}</span><Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></div>
+                    {w.workDone&&<div className="text-gray-500">Work: {w.workDone}</div>}
+                    <div className="flex gap-3 mt-0.5">
+                      {w.salary&&<span>Salary: {CURRENCY}{fmt(w.salary)}</span>}
+                      {w.paymentGiven&&<span className="text-green-700 font-bold">Paid: {CURRENCY}{fmt(w.paymentGiven)}</span>}
+                      {w.pending>0&&<span className="text-red-600">Pending: {CURRENCY}{fmt(w.pending)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}{p.remarks?` · ${p.remarks}`:""}</div></div>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Site Payment Received"&&p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+              </SectionBox>
+            )}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="font-bold text-xs text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+          </div>
+        ):(
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{sr.length}</div><div className="text-xs text-gray-400">Reports</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">Total Received</div></div>
+            </div>
+            {sr.length>0&&(
+              <SectionBox title="Submitted Reports" icon="Report" color="blue">
+                {sr.map((r,i)=>(
+                  <div key={r._id||i} className="bg-white rounded-xl border border-blue-100 p-2 mb-2 text-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-black text-gray-800">{r.date} - Report {sr.length-i}</div>
+                        <div className="text-gray-500">{r.workerEntries?.length||0} workers | {r.completedToday||0} sqft | {CURRENCY}{fmt(r.totalPayments||0)} paid</div>
+                        <div className="text-gray-400">By: {r.addedBy || "-"}</div>
+                      </div>
+                      {reportActions(r)}
+                    </div>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {allWorkers.length>0&&(
+              <SectionBox title="Worker Summary" icon="👷" color="teal">
+                {Object.entries(allWorkers.reduce((acc,w)=>{
+                  if (!acc[w.workerName]) acc[w.workerName]={days:0,paid:0,pending:0};
+                  acc[w.workerName].days++;
+                  acc[w.workerName].paid+=+(w.paymentGiven||0);
+                  acc[w.workerName].pending+=+(w.pending||0);
+                  return acc;
+                },{})).map(([name,d])=>(
+                  <div key={name} className="flex justify-between text-xs py-1 border-b border-teal-100">
+                    <span className="font-bold">{name} ({d.days} days)</span>
+                    <span>Paid: {CURRENCY}{fmt(d.paid)} {d.pending>0?`· Pending: ${CURRENCY}${fmt(d.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {allPayments.filter(p=>p.type==="Site Payment Received").length>0&&(
+              <SectionBox title="Payments Received from Site" icon="💰" color="blue">
+                {allPayments.filter(p=>p.type==="Site Payment Received").map((p,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100">
+                    <span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span>
+                    <span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="text-xs font-black text-blue-700 text-right mt-1">Total: {CURRENCY}{fmt(allPayments.filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
+              </SectionBox>
+            )}
+            {allPayments.filter(p=>p.type!=="Site Payment Received").length>0&&(
+              <SectionBox title="Payments Made" icon="💸" color="green">
+                {allPayments.filter(p=>p.type!=="Site Payment Received").map((p,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-green-100">
+                    <span>{p.date} · {p.type}{p.workerName?` → ${p.workerName}`:""}</span>
+                    <span className="font-black text-green-700">{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {allMats.length>0&&<SectionBox title="Material History" icon="🧱" color="teal">{allMats.map((m,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{m.date} · {m.name} ({m.qty})</span><span className="text-gray-400">{m.supplier||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((e,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{e.date} · {e.desc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(e.cost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">All Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports yet" />}
+            {groupedReports.map(r=>(
+              <div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right"><div className="font-black text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recv</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">📋 Daily Report</h2>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+        <div className="text-xs font-black text-gray-500 uppercase mb-2">New Daily Entry</div>
+        {entryButtons(false)}
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-black text-gray-500 uppercase">Submitted Daily Reports</div>
+            <div className="text-[11px] text-gray-400">Search section-wise report entries</div>
+          </div>
+          <button type="button" onClick={()=>setReportFilters({date:"",siteName:"",workerName:"",type:""})} className="bg-gray-50 text-gray-600 border border-gray-200 px-2 py-1 rounded-lg text-xs font-bold">Clear</button>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            {id:"site",label:"Site",icon:"🏗️",count:sectionReports.site.length,color:"border-blue-700 bg-blue-600 hover:bg-blue-700"},
+            {id:"workers",label:"Workers",icon:"👷",count:sectionReports.workers.length,color:"border-teal-700 bg-teal-600 hover:bg-teal-700"},
+            {id:"expenses",label:"Expenses",icon:"💸",count:sectionReports.expenses.length,color:"border-red-700 bg-red-600 hover:bg-red-700"},
+            {id:"office",label:"Office",icon:"🏢",count:sectionReports.office.length,color:"border-violet-700 bg-violet-600 hover:bg-violet-700"},
+          ].map(s=>(
+            <button key={s.id} type="button" aria-pressed={reportSection===s.id} onClick={()=>setReportSection(s.id)} className={`relative min-h-[82px] rounded-lg p-2 text-xs font-black text-white flex flex-col items-center justify-center gap-1 transition-all ${s.color} ${reportSection===s.id?"border-4 border-slate-900 shadow-xl scale-[1.02]":"border-2 border-transparent opacity-75 shadow-sm hover:opacity-100"}`}>
+              {reportSection===s.id&&<span className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white text-slate-900 flex items-center justify-center text-sm shadow" aria-label="Selected">✓</span>}
+              <span className="text-xl" aria-hidden="true">{s.icon}</span><span>{s.label}</span><span className="min-w-6 rounded-full bg-white/20 px-2 py-0.5">{s.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Input label="Date" type="date" value={reportFilters.date} onChange={e=>setReportFilters(f=>({...f,date:e.target.value}))} />
+          <Select label="Site Name" value={reportFilters.siteName} options={reportSiteOptions} onChange={e=>setReportFilters(f=>({...f,siteName:e.target.value}))} />
+          {reportSection==="workers"&&<Input label="Worker Name" value={reportFilters.workerName} onChange={e=>setReportFilters(f=>({...f,workerName:e.target.value}))} placeholder="Search worker" />}
+          {(reportSection==="workers"||reportSection==="expenses")&&<Input label={reportSection==="workers"?"Work Category":"Expense Type"} value={reportFilters.type} onChange={e=>setReportFilters(f=>({...f,type:e.target.value}))} placeholder="Search type" />}
+        </div>
+        <div className="text-xs font-bold text-slate-600">Showing {new Set(sectionRows[reportSection].map(row=>row.report?._id||row._id)).size} matching {{site:"site",workers:"worker",expenses:"expense",office:"office"}[reportSection]} report(s)</div>
+        <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
+          {reportSection==="site"&&sectionRows.site.map(r=>(
+            <div key={r._id} className="bg-gray-50 rounded-xl border border-gray-100 p-3 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{r.siteName||"Site Entry"}</div>
+                  {(r.payments||[]).filter(isSiteReceipt).length>0&&<div className="font-black text-blue-700">Site received: {CURRENCY}{fmt((r.payments||[]).filter(isSiteReceipt).reduce((sum,p)=>sum+(+(p.amount)||0),0))}</div>}
+                  <div className="text-gray-400">{r.date||"-"} · {r.addedBy||"-"}</div>
+                  <div className="mt-1 text-gray-600">{r.completedToday||0} sqft done {r.materialsUnloaded?`· ${r.materialsUnloaded} ${r.materialQty||""}`:""} {r.extraWorkDesc?`· Extra: ${r.extraWorkDesc}`:""}</div>
+                </div>
+                {reportActions(r,"site")}
+              </div>
+            </div>
+          ))}
+          {reportSection==="workers"&&sectionRows.workers.map(w=>(
+            <div key={w.rowId} className="bg-teal-50 rounded-xl border border-teal-100 p-3 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{w.workerName||"Worker"}</div>
+                  <div className="text-gray-500">{w.report.date||"-"} · {w.report.siteName||"No site"} · {w.workCategory||"-"}</div>
+                  <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-1">
+                    <span>Area: <b>{w.workArea||0} {w.unit||""}</b></span>
+                    <span>Earned: <b>{CURRENCY}{fmt(w.salary||w.amountEarned||0)}</b></span>
+                    <span>Paid: <b>{CURRENCY}{fmt(w.paymentGiven||0)}</b></span>
+                    <span>Pending: <b>{CURRENCY}{fmt(w.pending||0)}</b></span>
+                  </div>
+                </div>
+                {reportActions(w.report,"workers")}
+              </div>
+            </div>
+          ))}
+          {reportSection==="expenses"&&sectionRows.expenses.map(p=>(
+            <div key={p.rowId} className="bg-green-50 rounded-xl border border-green-100 p-3 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{p.type||"Expense"}</div>
+                  <div className="text-gray-500">{p.report.date||"-"} · {p.report.siteName||p.siteName||"No site"} · {p.mode||"-"}</div>
+                  <div className="mt-1 text-gray-600">{p.receivedFrom?`From: ${p.receivedFrom} · `:""}{p.supplierName?`Supplier: ${p.supplierName} · `:""}{p.remarks||""}</div>
+                </div>
+                <div className="sm:text-right shrink-0 space-y-1">
+                  <div className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount||0)}</div>
+                  {reportActions(p.report,"expenses")}
+                </div>
+              </div>
+            </div>
+          ))}
+          {reportSection==="office"&&sectionRows.office.map(r=>(
+            <div key={r._id} className="bg-red-50 rounded-xl border border-red-100 p-3 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-black text-gray-900">{r.date||"-"} · {r.siteName||"Office Entry"}</div>
+                  {r.dayNotes&&<div className="text-gray-600 mt-1">Notes: {r.dayNotes}</div>}
+                  {r.complaints&&<div className="text-red-700 mt-1">Complaint: {r.complaints}</div>}
+                  {r.actionTaken&&<div className="text-gray-500 mt-1">Action: {r.actionTaken}</div>}
+                  {(r.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className={`mt-1 font-bold ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{p.type}: {CURRENCY}{fmt(p.amount||0)}</div>)}
+                </div>
+                {reportActions(r,"office")}
+              </div>
+            </div>
+          ))}
+          {sectionRows[reportSection].length===0&&(
+            reportFilters.date||reportFilters.siteName||reportFilters.workerName||reportFilters.type
+              ? <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-6 text-center">
+                  <div className="font-black text-slate-800">No matching {reportSection==="workers"?"worker":reportSection==="expenses"?"expense":reportSection} reports</div>
+                  <div className="text-xs text-slate-500 mt-1">No saved report matches the selected filters. Clear them to view older records.</div>
+                  <button type="button" onClick={()=>setReportFilters({date:"",siteName:"",workerName:"",type:""})} className="mt-3 bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold">Show All Old Records</button>
+                </div>
+              : <EmptyState icon="Report" text={`No saved ${reportSection} reports for this supervisor`} />
+          )}
+        </div>
+      </div>
+      <div className="flex gap-1">
+        {[{id:"running",label:"🔄 Running",c:running.length},{id:"planned",label:"📋 Planned",c:planned.length},{id:"completed",label:"✅ Done",c:completed.length}].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label} ({t.c})</button>
+        ))}
+      </div>
+      <div className="space-y-3">
+        {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
+          const sr=getSiteReports(s); const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+          return (
+            <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="flex-1 cursor-pointer min-w-0" onClick={()=>setSelectedSite(s)}>
+                  <div className="font-black">{s.customerName}</div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · {comp}/{s.workSize||"-"} sqft</div>
+                </div>
+              </div>
+            </div>
+          );
+        }))}
+        {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div></div>
+        )))}
+        {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>(
+          <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300"><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div></div>
+        )))}
+      </div>
+
+      {addModal&&(
+        <Modal title={`${entrySection==="site"?"Site":entrySection==="workers"?"Worker":entrySection==="expenses"?"Expense":"Office"} Entry${form.siteName?` — ${form.siteName}`:""}`} onClose={()=>setAddModal(false)} wide>
+          <div className="space-y-3">
+            {entrySection==="site"?<div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name * (search or type)</label>
+              <input list="site-list" value={siteSearch} onChange={e=>{
+                setSiteSearch(e.target.value);
+                const found=mySites.find(s=>s.customerName===e.target.value);
+                if(found) {
+                  setForm(f=>({...f,siteName:found.customerName,siteId:found._id,interlockType:found.interlockType||f.interlockType,siteStatus:found.status||"running"}));
+                  setWorkerEntry(w=>({...w,workerName:""}));
+                }
+                else setForm(f=>({...f,siteName:e.target.value,siteId:""}));
+              }} placeholder="Search or type site name..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" />
+              <datalist id="site-list">{mySites.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
+              {form.siteId&&<div className="text-xs text-green-600 font-semibold mt-1">✓ Linked to existing site</div>}
+            </div>:null}
+            <div className={entrySection==="site"?"grid grid-cols-2 gap-2":"grid grid-cols-1 gap-2"}>
+              <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+              {entrySection==="site"&&<Select label="Site Status" value={form.siteStatus} options={form.siteStatus==="completed"?["completed"]:["pending","running"]} onChange={e=>setForm({...form,siteStatus:e.target.value})} />}
+            </div>
+            {entrySection==="site"&&<SectionBox title="Work Progress" icon="📐" color="blue">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Completed Today (sqft)" type="number" value={form.completedToday||""} onChange={e=>setForm({...form,completedToday:e.target.value})} placeholder="0" />
+                <Input label="Total Done Till Date" type="number" value={form.totalCompleted||""} onChange={e=>setForm({...form,totalCompleted:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Interlock Type" value={form.interlockType||""} onChange={e=>setForm({...form,interlockType:e.target.value})} />
+              <Textarea label="Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="What happened today..." />
+            </SectionBox>}
+
+            {entrySection==="site"&&<SectionBox title="Site Payment Received" icon="Cash" color="blue">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Received From" value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",receivedFrom:e.target.value})} placeholder="Client name" />
+                <Input label="Pending Amount" type="number" value={payForm.pending||""} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",pending:e.target.value})} placeholder="0" />
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,type:"Site Payment Received",remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-blue-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-blue-700">+ Add Site Payment</button>
+              {(form.payments||[]).filter(isSiteReceipt).map((p,i)=><div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-blue-200 text-xs mt-1"><div><span className="font-bold">{p.receivedFrom||"Site payment"}</span><div className="text-gray-400">{p.mode}{p.remarks?` - ${p.remarks}`:""}</div></div><div className="flex items-center gap-2"><span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(item=>item!==p)}))} className="text-red-400 font-black">x</button></div></div>)}
+            </SectionBox>}
+
+            {entrySection==="workers"&&<SectionBox title="Worker Details" icon="👷" color="teal">
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+                  <select value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
+                    <option value="">Select worker</option>
+                    {workersForCurrentEntry().map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
+                  </select>
+                  {form.siteId&&workersForCurrentEntry().length===0&&<div className="text-xs text-red-500 mt-1">No site workers assigned to this site.</div>}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select label="Work Category" value={workerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setWorkerEntry({...workerEntry,workCategory:e.target.value})} />
+                  <Select label="Attendance" value={workerEntry.attendance} options={["present","absent","half-day"]} onChange={e=>setWorkerEntry({...workerEntry,attendance:e.target.value})} />
+                  <Input label="Duty Area" value={workerEntry.dutyArea} onChange={e=>setWorkerEntry({...workerEntry,dutyArea:e.target.value})} placeholder="e.g. Front yard" />
+                  <Input label="Work Done Description" value={workerEntry.workDone} onChange={e=>setWorkerEntry({...workerEntry,workDone:e.target.value})} placeholder="e.g. Completed fitting" />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <Input label="Work Area" type="number" value={workerEntry.workArea} onChange={e=>{
+                    const area = e.target.value;
+                    const tot = ((parseFloat(area) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,workArea:area,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                  <Select label="Unit" value={workerEntry.unit} options={["Sqft","Sqm","Piece","Meter"]} onChange={e=>setWorkerEntry({...workerEntry,unit:e.target.value})} />
+                  <Input label="Rate" type="number" value={workerEntry.rate} onChange={e=>{
+                    const rate = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,rate:rate,salary:String(tot),pending:String(pend)});
+                  }} placeholder="₹" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label={`Loading Charge (${CURRENCY})`} type="number" value={workerEntry.loadingCharge} onChange={e=>{
+                    const loadingCharge = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(loadingCharge) || 0) + (parseFloat(workerEntry.unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,loadingCharge,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                  <Input label={`Unloading Charge (${CURRENCY})`} type="number" value={workerEntry.unloadingCharge} onChange={e=>{
+                    const unloadingCharge = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea) || 0) * (parseFloat(workerEntry.rate) || 0)) + (parseFloat(workerEntry.loadingCharge) || 0) + (parseFloat(unloadingCharge) || 0);
+                    const pend = Math.max(0, tot - (parseFloat(workerEntry.paymentGiven) || 0));
+                    setWorkerEntry({...workerEntry,unloadingCharge,salary:String(tot),pending:String(pend)});
+                  }} placeholder="0" />
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-center text-sm font-bold text-amber-800">
+                  Total Amount: {CURRENCY}{fmt(((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Payment Given Today" type="number" value={workerEntry.paymentGiven} onChange={e=>{
+                    const paid = e.target.value;
+                    const tot = ((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0);
+                    const pend = Math.max(0, tot - (parseFloat(paid) || 0));
+                    setWorkerEntry({...workerEntry,paymentGiven:paid,pending:String(pend)});
+                  }} placeholder="0" />
+                  <Select label="Payment Mode" value={workerEntry.paymentMode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setWorkerEntry({...workerEntry,paymentMode:e.target.value})} />
+                </div>
+
+                {Math.max(0, (((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0)) - (parseFloat(workerEntry.paymentGiven)||0)) > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-2 flex justify-between text-xs font-bold text-red-700">
+                    <span>Pending Amount:</span>
+                    <span>{CURRENCY}{fmt(Math.max(0, (((parseFloat(workerEntry.workArea)||0) * (parseFloat(workerEntry.rate)||0)) + (parseFloat(workerEntry.loadingCharge)||0) + (parseFloat(workerEntry.unloadingCharge)||0)) - (parseFloat(workerEntry.paymentGiven)||0)))}</span>
+                  </div>
+                )}
+
+                <Input label="Remarks" value={workerEntry.remarks} onChange={e=>setWorkerEntry({...workerEntry,remarks:e.target.value})} placeholder="Optional remarks..." />
+                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-teal-600">+ Add Worker Entry</button>
+              </div>
+              {(form.workerEntries||[]).map((w,i)=>(
+                <div key={i} className="bg-white rounded-xl p-3 border border-teal-200 text-xs mt-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-sm text-gray-800">{w.workerName}</span>
+                    <div className="flex items-center gap-1">
+                      <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>
+                      <button onClick={()=>setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}))} className="text-red-500 font-bold text-base hover:text-red-700 ml-2">×</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-gray-600">
+                    <div>Category: <span className="font-semibold text-gray-900">{w.workCategory || "—"}</span></div>
+                    <div>Area: <span className="font-semibold text-gray-900">{w.workArea} {w.unit}</span></div>
+                    <div>Rate: <span className="font-semibold text-gray-900">{CURRENCY}{w.rate}</span></div>
+                    <div>Loading: <span className="font-semibold text-gray-900">{CURRENCY}{w.loadingCharge || 0}</span></div>
+                    <div>Unloading: <span className="font-semibold text-gray-900">{CURRENCY}{w.unloadingCharge || 0}</span></div>
+                    <div>Earned: <span className="font-semibold text-green-700">{CURRENCY}{w.salary}</span></div>
+                    <div>Paid: <span className="font-semibold text-blue-700">{CURRENCY}{w.paymentGiven || 0} ({w.paymentMode})</span></div>
+                    <div>Pending: <span className="font-semibold text-red-600">{CURRENCY}{w.pending}</span></div>
+                  </div>
+                  {w.remarks && <div className="text-gray-400 italic">Notes: {w.remarks}</div>}
+                </div>
+              ))}
+            </SectionBox>}
+
+            {entrySection==="expenses"&&<SectionBox title="Payments & Expenses" icon="💰" color="green">
+              <Select label="Payment Type" value={payForm.type} options={["Vehicle Charge","Material Payment","Equipment Payment","Other Expense"]} onChange={e=>setPayForm({...payForm,type:e.target.value,workerName:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""})} />
+              {payForm.type==="Material Payment"&&(
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Material Name" value={payForm.materialName||""} onChange={e=>setPayForm({...payForm,materialName:e.target.value})} placeholder="Material" />
+                  <Input label="Supplier" value={payForm.supplierName||""} onChange={e=>setPayForm({...payForm,supplierName:e.target.value})} placeholder="Supplier" />
+                </div>
+              )}
+              {payForm.type==="Equipment Payment"&&(
+                <Input label="Equipment Name" value={payForm.equipmentName||""} onChange={e=>setPayForm({...payForm,equipmentName:e.target.value})} placeholder="Equipment" />
+              )}
+              {payForm.type==="Vehicle Charge"&&(
+                <Input label="Vehicle / Charge Name" value={payForm.expenseName||""} onChange={e=>setPayForm({...payForm,expenseName:e.target.value})} placeholder="Vehicle number or charge" />
+              )}
+              {payForm.type==="Other Expense"&&(
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Expense Name</label>
+                  <input list="other-expense-names" value={payForm.expenseName||""} onChange={e=>setPayForm({...payForm,expenseName:e.target.value})} placeholder="Select or type expense name" className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-gray-50" />
+                  <datalist id="other-expense-names">
+                    {["Tea Expense","Generator Fuel","Accommodation","Food","Miscellaneous"].map(name=><option key={name} value={name} />)}
+                  </datalist>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-green-500 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-600">+ Add Payment</button>
+              {(form.payments||[]).filter(isExpensePayment).map((p,i)=>(
+                <div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-green-200 text-xs mt-1">
+                  <div><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}<div className="text-gray-400">{p.mode}</div></div>
+                  <div className="flex items-center gap-1">
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                    <button onClick={()=>setForm(f=>({...f,payments:f.payments.filter((_,j)=>j!==i)}))} className="text-red-400 font-black ml-1">×</button>
+                  </div>
+                </div>
+              ))}
+              {(form.payments||[]).length>0&&(
+                <div className="grid grid-cols-2 gap-2 mt-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt((form.payments||[]).filter(p=>p.type!=="Site Payment Received"&&p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+              )}
+            </SectionBox>}
+
+            {entrySection==="site"&&<SectionBox title="Materials & Equipment" icon="🧱" color="teal">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Materials" value={form.materialsUnloaded||""} onChange={e=>setForm({...form,materialsUnloaded:e.target.value})} placeholder="e.g. Cement, Sand" />
+                <Input label="Quantity" value={form.materialQty||""} onChange={e=>setForm({...form,materialQty:e.target.value})} placeholder="e.g. 50 bags" />
+                <Input label="Equipment" value={form.equipment||""} onChange={e=>setForm({...form,equipment:e.target.value})} placeholder="e.g. Mixer" />
+                <Input label="Supplier" value={form.supplierName||""} onChange={e=>setForm({...form,supplierName:e.target.value})} placeholder="Supplier name" />
+              </div>
+            </SectionBox>}
+
+            {entrySection==="site"&&<SectionBox title="Extra Work" icon="➕" color="orange">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Description" value={form.extraWorkDesc||""} onChange={e=>setForm({...form,extraWorkDesc:e.target.value})} placeholder="Extra work done" />
+                <Input label="Qty / Sqft" value={form.extraWorkQty||""} onChange={e=>setForm({...form,extraWorkQty:e.target.value})} />
+                <Input label={`Cost (${CURRENCY})`} type="number" value={form.extraWorkCost||""} onChange={e=>setForm({...form,extraWorkCost:e.target.value})} placeholder="0" />
+              </div>
+            </SectionBox>}
+
+            {entrySection==="office"&&<SectionBox title="Office Notes & Complaints" icon="⚠️" color="red">
+              <Textarea label="Office / Day Notes" value={form.dayNotes||""} onChange={e=>setForm({...form,dayNotes:e.target.value})} placeholder="Office notes for this date..." />
+              <Textarea label="Complaint" value={form.complaints||""} onChange={e=>setForm({...form,complaints:e.target.value})} placeholder="Any issues..." />
+              <Textarea label="Action Taken" value={form.actionTaken||""} onChange={e=>setForm({...form,actionTaken:e.target.value})} placeholder="Action taken..." />
+            </SectionBox>}
+
+            {entrySection==="office"&&<SectionBox title="Office Cash" icon="Cash" color="blue">
+              <Select label="Cash Entry" value={payForm.type} options={["Cash Received from Office","Cash Given to Office"]} onChange={e=>setPayForm({...payForm,type:e.target.value})} />
+              <div className="grid grid-cols-2 gap-2">
+                <Select label="Mode" value={payForm.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPayForm({...payForm,mode:e.target.value})} />
+                <Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0" />
+              </div>
+              <Input label={isOfficeCashReceived(payForm)?"Received From":"Given To"} value={payForm.receivedFrom||""} onChange={e=>setPayForm({...payForm,receivedFrom:e.target.value})} placeholder="Office / person name" />
+              <Input label="Remarks" value={payForm.remarks} onChange={e=>setPayForm({...payForm,remarks:e.target.value})} placeholder="Optional" />
+              <button onClick={addPayment} className="w-full bg-blue-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-blue-700">+ Add Office Cash Entry</button>
+              {(form.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-blue-200 text-xs mt-1"><div><span className="font-bold">{p.type}</span><div className="text-gray-400">{p.receivedFrom||"Office"} - {p.mode}</div></div><div className="flex items-center gap-2"><span className={`font-black ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{CURRENCY}{fmt(p.amount)}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(item=>item!==p)}))} className="text-red-400 font-black">x</button></div></div>)}
+            </SectionBox>}
+
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{form._id?"Resubmit Daily Report":`Submit ${entrySection==="site"?"Site":entrySection==="workers"?"Workers":entrySection==="expenses"?"Expenses":"Office"} Entry`}</button>
+          </div>
+        </Modal>
+      )}
+      {viewModal&&(
+        <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><div className="flex gap-2"><button onClick={()=>editDailyReport(viewModal)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button><button onClick={()=>deleteDailyReport(viewModal)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-red-100">Delete</button></div></div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(viewModal.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(viewModal.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
+            </div>
+            {viewModal.dayNotes&&<SectionBox title="Notes" icon="📝" color="gray"><div className="text-sm">{viewModal.dayNotes}</div></SectionBox>}
+            {(viewModal.workerEntries||[]).length>0&&(
+              <SectionBox title="Workers" icon="👷" color="teal">
+                {viewModal.workerEntries.map((w,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                    <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></span>
+                    <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""} {+w.pending>0?`Pending: ${CURRENCY}${fmt(w.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {(viewModal.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {(viewModal.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {viewModal.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{viewModal.materialsUnloaded} · {viewModal.materialQty}</div></SectionBox>}
+            {viewModal.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{viewModal.extraWorkDesc} · {CURRENCY}{fmt(viewModal.extraWorkCost||0)}</div></SectionBox>}
+            {viewModal.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{viewModal.complaints}</div></SectionBox>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── SUPERVISOR OVERVIEW (Admin) ───────────────────────────────────────────────
+function SupervisorReports({ allUsers }) {
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("running");
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [searchSite, setSearchSite] = useState("");
+  const [searchDate, setSearchDate] = useState("");
+  const [reportView, setReportView] = useState("daily"); // daily | monthly
+
+  const supervisors = (allUsers||[]).filter(u=>u.role==="supervisor");
+
+  useEffect(()=>{
+    if (!selectedSupervisor) return;
+    setLoading(true);
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks((Array.isArray(sw)?sw:[]).filter(x=>x.addedBy===selectedSupervisor));
+      setReports((Array.isArray(dr)?dr:[]).filter(x=>x.addedBy===selectedSupervisor));
+      setLoading(false);
+    });
+  },[selectedSupervisor]);
+
+  const getSiteReports = (site) => {
+    let r = reports.filter(r=>r.siteName===site.customerName||r.siteId===site._id);
+    if (searchDate) r = r.filter(x=>x.date===searchDate);
+    return r.sort((a,b)=>b.date.localeCompare(a.date));
+  };
+
+  const filterSites = (list) => list.filter(s=>!searchSite||(s.customerName||"").toLowerCase().includes(searchSite.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(searchSite.toLowerCase()));
+  const planned = filterSites(siteWorks.filter(s=>s.status==="pending"));
+  const running = filterSites(siteWorks.filter(s=>s.status==="running"));
+  const completed = filterSites(siteWorks.filter(s=>s.status==="completed"));
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const allReports = reports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).sort((a,b)=>b.date.localeCompare(a.date));
+    const dateReport = selectedDate?allReports.find(r=>r.date===selectedDate):null;
+    const totalComp = allReports.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalReceived = allReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+    const totalPaid = allReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const allPayments = allReports.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const allWorkers = allReports.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+    const allMats = allReports.filter(r=>r.materialsUnloaded).map(r=>({name:r.materialsUnloaded,qty:r.materialQty,supplier:r.supplierName,date:r.date}));
+    const allExtra = allReports.filter(r=>r.extraWorkDesc).map(r=>({desc:r.extraWorkDesc,qty:r.extraWorkQty,cost:r.extraWorkCost,date:r.date}));
+
+    // Monthly grouping
+    const byMonth = allReports.reduce((acc,r)=>{
+      const m = r.date?.slice(0,7)||"unknown";
+      if (!acc[m]) acc[m]={reports:[],received:0,paid:0,completed:0};
+      acc[m].reports.push(r);
+      acc[m].received+=+(r.totalReceived||0);
+      acc[m].paid+=+(r.totalPayments||0);
+      acc[m].completed+=+(r.completedToday||0);
+      return acc;
+    },{});
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          {selectedSite.completionApprovalStatus&&<Badge color={selectedSite.completionApprovalStatus==="approved"?"green":selectedSite.completionApprovalStatus==="rejected"?"red":"blue"}>{selectedSite.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="font-black text-xl">{selectedSite.customerName}</div>
+              <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy}</div>
+              <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+            </div>
+            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Total Received</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Work Done</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Total Paid Out</div></div>
+          </div>
+        </div>
+
+        <div className="flex gap-1">
+          {["daily","monthly","workers","payments"].map(v=>(
+            <button key={v} onClick={()=>setReportView(v)} className={`flex-1 py-1.5 rounded-xl text-xs font-bold ${reportView===v?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>
+              {v==="daily"?"📅 Daily":v==="monthly"?"📆 Monthly":v==="workers"?"👷 Workers":"💰 Payments"}
+            </button>
+          ))}
+        </div>
+
+        {reportView==="daily"&&(
+          <div className="space-y-2">
+            <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>setSelectedDate(e.target.value||null)}>
+              <option value="">All Dates ({allReports.length} reports)</option>
+              {allReports.map(r=><option key={r._id} value={r.date}>{r.date} — {r.completedToday||0} sqft, {CURRENCY}{fmt(r.totalReceived||0)} recd</option>)}
+            </select>
+            {dateReport?(
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+                {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+                {(dateReport.workerEntries||[]).length>0&&(
+                  <SectionBox title="Worker Details" icon="👷" color="teal">
+                    {dateReport.workerEntries.map((w,i)=>(
+                      <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                        <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>{w.workDone?` · ${w.workDone}`:""}</span>
+                        <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""} {+w.pending>0?`P:${CURRENCY}${fmt(w.pending)}`:""}</span>
+                      </div>
+                    ))}
+                  </SectionBox>
+                )}
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
+                  <SectionBox title="Payments" icon="💰" color="green">
+                    {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+                      <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                        <span><span className="font-bold">{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""}</span>
+                        <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-green-700"}`}>{CURRENCY}{fmt(p.amount)}</span>
+                      </div>
+                    ))}
+                  </SectionBox>
+                )}
+                {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty} (Supplier: {dateReport.supplierName||"—"})</div></SectionBox>}
+                {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+                {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+              </div>
+            ):(
+              <div className="space-y-2">
+                {allReports.map(r=>(
+                  <div key={r._id} onClick={()=>setSelectedDate(r.date)} className="bg-white rounded-xl border p-3 cursor-pointer hover:border-amber-300 transition-all">
+                    <div className="flex justify-between items-center">
+                      <div><div className="font-black text-sm">📅 {r.date}</div><div className="text-xs text-gray-400">{(r.workerEntries||[]).length} workers · {r.completedToday||0} sqft</div></div>
+                      <div className="text-right"><div className="text-xs font-bold text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)} recd</div><div className="text-xs text-green-600">{CURRENCY}{fmt(r.totalPayments||0)} paid</div></div>
+                    </div>
+                  </div>
+                ))}
+                {allReports.length===0&&<EmptyState icon="📋" text="No reports" />}
+              </div>
+            )}
+          </div>
+        )}
+
+        {reportView==="monthly"&&(
+          <div className="space-y-3">
+            {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+              <div key={month} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black text-gray-900 mb-2">📆 {month}</div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{data.completed} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(data.received)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid Out</div></div>
+                </div>
+                <div className="text-xs text-gray-400 mt-1">{data.reports.length} daily reports</div>
+              </div>
+            ))}
+            {Object.keys(byMonth).length===0&&<EmptyState icon="📆" text="No reports" />}
+          </div>
+        )}
+
+        {reportView==="workers"&&(
+          <div className="space-y-3">
+            {Object.entries(allWorkers.reduce((acc,w)=>{
+              if (!acc[w.workerName]) acc[w.workerName]={days:0,absent:0,paid:0,pending:0,work:[],entries:[]};
+              if (w.attendance==="present") acc[w.workerName].days++;
+              else acc[w.workerName].absent++;
+              acc[w.workerName].paid+=+(w.paymentGiven||0);
+              acc[w.workerName].pending+=+(w.pending||0);
+              if (w.workDone) acc[w.workerName].work.push(`${w.date}: ${w.workDone}`);
+              acc[w.workerName].entries.push(w);
+              return acc;
+            },{})).map(([name,d])=>(
+              <div key={name} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black text-gray-900 mb-2">👷 {name}</div>
+                <div className="grid grid-cols-4 gap-1 text-xs mb-2">
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{d.days}</div><div className="text-gray-400">Present</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{d.absent}</div><div className="text-gray-400">Absent</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(d.paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(d.pending)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+                {d.work.length>0&&<div className="text-xs text-gray-400">{d.work.slice(0,3).join(" · ")}</div>}
+              </div>
+            ))}
+            {allWorkers.length===0&&<EmptyState icon="👷" text="No worker data" />}
+          </div>
+        )}
+
+        {reportView==="payments"&&(
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="font-black text-blue-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type==="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Received from Site</div></div>
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="font-black text-green-700 text-lg">{CURRENCY}{fmt(allPayments.filter(p=>p.type!=="Site Payment Received").reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid Out</div></div>
+            </div>
+            {["Site Payment Received","Material Payment","Equipment Payment","Other Expense"].map(type=>{
+              const pts = allPayments.filter(p=>p.type===type);
+              if (pts.length===0) return null;
+              return (
+                <SectionBox key={type} title={type} icon={type==="Site Payment Received"?"💰":"💸"} color={type==="Site Payment Received"?"blue":"green"}>
+                  {pts.map((p,i)=>(
+                    <div key={i} className="text-xs flex justify-between py-1 border-b border-gray-100">
+                      <span>{p.date}{p.workerName?` · ${p.workerName}`:""}{p.receivedFrom?` · ${p.receivedFrom}`:""} · {p.mode}</span>
+                      <span className="font-black">{CURRENCY}{fmt(p.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="text-xs font-black text-right mt-1">Total: {CURRENCY}{fmt(pts.reduce((a,p)=>a+(+(p.amount)||0),0))}</div>
+                </SectionBox>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">🔍 Supervisor Overview</h2>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+        <Select label="Select Supervisor" value={selectedSupervisor} options={[{value:"",label:"-- Select Supervisor --"},...supervisors.map(s=>({value:s.name,label:`${s.name} (@${s.username})`}))]} onChange={e=>{setSelectedSupervisor(e.target.value);setSelectedSite(null);}} />
+      </div>
+      {!selectedSupervisor&&<EmptyState icon="👆" text="Select a supervisor to view their work" />}
+      {loading&&<Loader />}
+      {selectedSupervisor&&!loading&&(
+        <>
+          <div className="bg-white rounded-2xl border shadow-sm p-3 space-y-2">
+            <input value={searchSite} onChange={e=>setSearchSite(e.target.value)} placeholder="🔍 Search site name or location..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            <div className="flex gap-2 items-center">
+              <Input label="Filter by date" type="date" value={searchDate} onChange={e=>setSearchDate(e.target.value)} />
+              {(searchSite||searchDate)&&<button onClick={()=>{setSearchSite("");setSearchDate("");}} className="text-xs text-amber-600 font-bold mt-5 whitespace-nowrap">✕ Clear</button>}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-gray-50 border rounded-xl p-2 text-center"><div className="font-black">{planned.length}</div><div className="text-xs text-gray-400">Planned</div></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{running.length}</div><div className="text-xs text-gray-400">Running</div></div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{completed.length}</div><div className="text-xs text-gray-400">Completed</div></div>
+          </div>
+          <div className="flex gap-1">
+            {[{id:"running",label:"Running"},{id:"planned",label:"Planned"},{id:"completed",label:"Completed"}].map(t=>(
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${activeTab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
+            ))}
+          </div>
+          <div className="space-y-3">
+            {activeTab==="running"&&(running.length===0?<EmptyState icon="🔄" text="No running sites"/>:running.map(s=>{
+              const sr=reports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+              const comp=sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+              const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+              return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between"><div><div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div></div>
+                {s.completionApprovalStatus&&<Badge color={s.completionApprovalStatus==="rejected"?"red":"blue"}>{s.completionApprovalStatus.replaceAll('_',' ')}</Badge>}</div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp}/{s.workSize||"-"} sqft</div><div className="text-gray-400">Progress</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>);
+            }))}
+            {activeTab==="planned"&&(planned.length===0?<EmptyState icon="📋" text="No planned sites"/>:planned.map(s=>(
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="font-black">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · 📅 {s.startDate||"—"}</div>
+              </div>
+            )))}
+            {activeTab==="completed"&&(completed.length===0?<EmptyState icon="✅" text="No completed sites"/>:completed.map(s=>{
+              const sr=reports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+              const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+              const paid=sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+              return (<div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="font-black">{s.customerName}</div>
+                <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · ✅ {s.endDate||"—"}</div>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid Out</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>);
+            }))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── REPORTS (Admin) ──────────────────────────────────────────────────────────
+function Reports({ production, sales, stock, raw, siteWorks }) {
+  const [dailyReports, setDailyReports] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [allSiteWorks, setAllSiteWorks] = useState([]);
+  const [customerReports, setCustomerReports] = useState({ customers: [], itemWise: [] });
+  const [supplierReports, setSupplierReports] = useState({ suppliers: [], materialWise: [] });
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("sites");
+  const [reportSubTab, setReportSubTab] = useState("all");
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [searchSite, setSearchSite] = useState("");
+  const [searchWorker, setSearchWorker] = useState("");
+  const [searchCustomer, setSearchCustomer] = useState("");
+  const [searchSupplier, setSearchSupplier] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  useEffect(()=>{
+    Promise.all([
+      api("GET","/dailyreport"), api("GET","/workers"), api("GET","/sitework"),
+      api("GET","/customers/reports"), api("GET","/suppliers/reports"),
+    ]).then(([dr,w,sw,cr,sr])=>{
+      setDailyReports(Array.isArray(dr)?dr:[]);
+      setWorkers(Array.isArray(w)?w:[]);
+      setAllSiteWorks(Array.isArray(sw)?sw:[]);
+      setCustomerReports(cr?.customers ? cr : { customers: [], itemWise: cr?.itemWise || [] });
+      setSupplierReports(sr?.suppliers ? sr : { suppliers: [], materialWise: sr?.materialWise || [] });
+      setLoading(false);
+    });
+  },[]);
+
+  const loadCustomerReports = async (type) => {
+    const data = await api("GET", `/customers/reports${type ? `?type=${type}` : ""}`);
+    if (data?.customers) setCustomerReports(data);
+  };
+  const loadSupplierReports = async (type) => {
+    const data = await api("GET", `/suppliers/reports${type ? `?type=${type}` : ""}`);
+    if (data?.suppliers) setSupplierReports(data);
+  };
+  const downloadExport = (dataset, format = "csv") => {
+    window.open(`${API}/export/${dataset}?format=${format}`, "_blank");
+  };
+
+  const filterByDate = (r) => {
+    if (fromDate && r.date<fromDate) return false;
+    if (toDate && r.date>toDate) return false;
+    return true;
+  };
+
+  if (loading) return <Loader />;
+
+  const filteredDailyReports = dailyReports.filter(filterByDate);
+
+  // Site Report
+  if (selectedSite) {
+    const sr = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id).filter(filterByDate).sort((a,b)=>b.date.localeCompare(a.date));
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const allWorkers = sr.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date})));
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const totalReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+    const totalPaidOut = sr.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+    const byMonth = sr.reduce((acc,r)=>{
+      const m=r.date?.slice(0,7)||"-";
+      if (!acc[m]) acc[m]={recv:0,paid:0,comp:0,count:0};
+      acc[m].recv+=+(r.totalReceived||0); acc[m].paid+=+(r.totalPayments||0);
+      acc[m].comp+=+(r.completedToday||0); acc[m].count++;
+      return acc;
+    },{});
+
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedSite(null)} className="text-amber-600 font-bold text-sm">← Back to Sites</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft total</div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{totalComp} sqft</div><div className="text-gray-400">Work Done</div></div>
+            <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-gray-400">Total Received</div></div>
+            <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaidOut)}</div><div className="text-gray-400">Total Paid Out</div></div>
+            <div className="bg-red-50 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(selectedSite.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+        </div>
+        {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+          <SectionBox key={month} title={`📆 ${month}`} icon="" color="gray">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center"><div className="font-black text-teal-700">{data.comp} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(data.recv)}</div><div className="text-gray-400">Received</div></div>
+              <div className="text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid Out</div></div>
+            </div>
+          </SectionBox>
+        ))}
+        {allWorkers.length>0&&(
+          <SectionBox title="Worker Summary" icon="👷" color="teal">
+            {Object.entries(allWorkers.reduce((acc,w)=>{
+              if (!acc[w.workerName]) acc[w.workerName]={days:0,paid:0,pending:0};
+              if (w.attendance==="present") acc[w.workerName].days++;
+              acc[w.workerName].paid+=+(w.paymentGiven||0);
+              acc[w.workerName].pending+=+(w.pending||0);
+              return acc;
+            },{})).map(([name,d])=>(
+              <div key={name} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                <span className="font-bold">{name} ({d.days} days)</span>
+                <span>Paid: {CURRENCY}{fmt(d.paid)} {d.pending>0?`· P:${CURRENCY}${fmt(d.pending)}`:""}</span>
+              </div>
+            ))}
+          </SectionBox>
+        )}
+        {allPayments.filter(p=>p.type==="Site Payment Received").length>0&&(
+          <SectionBox title="Payments Received" icon="💰" color="blue">
+            {allPayments.filter(p=>p.type==="Site Payment Received").map((p,i)=>(
+              <div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100">
+                <span>{p.date} · {p.receivedFrom||"—"} · {p.mode}</span>
+                <span className="font-black text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+              </div>
+            ))}
+          </SectionBox>
+        )}
+        {sr.length===0&&<EmptyState icon="📋" text="No reports for this period" />}
+        {sr.map(r=>(
+          <div key={r._id} className="bg-white rounded-xl border p-3">
+            <div className="flex justify-between"><div className="font-black text-sm">📅 {r.date}</div><div className="text-xs"><span className="text-blue-700">{CURRENCY}{fmt(r.totalReceived||0)}</span> / <span className="text-green-600">{CURRENCY}{fmt(r.totalPayments||0)}</span></div></div>
+            <div className="text-xs text-gray-400">{r.completedToday||0} sqft · {(r.workerEntries||[]).length} workers</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Worker Report
+  if (selectedWorker) {
+    const workerReports = dailyReports.filter(r=>(r.workerEntries||[]).some(w=>w.workerName===selectedWorker.name)).filter(filterByDate);
+    const allEntries = workerReports.flatMap(r=>(r.workerEntries||[]).filter(w=>w.workerName===selectedWorker.name).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    const totalDays = allEntries.filter(e=>e.attendance==="present").length;
+    const totalPaid = allEntries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
+    const totalPending = allEntries.reduce((a,e)=>a+(+(e.pending||0)),0);
+    const byMonth = allEntries.reduce((acc,e)=>{
+      const m=e.date?.slice(0,7)||"-";
+      if (!acc[m]) acc[m]={days:0,paid:0,pending:0,work:[]};
+      if (e.attendance==="present") acc[m].days++;
+      acc[m].paid+=+(e.paymentGiven||0);
+      acc[m].pending+=+(e.pending||0);
+      if (e.workDone) acc[m].work.push(e.workDone);
+      return acc;
+    },{});
+
+    return (
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back to Workers</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">👷 {selectedWorker.name}</div>
+          <div className="text-xs text-gray-400">{selectedWorker.role} · {selectedWorker.paymentType||"day"} · {CURRENCY}{fmt(selectedWorker.rateAmount||0)}/unit</div>
+          {selectedWorker.phone&&<div className="text-xs text-gray-400">📞 {selectedWorker.phone}</div>}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="font-black text-blue-700 text-lg">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(totalPending)}</div><div className="text-xs text-gray-400">Pending</div></div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+          <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+        </div>
+        {Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,data])=>(
+          <SectionBox key={month} title={`📆 ${month}`} icon="" color="gray">
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="text-center"><div className="font-black text-blue-700">{data.days} days</div><div className="text-gray-400">Present</div></div>
+              <div className="text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(data.paid)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(data.pending)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+          </SectionBox>
+        ))}
+        <div className="text-xs font-black text-gray-500 uppercase">📅 Daily Attendance</div>
+        {allEntries.sort((a,b)=>b.date.localeCompare(a.date)).map((e,i)=>(
+          <div key={i} className="bg-white rounded-xl border p-3 text-xs flex justify-between items-center">
+            <div><div className="font-bold">{e.date}</div><div className="text-gray-400">{e.siteName} {e.workDone?`· ${e.workDone}`:""}</div></div>
+            <div className="text-right">
+              <Badge color={e.attendance==="present"?"green":"red"}>{e.attendance}</Badge>
+              {+e.paymentGiven>0&&<div className="text-green-700 font-bold mt-0.5">{CURRENCY}{fmt(e.paymentGiven)}</div>}
+              {+e.pending>0&&<div className="text-red-500 text-xs">P:{CURRENCY}{fmt(e.pending)}</div>}
+            </div>
+          </div>
+        ))}
+        {allEntries.length===0&&<EmptyState icon="📋" text="No records for this period" />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📈 Reports</h2>
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {[{id:"sites",label:"🏗️ Sites"},{id:"workers",label:"👷 Workers"},{id:"financial",label:"💰 Financial"},{id:"customers",label:"👤 Customers"},{id:"suppliers",label:"🏪 Suppliers"}].map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);setReportSubTab("all");}} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab===t.id?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t.label}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />
+        <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />
+      </div>
+      <SectionBox title="Backup & Export" icon="Export" color="blue">
+        <div className="text-sm text-gray-600">Download a full backup or Excel-ready CSV files for business records.</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <button onClick={()=>downloadExport("all","json")} className="bg-blue-600 text-white rounded-xl px-3 py-2.5 text-xs font-black hover:bg-blue-700">Full Backup</button>
+          {[
+            ["sales","Sales"],["purchases","Purchases"],["stock","Stock"],["customers","Customers"],
+            ["suppliers","Suppliers"],["workers","Workers"],["siteWorks","Sites"],["dailyReports","Daily Reports"],
+            ["productionSiteEntries","Production"],["rawMaterials","Raw Materials"],["masterInterlocks","Interlock Master"],["workerPayments","Worker Payments"]
+          ].map(([id,label])=>(
+            <button key={id} onClick={()=>downloadExport(id,"csv")} className="bg-white border border-blue-200 text-blue-700 rounded-xl px-3 py-2.5 text-xs font-black hover:bg-blue-50">{label}</button>
+          ))}
+        </div>
+      </SectionBox>
+
+      {tab==="sites"&&(
+        <div className="space-y-3">
+          <input value={searchSite} onChange={e=>setSearchSite(e.target.value)} placeholder="🔍 Search site..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          {allSiteWorks.filter(s=>!searchSite||(s.customerName||"").toLowerCase().includes(searchSite.toLowerCase())).map(s=>{
+            const sr = filteredDailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+            const recv = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+            const comp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+            return (
+              <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-start justify-between">
+                  <div><div className="font-black text-gray-900">{s.customerName}</div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div></div>
+                  <Badge color={s.status==="completed"?"green":s.status==="running"?"amber":"gray"}>{s.status}</Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{comp} sqft</div><div className="text-gray-400">Done</div></div>
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(recv)}</div><div className="text-gray-400">Received</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+          {allSiteWorks.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
+        </div>
+      )}
+
+      {tab==="workers"&&(
+        <div className="space-y-3">
+          <input value={searchWorker} onChange={e=>setSearchWorker(e.target.value)} placeholder="🔍 Search worker..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          {workers.filter(w=>!searchWorker||w.name.toLowerCase().includes(searchWorker.toLowerCase())).map(w=>{
+            const entries = filteredDailyReports.flatMap(r=>(r.workerEntries||[]).filter(e=>e.workerName===w.name));
+            const days = entries.filter(e=>e.attendance==="present").length;
+            const paid = entries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
+            const pending = entries.reduce((a,e)=>a+(+(e.pending||0)),0);
+            return (
+              <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role} · {w.paymentType||"day"} · {CURRENCY}{fmt(w.rateAmount||0)}</div></div>
+                  <span className="text-gray-300 text-xl">›</span>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{days}</div><div className="text-gray-400">Days</div></div>
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            );
+          })}
+          {workers.length===0&&<EmptyState icon="👷" text="No workers found" />}
+        </div>
+      )}
+
+      {tab==="financial"&&(
+        <div className="space-y-3">
+          {(()=>{
+            const totalReceived = filteredDailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+            const totalPaid = filteredDailyReports.reduce((a,r)=>a+(+(r.totalPayments||0)),0);
+            const totalSales = sales.reduce((a,s)=>a+(+(s.total)||0),0);
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard label="Total Received" value={`${CURRENCY}${fmt(totalReceived)}`} icon="💰" color="blue" />
+                  <StatCard label="Total Paid Out" value={`${CURRENCY}${fmt(totalPaid)}`} icon="💸" color="green" />
+                  <StatCard label="Pending Payments" value={`${CURRENCY}${fmt(allSiteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}`} icon="⏳" color="red" />
+                  <StatCard label="Stock Sales" value={`${CURRENCY}${fmt(totalSales)}`} icon="🛒" color="purple" />
+                </div>
+                <div className="bg-white rounded-2xl border shadow-sm p-4">
+                  <div className="font-black text-gray-900 mb-3">📊 Site Summary</div>
+                  {allSiteWorks.slice(0,5).map(s=>{
+                    const sr=filteredDailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id);
+                    const recv=sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+                    return <div key={s._id} className="flex justify-between py-2 border-b border-gray-50 text-sm"><span className="font-bold">{s.customerName}</span><span className="text-blue-700 font-bold">{CURRENCY}{fmt(recv)}</span></div>;
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {tab==="customers"&&(
+        <div className="space-y-3">
+          <div className="flex gap-1 flex-wrap">
+            {[{id:"all",label:"All Customers"},{id:"pending",label:"Pending"},{id:"paid",label:"Fully Paid"},{id:"items",label:"Item-wise"}].map(t=>(
+              <button key={t.id} onClick={()=>{setReportSubTab(t.id); if(t.id!=="items") loadCustomerReports(t.id==="all"?"":t.id);}} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportSubTab===t.id?"bg-amber-500 text-white border-amber-500":"bg-white text-gray-600"}`}>{t.label}</button>
+            ))}
+          </div>
+          <input value={searchCustomer} onChange={e=>setSearchCustomer(e.target.value)} placeholder="🔍 Search customer..." className="w-full border rounded-xl px-3 py-2 text-sm bg-white" />
+          {reportSubTab==="items" ? (
+            <SectionBox title="Item-wise Sales" icon="📦" color="blue">
+              {(customerReports.itemWise||[]).map((it,i)=>(
+                <div key={i} className="flex justify-between py-2 border-b border-gray-100 text-sm">
+                  <span className="font-bold">{it.item}</span>
+                  <span>{fmt(it.quantity)} {it.unit} · {CURRENCY}{fmt(it.amount)}</span>
+                </div>
+              ))}
+              {(customerReports.itemWise||[]).length===0&&<EmptyState icon="📦" text="No sales data" />}
+            </SectionBox>
+          ) : (
+            (customerReports.customers||[]).filter(c=>!searchCustomer||(c.name||"").toLowerCase().includes(searchCustomer.toLowerCase())||(c.mobile||"").includes(searchCustomer)).map(c=>(
+              <div key={c._id||c.mobile} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black">{c.name}</div>
+                <div className="text-xs text-gray-400">📱 {c.mobile}</div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(c.totalSalesAmount||0)}</div><div className="text-gray-400">Sales</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(c.totalPaid||0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(c.totalPending||0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {tab==="suppliers"&&(
+        <div className="space-y-3">
+          <div className="flex gap-1 flex-wrap">
+            {[{id:"all",label:"All Suppliers"},{id:"pending",label:"Pending"},{id:"paid",label:"Fully Paid"},{id:"materials",label:"Material-wise"}].map(t=>(
+              <button key={t.id} onClick={()=>{setReportSubTab(t.id); if(t.id!=="materials") loadSupplierReports(t.id==="all"?"":t.id);}} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportSubTab===t.id?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600"}`}>{t.label}</button>
+            ))}
+          </div>
+          <input value={searchSupplier} onChange={e=>setSearchSupplier(e.target.value)} placeholder="🔍 Search supplier..." className="w-full border rounded-xl px-3 py-2 text-sm bg-white" />
+          {reportSubTab==="materials" ? (
+            <SectionBox title="Material-wise Purchases" icon="🧱" color="teal">
+              {(supplierReports.materialWise||[]).map((m,i)=>(
+                <div key={i} className="flex justify-between py-2 border-b border-gray-100 text-sm">
+                  <span className="font-bold">{m.material}</span>
+                  <span>{fmt(m.quantity)} {m.unit} · {CURRENCY}{fmt(m.amount)}</span>
+                </div>
+              ))}
+              {(supplierReports.materialWise||[]).length===0&&<EmptyState icon="🧱" text="No purchase data" />}
+            </SectionBox>
+          ) : (
+            (supplierReports.suppliers||[]).filter(s=>!searchSupplier||(s.name||"").toLowerCase().includes(searchSupplier.toLowerCase())||(s.mobile||"").includes(searchSupplier)).map(s=>(
+              <div key={s._id||s.name} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="font-black">{s.name}</div>
+                <div className="text-xs text-gray-400">📱 {s.mobile||"—"}</div>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                  <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-700">{CURRENCY}{fmt(s.totalPurchaseAmount||0)}</div><div className="text-gray-400">Purchases</div></div>
+                  <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(s.totalPaid||0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(s.totalPending||0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WORKERS ──────────────────────────────────────────────────────────────────
+function Workers({ user }) {
+  const [workers, setWorkers] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [siteReports, setSiteReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [addModal, setAddModal] = useState(false);
+  const [editModal, setEditModal] = useState(null);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const emptyForm = { name:"", phone:"", address:"", role:"Labourer", workerCategory:"Site Worker", workerType:"Site Worker", status:"Active", workLocationType:"Outside Site", paymentType:"Per Day", customPaymentType:"", rateAmount:"" };
+  const [workerForm, setWorkerForm] = useState(emptyForm);
+  const canEdit = isAdminLike(user.role);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/workers"),api("GET","/workerpayments"),api("GET","/workerreport")]).then(([w,p,sr])=>{
+      setWorkers(Array.isArray(w)?w:[]);
+      setPayments(Array.isArray(p)?p:[]);
+      setSiteReports(Array.isArray(sr)?sr:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const addWorker = async () => {
+    if (!workerForm.name) return;
+    const type = workerForm.workerType || workerForm.workerCategory || "Site Worker";
+    const w = await api("POST","/workers",{...workerForm,workerType:type,workerCategory:type,rateAmount:+workerForm.rateAmount||0,addedBy:user.name});
+    if (w._id) { setWorkers(p=>[...p,w]); setAddModal(false); setWorkerForm(emptyForm); }
+  };
+
+  const saveEdit = async () => {
+    const type = editModal.workerType || editModal.workerCategory || "Site Worker";
+    const saved = await api("PUT",`/workers/${editModal._id}`,{...editModal,workerType:type,workerCategory:type});
+    setWorkers(p=>p.map(x=>x._id===editModal._id?saved:x));
+    if (selectedWorker?._id===editModal._id) setSelectedWorker({...selectedWorker,...editModal});
+    setEditModal(null);
+  };
+
+  const del = async (id) => {
+    if (!window.confirm("Delete worker?")) return;
+    await api("DELETE",`/workers/${id}`);
+    setWorkers(p=>p.filter(x=>x._id!==id));
+    setSelectedWorker(null);
+  };
+
+  const wPayments = (n) => payments.filter(p=>p.workerName===n).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const totalPaid = (n) => wPayments(n).reduce((a,p)=>a+(+(p.amount)||0),0);
+  const totalSqft = (n) => siteReports.filter(r=>r.workerName===n).reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0);
+  const totalDays = (n) => new Set(siteReports.filter(r=>r.workerName===n).map(r=>r.startingDate).filter(Boolean)).size;
+
+  if (loading) return <Loader />;
+
+  if (selectedWorker) {
+    const wp = wPayments(selectedWorker.name);
+    const sqft = totalSqft(selectedWorker.name);
+    const days = totalDays(selectedWorker.name);
+    const paid = totalPaid(selectedWorker.name);
+    const sites = siteReports.filter(r=>r.workerName===selectedWorker.name);
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
+          {canEdit&&<div className="flex gap-1"><button onClick={()=>setEditModal({...selectedWorker})} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(selectedWorker._id)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl text-gray-900 mb-2">👷 {selectedWorker.name}</div>
+          <div className="flex gap-1 mb-2"><Badge color={workerTypeOf(selectedWorker)==="Production Worker"?"purple":"teal"}>{workerTypeOf(selectedWorker)}</Badge><Badge color={isActiveWorker(selectedWorker)?"green":"red"}>{selectedWorker.status||"Active"}</Badge></div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div><div className="text-xs text-gray-400">Role</div><div className="font-bold">{selectedWorker.role}</div></div>
+            <div><div className="text-xs text-gray-400">Phone</div><div className="font-bold">{selectedWorker.phone||"—"}</div></div>
+            <div className="col-span-2"><div className="text-xs text-gray-400">Address</div><div className="font-bold">{selectedWorker.address||"—"}</div></div>
+            <div><div className="text-xs text-gray-400">Payment Type</div><div className="font-bold">{selectedWorker.paymentType||"Per Day"}</div></div>
+            <div><div className="text-xs text-gray-400">Rate</div><div className="font-bold text-amber-700">{CURRENCY}{fmt(selectedWorker.rateAmount||0)}</div></div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-blue-700">{days}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-teal-700">{fmt(sqft)}</div><div className="text-xs text-gray-400">sqft</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(paid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+        </div>
+        <div className="font-black text-gray-800 mb-2">💸 Payment History</div>
+        {wp.length===0&&<EmptyState icon="💸" text="No payments recorded" />}
+        {wp.map((p,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between items-center"><div><div className="font-bold text-sm">{CURRENCY}{fmt(+(p.amount)||0)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div></div><Badge color="green">Paid</Badge></div>)}
+        <div className="font-black text-gray-800 mb-2">🏗️ Site Work</div>
+        {sites.length===0&&<EmptyState icon="🏗️" text="No site reports" />}
+        {sites.map(r=><div key={r._id} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">{r.siteName||"—"}</div><div className="text-xs text-gray-400">📅 {r.startingDate}</div></div><div className="text-right"><div className="font-black text-teal-700 text-sm">{r.totalWorkingArea||"0"} sqft</div><div className="text-xs text-gray-400">{CURRENCY}{fmt(+(r.totalAmount)||0)}</div></div></div>)}
+        {editModal&&<Modal title="Edit Worker" onClose={()=>setEditModal(null)}>
+          <div className="space-y-3">
+            <Input label="Name" value={editModal.name||""} onChange={e=>setEditModal({...editModal,name:e.target.value})} />
+            <Input label="Phone" type="tel" value={editModal.phone||""} onChange={e=>setEditModal({...editModal,phone:e.target.value})} />
+            <Input label="Address" value={editModal.address||""} onChange={e=>setEditModal({...editModal,address:e.target.value})} />
+            <Select label="Role" value={editModal.role||"Labourer"} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setEditModal({...editModal,role:e.target.value})} />
+            <Select label="Worker Type" value={editModal.workerType||editModal.workerCategory||"Site Worker"} options={["Site Worker","Production Worker"]} onChange={e=>setEditModal({...editModal,workerType:e.target.value,workerCategory:e.target.value})} />
+            <Select label="Status" value={editModal.status||"Active"} options={["Active","Inactive"]} onChange={e=>setEditModal({...editModal,status:e.target.value})} />
+            <Select label="Payment Type" value={editModal.paymentType||"Per Day"} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setEditModal({...editModal,paymentType:e.target.value})} />
+            <Input label={`Rate (${CURRENCY})`} type="number" value={editModal.rateAmount||""} onChange={e=>setEditModal({...editModal,rateAmount:+e.target.value})} />
+            <button onClick={saveEdit} className="w-full bg-blue-500 text-white py-2.5 rounded-xl font-bold">Save Changes</button>
+          </div>
+        </Modal>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">👷 Workers</h2>
+        {canEdit&&<button onClick={()=>setAddModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white border rounded-xl p-2 text-center"><div className="font-black">{workers.length}</div><div className="text-xs text-gray-400">Workers</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(payments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div><div className="text-xs text-gray-400">Total Paid</div></div>
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{fmt(siteReports.reduce((a,r)=>a+(+(r.totalWorkingArea)||0),0))} sqft</div><div className="text-xs text-gray-400">Work</div></div>
+      </div>
+      <div className="space-y-3">
+        {workers.length===0&&<EmptyState icon="👷" text="No workers yet" />}
+        {workers.map(w=>(
+          <div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+            <div className="flex items-center justify-between">
+              <div><div className="font-black text-gray-900">{w.name}</div><div className="text-xs text-gray-400">{w.role}{w.phone?` · 📞 ${w.phone}`:""}</div><div className="flex gap-1 mt-1"><Badge color={workerTypeOf(w)==="Production Worker"?"purple":"teal"}>{workerTypeOf(w)}</Badge><Badge color={isActiveWorker(w)?"green":"red"}>{w.status||"Active"}</Badge></div><div className="text-xs text-amber-600 font-semibold mt-1">{CURRENCY}{fmt(w.rateAmount||0)} / {w.paymentType||"day"}</div></div>
+              <span className="text-gray-300 text-xl">›</span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+              <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays(w.name)}</div><div className="text-gray-400">Days</div></div>
+              <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{fmt(totalSqft(w.name))} sqft</div><div className="text-gray-400">Work</div></div>
+              <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalPaid(w.name))}</div><div className="text-gray-400">Paid</div></div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {addModal&&<Modal title="Add Worker" onClose={()=>setAddModal(false)}>
+        <div className="space-y-3">
+          <Input label="Worker Name *" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm,name:e.target.value})} />
+          <Input label="Phone" type="tel" value={workerForm.phone} onChange={e=>setWorkerForm({...workerForm,phone:e.target.value})} />
+          <Input label="Address" value={workerForm.address} onChange={e=>setWorkerForm({...workerForm,address:e.target.value})} />
+          <Select label="Role" value={workerForm.role} options={["Labourer","Mason","Helper","Supervisor","Driver","Other"]} onChange={e=>setWorkerForm({...workerForm,role:e.target.value})} />
+          <Select label="Worker Type" value={workerForm.workerType} options={["Site Worker","Production Worker"]} onChange={e=>setWorkerForm({...workerForm,workerType:e.target.value,workerCategory:e.target.value})} />
+          <Select label="Status" value={workerForm.status} options={["Active","Inactive"]} onChange={e=>setWorkerForm({...workerForm,status:e.target.value})} />
+          <Select label="Payment Type" value={workerForm.paymentType} options={["Per Day","Per Hour","Per Piece","Per Square Feet","Per Square Meter","Other"]} onChange={e=>setWorkerForm({...workerForm,paymentType:e.target.value})} />
+          {workerForm.paymentType==="Other"&&<Input label="Custom Type" value={workerForm.customPaymentType} onChange={e=>setWorkerForm({...workerForm,customPaymentType:e.target.value})} placeholder="e.g. per load" />}
+          <Input label={`Rate (${CURRENCY})`} type="number" value={workerForm.rateAmount} onChange={e=>setWorkerForm({...workerForm,rateAmount:e.target.value})} />
+          <button onClick={addWorker} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Add Worker</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+function Suppliers({ user }) {
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const MATERIAL_OPTIONS = ["Cement","Stone","Sand","Blocks","Chips","Steel","Tiles"];
+  const emptyForm = { name:"", location:"", phone:"", materials:[], customMaterial:"", note:"" };
+  const [form, setForm] = useState(emptyForm);
+  const canEdit = isAdminLike(user.role);
+
+  useEffect(()=>{ api("GET","/suppliers").then(d=>{ setSuppliers(Array.isArray(d)?d:[]); setLoading(false); }); },[]);
+
+  const save = async () => {
+    if (!form.name) return;
+    const mats = [...(form.materials||[])];
+    if (form.customMaterial) mats.push(form.customMaterial);
+    const data = {...form, materials:mats};
+    if (editItem) { await api("PUT",`/suppliers/${editItem._id}`,data); setSuppliers(p=>p.map(x=>x._id===editItem._id?{...x,...data}:x)); }
+    else { const item = await api("POST","/suppliers",{...data,addedBy:user.name}); if (item._id) setSuppliers(p=>[...p,item]); }
+    setModal(false); setEditItem(null); setForm(emptyForm);
+  };
+
+  const del = async (id) => { if (!window.confirm("Delete?")) return; await api("DELETE",`/suppliers/${id}`); setSuppliers(p=>p.filter(x=>x._id!==id)); };
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏪 Suppliers</h2>
+        {canEdit&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="space-y-3">
+        {suppliers.length===0&&<EmptyState icon="🏪" text="No suppliers yet" />}
+        {suppliers.map(s=>(
+          <div key={s._id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1"><div className="font-black text-gray-900">{s.name}</div><div className="text-xs text-gray-400">📍 {s.location||"—"} · 📞 {s.phone||"—"}</div><div className="mt-1 flex gap-1 flex-wrap">{(s.materials||[]).map(m=><Badge key={m} color="teal">{m}</Badge>)}</div></div>
+              {canEdit&&<div className="flex gap-1"><button onClick={()=>{setForm({...s,customMaterial:""});setEditItem(s);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(s._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {modal&&<Modal title={editItem?"Edit Supplier":"Add Supplier"} onClose={()=>{setModal(false);setEditItem(null);setForm(emptyForm);}}>
+        <div className="space-y-3">
+          <Input label="Supplier Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <Input label="Location" value={form.location||""} onChange={e=>setForm({...form,location:e.target.value})} />
+          <Input label="Phone" type="tel" value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} />
+          <div><label className="block text-xs font-semibold text-gray-600 mb-2">Materials Supplied</label>
+            <div className="flex flex-wrap gap-1 mb-2">{MATERIAL_OPTIONS.map(m=><button key={m} type="button" onClick={()=>{const mats=form.materials||[];setForm({...form,materials:mats.includes(m)?mats.filter(x=>x!==m):[...mats,m]});}} className={`px-2 py-1 rounded-lg text-xs font-bold border ${(form.materials||[]).includes(m)?"bg-teal-500 text-white border-teal-500":"bg-white text-gray-600 border-gray-200"}`}>{m}</button>)}</div>
+            <Input label="Other Material" value={form.customMaterial||""} onChange={e=>setForm({...form,customMaterial:e.target.value})} placeholder="Custom material..." />
+          </div>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add Supplier"}</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── PURCHASES ────────────────────────────────────────────────────────────────
+function Purchases({ user }) {
+  const [purchases, setPurchases] = useState([]);
+  const [supplierMaster, setSupplierMaster] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [viewModal, setViewModal] = useState(null);
+  const [supplierMode, setSupplierMode] = useState("existing");
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [quickSearch, setQuickSearch] = useState("");
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({ mobile: "", supplier: "", datePreset: "", customDate: "", fromDate: "", toDate: "" });
+  const emptyForm = { date:today(), supplierName:"", supplierPhone:"", supplierMobile:"", supplierAddress:"", itemName:"", itemType:"Material", quantity:"", unit:"nos", unitPrice:"", totalAmount:"", amountPaid:"", paymentMode:"Cash", note:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/purchases"), api("GET","/suppliers")]).then(([p,s])=>{
+      setPurchases(Array.isArray(p)?p:[]);
+      setSupplierMaster(Array.isArray(s)?s:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const calcTotal = () => +form.quantity * (+form.unitPrice || 0) || +(form.totalAmount || 0);
+  const calcPending = () => Math.max(0, calcTotal() - +(form.amountPaid || 0));
+
+  const filterPurchases = () => {
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset && filters.datePreset !== "custom" && filters.datePreset !== "range") {
+      const r = salesDateRange(filters.datePreset);
+      if (r) { from = r.from; to = r.to; }
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    const mob = (filters.mobile || quickSearch).replace(/\D/g, "");
+    const q = quickSearch.trim().toLowerCase();
+    return purchases.filter(p => {
+      if (mob && !(p.supplierMobile || p.supplierPhone || "").includes(mob)) return false;
+      if (filters.supplier && !(p.supplierName || "").toLowerCase().includes(filters.supplier.toLowerCase())) return false;
+      if (q && !mob && !(p.supplierName || "").toLowerCase().includes(q) && !(p.supplierMobile || p.supplierPhone || "").includes(q)) return false;
+      if (from && p.date < from) return false;
+      if (to && p.date > to) return false;
+      return true;
+    });
+  };
+
+  const openSupplierLedger = async (mobile, name) => {
+    setLedgerLoading(true);
+    const qs = [];
+    if (filters.fromDate) qs.push(`fromDate=${filters.fromDate}`);
+    if (filters.toDate) qs.push(`toDate=${filters.toDate}`);
+    const suffix = qs.length ? `?${qs.join("&")}` : "";
+    let data;
+    if (mobile) data = await api("GET", `/suppliers/ledger?mobile=${mobile}${qs.length ? "&" + qs.join("&") : ""}`);
+    else if (name) data = await api("GET", `/suppliers/ledger?name=${encodeURIComponent(name)}${qs.length ? "&" + qs.join("&") : ""}`);
+    setLedgerLoading(false);
+    if (data?.supplier) setLedger(data);
+  };
+
+  const handleQuickSearch = async () => {
+    const q = quickSearch.trim();
+    if (!q) { setLedger(null); return; }
+    if (/^\d{6,}$/.test(q.replace(/\D/g, ""))) await openSupplierLedger(q.replace(/\D/g, "").slice(-10));
+    else await openSupplierLedger(null, q);
+  };
+
+  const selectMasterSupplier = (id) => {
+    setSelectedSupplierId(id);
+    const s = supplierMaster.find(x => x._id === id);
+    if (!s) return;
+    setForm(f => ({ ...f, supplierName: s.name, supplierPhone: s.mobile || s.phone || "", supplierMobile: s.mobile || s.phone || "", supplierAddress: s.address || s.location || "" }));
+  };
+
+  const save = async () => {
+    if (!form.supplierName || !form.itemName) return;
+    const total = calcTotal();
+    const amountPaid = +(form.amountPaid || 0);
+    const payload = {
+      ...form, totalAmount: total, amountPaid, amountPending: calcPending(),
+      supplierMobile: (form.supplierMobile || form.supplierPhone || "").replace(/\D/g, "").slice(-10),
+      addedBy: user.name, saveToSupplierMaster: true,
+    };
+    const audit = editItem ? requestAuditReason("edit", "purchase report", user) : null;
+    if (editItem && !audit) return;
+    const item = await api(editItem ? "PUT" : "POST", editItem ? `/purchases/${editItem._id}` : "/purchases", editItem ? { ...payload, ...audit } : payload);
+    if (item._id) {
+      setPurchases(p => editItem ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
+      setModal(false);
+      setEditItem(null);
+      setForm(emptyForm);
+      setSelectedSupplierId("");
+      api("GET", "/suppliers").then(s => setSupplierMaster(Array.isArray(s) ? s : []));
+    }
+  };
+
+  const deletePurchase = async (purchase) => {
+    const canModifyPurchase = isAdminLike(user.role) || (user.role === "supervisor" && purchase?.addedBy === user.name);
+    if (!canModifyPurchase || !purchase?._id) return;
+    if (!window.confirm("Delete this purchase? Supplier pending will be updated.")) return;
+    const audit = requestAuditReason("delete", "purchase report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/purchases/${purchase._id}`, audit);
+    if (deleted?.ok) {
+      setPurchases(p => p.filter(x => x._id !== purchase._id));
+      setViewModal(null);
+      api("GET", "/suppliers").then(s => setSupplierMaster(Array.isArray(s) ? s : []));
+      if (ledger?.supplier?.mobile) openSupplierLedger(ledger.supplier.mobile);
+    } else if (deleted?.message) {
+      window.alert(deleted.message);
+    }
+  };
+
+  const filtered = filterPurchases();
+  const canAdd = isAdminLike(user.role) || user.role === "supervisor";
+  const openEditPurchase = (purchase) => {
+    setEditItem(purchase);
+    setForm({ ...emptyForm, ...purchase, supplierPhone: purchase.supplierPhone || purchase.supplierMobile || "" });
+    setSupplierMode("new");
+    setModal(true);
+  };
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🛒 Purchases</h2>
+        {canAdd && <button onClick={() => { setEditItem(null); setForm(emptyForm); setSupplierMode("existing"); setModal(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-3">
+        <div className="flex gap-2">
+          <input className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" placeholder="🔍 Search by Mobile / Supplier Name" value={quickSearch} onChange={e => setQuickSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && handleQuickSearch()} />
+          <button onClick={handleQuickSearch} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold shrink-0">Search</button>
+        </div>
+        {ledgerLoading && <div className="text-xs text-amber-600 mt-2">Loading supplier...</div>}
+      </div>
+
+      {ledger?.supplier && (
+        <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden">
+          <div className="bg-teal-700 px-4 py-3 flex items-center justify-between">
+            <div className="text-white font-black">📒 Supplier Ledger</div>
+            <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl">×</button>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-gray-400 text-xs">Supplier</span><div className="font-bold">{ledger.supplier.name}</div></div>
+              <div><span className="text-gray-400 text-xs">Mobile</span><div className="font-bold">{ledger.supplier.mobile || "—"}</div></div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <StatCard label="Total Purchases" value={ledger.supplier.totalPurchases} icon="🛒" color="blue" />
+              <StatCard label="Purchase Amount" value={`${CURRENCY}${fmt(ledger.supplier.totalPurchaseAmount)}`} icon="💰" color="red" />
+              <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.supplier.totalPaid)}`} icon="✅" color="teal" />
+              <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.supplier.totalPending)}`} icon="⏳" color="amber" />
+            </div>
+            {(ledger.materialSummary || []).length > 0 && (
+              <SectionBox title="Materials Purchased" icon="🧱" color="teal">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Material</th><th className="text-right p-1">Total Qty</th></tr></thead>
+                  <tbody>
+                    {ledger.materialSummary.map((m, i) => (
+                      <tr key={i} className="border-t"><td className="p-1 font-semibold">{m.item}</td><td className="p-1 text-right">{fmt(m.quantity)} {m.unit}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionBox>
+            )}
+            <div className="overflow-x-auto">
+              <div className="text-xs font-bold text-gray-600 mb-1">Purchase History</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500">
+                    <th className="text-left p-2">Date</th><th className="text-left p-2">Material</th><th className="text-right p-2">Qty</th>
+                    <th className="text-right p-2">Amount</th><th className="text-right p-2">Paid</th><th className="text-right p-2">Pending</th><th className="text-left p-2">Mode</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(ledger.purchases || []).map(p => (
+                    <tr key={p._id} className="border-t">
+                      <td className="p-2">{p.date}</td><td className="p-2 font-semibold">{p.itemName}</td>
+                      <td className="p-2 text-right">{p.quantity} {p.unit}</td>
+                      <td className="p-2 text-right text-red-700 font-bold">{CURRENCY}{fmt(+(p.totalAmount) || 0)}</td>
+                      <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
+                      <td className="p-2 text-right text-amber-700">{CURRENCY}{fmt(+(p.amountPending) || 0)}</td>
+                      <td className="p-2">{p.paymentMode}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full px-4 py-3 flex justify-between text-sm font-bold text-gray-700">
+          <span>🔎 Purchase Filters</span><span>{showFilters ? "▲" : "▼"}</span>
+        </button>
+        {showFilters && (
+          <div className="px-4 pb-4 space-y-3 border-t pt-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} />
+              <Input label="Supplier Name" value={filters.supplier} onChange={e => setFilters({ ...filters, supplier: e.target.value })} />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "yesterday", label: "Yesterday" }, { id: "thismonth", label: "This Month" }, { id: "range", label: "Date Range" }].map(d => (
+                <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{d.label}</button>
+              ))}
+            </div>
+            {filters.datePreset === "range" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+                <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Total Spent" value={`${CURRENCY}${fmt(filtered.reduce((a, p) => a + (+(p.totalAmount) || 0), 0))}`} icon="💰" color="red" sub={`${filtered.length} record(s)`} />
+        <StatCard label="Total Pending" value={`${CURRENCY}${fmt(filtered.reduce((a, p) => a + (+(p.amountPending) || 0), 0))}`} icon="⏳" color="amber" />
+      </div>
+
+      <div className="space-y-3">
+        {filtered.length === 0 && <EmptyState icon="🛒" text="No purchases found" />}
+        {filtered.map(p => (
+          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
+            <div className="flex justify-between gap-2" onClick={() => setViewModal(p)}>
+              <div className="flex-1 cursor-pointer">
+                <div className="flex items-center gap-2"><span className="font-black">{p.itemName}</span><Badge color="teal">{p.itemType}</Badge></div>
+                <div className="text-xs text-gray-400">🏪 {p.supplierName} · 📅 {p.date}</div>
+                {(+(p.amountPending) || 0) > 0 && <div className="text-xs text-amber-600">Pending: {CURRENCY}{fmt(+(p.amountPending) || 0)}</div>}
+              </div>
+              <div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(+(p.totalAmount) || 0)}</div><div className="text-xs text-gray-400">{p.quantity} {p.unit}</div></div>
+            </div>
+            {(p.supplierMobile || p.supplierPhone) && (
+              <button onClick={() => openSupplierLedger(p.supplierMobile || p.supplierPhone)} className="mt-2 text-xs text-teal-600 font-bold hover:underline">View Supplier Ledger →</button>
+            )}
+            {(isAdminLike(user.role) || (user.role === "supervisor" && p.addedBy === user.name)) && (
+              <>
+                <button onClick={() => openEditPurchase(p)} className="mt-2 ml-3 text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-100">Edit</button>
+                <button onClick={() => deletePurchase(p)} className="mt-2 text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-xl font-bold hover:bg-red-100">Delete</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {modal && <Modal title={editItem ? "Edit Purchase" : "Add Purchase"} onClose={() => { setModal(false); setEditItem(null); setForm(emptyForm); }} wide>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+          <SectionBox title="Supplier" icon="🏪" color="blue">
+            <div className="flex gap-2 mb-2">
+              <button type="button" onClick={() => setSupplierMode("existing")} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${supplierMode === "existing" ? "bg-teal-600 text-white" : "bg-white"}`}>Select Existing</button>
+              <button type="button" onClick={() => { setSupplierMode("new"); setSelectedSupplierId(""); }} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${supplierMode === "new" ? "bg-teal-600 text-white" : "bg-white"}`}>New Supplier</button>
+            </div>
+            {supplierMode === "existing" ? (
+              <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white mb-2" value={selectedSupplierId} onChange={e => selectMasterSupplier(e.target.value)}>
+                <option value="">-- Select from Supplier Master --</option>
+                {supplierMaster.map(s => <option key={s._id} value={s._id}>{s.name} ({s.mobile || s.phone || "—"})</option>)}
+              </select>
+            ) : (
+              <>
+                <Input label="Supplier Name *" value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="Mobile" type="tel" value={form.supplierPhone} onChange={e => setForm({ ...form, supplierPhone: e.target.value, supplierMobile: e.target.value })} />
+                  <Input label="Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
+                </div>
+                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-semibold text-green-700">
+                  This supplier will be saved automatically to Supplier Master.
+                </div>
+              </>
+            )}
+            {supplierMode === "existing" && selectedSupplierId && (
+              <div className="text-xs bg-white border rounded-xl p-2 mt-1">
+                <div><b>{form.supplierName}</b> · {form.supplierPhone}</div>
+                <div>{form.supplierAddress || "—"}</div>
+              </div>
+            )}
+          </SectionBox>
+          <SectionBox title="Item" icon="📦" color="amber">
+            <Input label="Item / Material Name *" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />
+            <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e => setForm({ ...form, itemType: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Qty" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value, totalAmount: String(+e.target.value * (+(form.unitPrice) || 0)) })} />
+              <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e => setForm({ ...form, unit: e.target.value })} />
+              <Input label={`Unit Price (${CURRENCY})`} type="number" value={form.unitPrice} onChange={e => setForm({ ...form, unitPrice: e.target.value, totalAmount: String((+(form.quantity) || 0) * +e.target.value) })} />
+              <Input label={`Total (${CURRENCY})`} type="number" value={form.totalAmount} onChange={e => setForm({ ...form, totalAmount: e.target.value })} />
+            </div>
+          </SectionBox>
+          <div className="grid grid-cols-2 gap-2">
+            <Input label={`Amount Paid (${CURRENCY})`} type="number" value={form.amountPaid} onChange={e => setForm({ ...form, amountPaid: e.target.value })} placeholder="0" />
+            <div><label className="block text-xs font-semibold text-gray-600 mb-1">Pending</label><div className="border border-amber-200 rounded-xl px-3 py-2.5 text-sm bg-amber-50 text-amber-800 font-bold">{CURRENCY}{fmt(calcPending())}</div></div>
+          </div>
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","Bank","GPay","UPI","Credit"]} onChange={e => {
+            const mode = e.target.value;
+            setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
+          }} />
+          <Textarea label="Note" value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">{editItem ? "Save Purchase" : "Submit"}</button>
+        </div>
+      </Modal>}
+      {viewModal && <Modal title="Purchase Details" onClose={() => setViewModal(null)}>
+        <div className="space-y-3">
+          <div className="text-xs text-gray-400">By: {viewModal.addedBy} · {viewModal.date}</div>
+          <SectionBox title="Supplier" icon="🏪" color="blue"><div className="text-sm"><div className="font-bold">{viewModal.supplierName}</div><div className="text-xs text-gray-400">{viewModal.supplierPhone} · {viewModal.supplierAddress || "—"}</div></div></SectionBox>
+          <SectionBox title="Item" icon="📦" color="amber">
+            <div className="text-sm font-bold">{viewModal.itemName} — {viewModal.quantity} {viewModal.unit}</div>
+            <div className="grid grid-cols-3 gap-2 mt-2 text-xs text-center">
+              <div className="bg-red-50 rounded-xl p-2"><div className="font-black text-red-700">{CURRENCY}{fmt(+(viewModal.totalAmount) || 0)}</div><div className="text-gray-400">Total</div></div>
+              <div className="bg-teal-50 rounded-xl p-2"><div className="font-black text-teal-700">{CURRENCY}{fmt(+(viewModal.amountPaid) || 0)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-amber-50 rounded-xl p-2"><div className="font-black text-amber-700">{CURRENCY}{fmt(+(viewModal.amountPending) || 0)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+          </SectionBox>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── PRODUCTION SITE ──────────────────────────────────────────────────────────
+function ProductionSite({ user, setStock }) {
+  const [entries, setEntries] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [interlockTypes, setInterlockTypes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("entry");
+  const [modal, setModal] = useState(false);
+  const [editingProductionId, setEditingProductionId] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [reports, setReports] = useState(null);
+  const [reportType, setReportType] = useState("worker");
+  const [filters, setFilters] = useState({ worker: "", datePreset: "", fromDate: "", toDate: "", customDate: "" });
+  const [workerSearch, setWorkerSearch] = useState("");
+
+  const emptyForm = {
+    date: today(), shift: "", workerId: "", workerName: "", itemId: "", itemName: "",
+    productType: "interlock", category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", unitType: "piece", producedQty: "", unit: "piece",
+    productionUnit: "unit", boxQty: "", boxCount: "",
+    productionRate: "", loadingCharge: "", unloadingCharge: "", paymentGiven: "", remarks: "",
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const canEdit = isAdminLike(user.role) || user.role === "supervisor";
+
+  useEffect(() => {
+    Promise.all([
+      api("GET", "/productionsite"), api("GET", "/workers"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"),
+    ]).then(([e, w, i, h]) => {
+      const interlocks = Array.isArray(i) ? i.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
+      setEntries(Array.isArray(e) ? e : []);
+      setWorkers(Array.isArray(w) ? w : []);
+      setInterlockTypes([...interlocks, ...hollow]);
+      setLoading(false);
+    });
+  }, []);
+
+  const dateFilterParams = () => {
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset === "today") { const r = salesDateRange("today"); from = r.from; to = r.to; }
+    else if (filters.datePreset === "month") {
+      const now = new Date();
+      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      to = today();
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    const q = [];
+    if (from) q.push(`fromDate=${from}`);
+    if (to) q.push(`toDate=${to}`);
+    return q.length ? `&${q.join("&")}` : "";
+  };
+
+  const isHollowProduction = () => form.productType === "hollowbrick";
+  const calcProducedQty = () => isHollowProduction() && form.productionUnit === "box" ? ((+(form.boxQty || 0)) * (+(form.boxCount || 0))) : +(form.producedQty || 0);
+  const calcRateQty = () => isHollowProduction() && form.productionUnit === "box" ? +(form.boxQty || 0) : calcProducedQty();
+  const calcTotal = () => (calcRateQty() * +(form.productionRate || 0)) + +(form.loadingCharge || 0) + +(form.unloadingCharge || 0);
+  const calcProductionSqft = () => isHollowProduction() ? 0 : (+(form.sqftQty || 0) || ((+(form.producedQty || 0)) * (+(form.sqftPerPiece || 0))));
+  const calcPending = () => Math.max(0, calcTotal() - +(form.paymentGiven || 0));
+  const productionQtyText = (entry) => entry?.productType === "hollowbrick" && entry?.productionUnit === "box"
+    ? `${fmt(entry.boxQty || 0)} box x ${fmt(entry.boxCount || 0)} = ${fmt(entry.producedQty || 0)} pieces`
+    : qtyWithSqft(entry, interlockTypes);
+  const productionRateLabel = (entry) => `${CURRENCY}${fmt(entry?.productionRate || 0)} / ${entry?.productType === "hollowbrick" && entry?.productionUnit === "box" ? "box" : "unit"}`;
+  const productionWorkers = workers.filter(w => workerTypeOf(w)==="Production Worker" && isActiveWorker(w));
+
+  const selectWorker = (id) => {
+    const w = workers.find(x => x._id === id);
+    if (!w) return;
+    setForm(f => ({ ...f, workerId: id, workerName: w.name }));
+  };
+
+  const selectItem = (id) => {
+    const it = interlockTypes.find(x => x._id === id);
+    if (!it) return;
+    const productType = it.productType || "interlock";
+    let unitType = productType === "hollowbrick" ? "piece" : (it.unit || "piece").toLowerCase();
+    if (unitType === "nos" || unitType === "load") unitType = "piece";
+    if (!["piece", "sqft", "sqm"].includes(unitType)) unitType = "piece";
+    const sqftPerPiece = productType === "hollowbrick" ? 0 : +(it.sqftPerPiece || 0);
+    const boxCount = +(it.boxCount || 0);
+    const producedQty = productType === "hollowbrick" && form.productionUnit === "box" ? (+(form.boxQty || 0) * boxCount) : +(form.producedQty || 0);
+    setForm(f => ({
+      ...f, itemId: id, itemName: it.name, productType, category: it.category || "", shape: it.shape || "", color: it.color || "", size: it.size || "", thickness: it.thickness || "",
+      boxCount: boxCount ? String(boxCount) : "", sqftPerPiece: sqftPerPiece ? String(sqftPerPiece) : "", sqftQty: sqftPerPiece && producedQty ? String(sqftPerPiece * producedQty) : "", unitType, unit: "piece",
+    }));
+  };
+
+  const save = async () => {
+    if (saving) return;
+    setSaveError("");
+    if (!form.workerName) { setSaveError("Select a worker"); return; }
+    if (!form.itemName) { setSaveError("Select an item"); return; }
+    const producedQty = calcProducedQty();
+    if (!producedQty) { setSaveError(isHollowProduction() && form.productionUnit === "box" ? "Enter no. of boxes. If total is still 0, set 1 box count in Hollow Brick master." : "Enter produced quantity"); return; }
+    if (!+(form.productionRate)) { setSaveError("Enter rate per box/unit manually"); return; }
+    const audit = editingProductionId ? requestAuditReason("edit", "production entry", user) : null;
+    if (editingProductionId && !audit) return;
+    setSaving(true);
+    try {
+      const item = await api(editingProductionId ? "PUT" : "POST", editingProductionId ? `/productionsite/${editingProductionId}` : "/productionsite", {
+        ...form,
+        producedQty,
+        boxQty: +(form.boxQty || 0),
+        boxCount: +(form.boxCount || 0),
+        sqftPerPiece: +(form.sqftPerPiece || 0),
+        sqftQty: isHollowProduction() ? 0 : calcProductionSqft(),
+        productionRate: +form.productionRate,
+        loadingCharge: +(form.loadingCharge || 0),
+        unloadingCharge: +(form.unloadingCharge || 0),
+        paymentGiven: +(form.paymentGiven || 0),
+        addedBy: form.addedBy || user.name,
+        ...(audit || {}),
+      });
+      if (item.duplicateIgnored) {
+        setSaveError(item.message || "Duplicate production entry ignored.");
+        api("GET", "/productionsite").then(e => setEntries(Array.isArray(e) ? e : []));
+        api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      } else if (item._id) {
+        setEntries(p => editingProductionId ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
+        setModal(false);
+        setForm(emptyForm);
+        setEditingProductionId("");
+        api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+        api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      } else setSaveError(item.message || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openProductionEdit = (entry) => {
+    setSaveError("");
+    setEditingProductionId(entry._id);
+    setForm({
+      ...emptyForm,
+      ...entry,
+      date: entry.date || today(),
+      shift: entry.shift || "",
+      workerId: entry.workerId || "",
+      workerName: entry.workerName || "",
+      itemId: entry.itemId || "",
+      itemName: entry.itemName || "",
+      productType: entry.productType || "interlock",
+      productionUnit: entry.productionUnit || "unit",
+      boxQty: String(entry.boxQty || ""),
+      boxCount: String(entry.boxCount || ""),
+      producedQty: String(entry.producedQty || ""),
+      sqftPerPiece: String(entry.sqftPerPiece || ""),
+      sqftQty: String(entry.sqftQty || ""),
+      productionRate: String(entry.productionRate || ""),
+      loadingCharge: String(entry.loadingCharge || ""),
+      unloadingCharge: String(entry.unloadingCharge || ""),
+      paymentGiven: String(entry.paymentGiven || ""),
+      remarks: entry.remarks || "",
+    });
+    setModal(true);
+  };
+
+  const deleteProductionEntry = async (entry) => {
+    const audit = requestAuditReason("delete", "production entry", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/productionsite/${entry._id}`, audit);
+    if (deleted?.ok) {
+      setEntries(p => p.filter(x => x._id !== entry._id));
+      api("GET", "/workers").then(w => setWorkers(Array.isArray(w) ? w : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      if (reports) loadReports();
+    } else if (deleted?.message) window.alert(deleted.message);
+  };
+
+  const openLedger = async (name) => {
+    if (!name) return;
+    setLedgerLoading(true);
+    const data = await api("GET", `/workers/reports/production?name=${encodeURIComponent(name)}${dateFilterParams()}`);
+    setLedger(data);
+    setLedgerLoading(false);
+  };
+
+  const loadReports = async () => {
+    const data = await api("GET", `/productionsite/reports?type=detail${dateFilterParams()}`);
+    setReports(data);
+  };
+
+  const productionEntries = entries.filter(e => e.producedQty > 0);
+  const filteredEntries = productionEntries.filter(e => {
+    if (filters.worker && !(e.workerName || "").toLowerCase().includes(filters.worker.toLowerCase())) return false;
+    let from = filters.fromDate, to = filters.toDate;
+    if (filters.datePreset === "today") { const r = salesDateRange("today"); from = r.from; to = r.to; }
+    else if (filters.datePreset === "month") {
+      const now = new Date();
+      from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      to = today();
+    } else if (filters.datePreset === "custom" && filters.customDate) { from = filters.customDate; to = filters.customDate; }
+    if (from && e.date < from) return false;
+    if (to && e.date > to) return false;
+    return true;
+  });
+
+  const todayEntries = productionEntries.filter(e => e.date === today());
+  const todayEarned = todayEntries.reduce((a, e) => a + (+(e.totalAmount) || 0), 0);
+  const todayPaid = todayEntries.reduce((a, e) => a + (+(e.paymentGiven) || 0), 0);
+
+  if (loading) return <Loader />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏭 Production Site</h2>
+        {canEdit && tab === "entry" && (
+          <button onClick={() => { setModal(true); setEditingProductionId(""); setSaveError(""); setForm(emptyForm); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Production</button>
+        )}
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {[{ id: "entry", label: "📝 Entry" }, { id: "ledger", label: "👷 Worker Ledger" }, { id: "reports", label: "📊 Reports" }].map(t => (
+          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === "reports") loadReports(); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "entry" && (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <StatCard label="Today's Production" value={fmt(todayEntries.reduce((a, e) => a + (+(e.producedQty) || 0), 0))} icon="📦" color="blue" sub={`${fmt(todayEntries.reduce((a,e)=>a+itemSqft(e, interlockTypes),0))} sqft`} />
+            <StatCard label="Today's Earnings" value={`${CURRENCY}${fmt(todayEarned)}`} icon="💰" color="green" />
+            <StatCard label="Today's Paid" value={`${CURRENCY}${fmt(todayPaid)}`} icon="✅" color="teal" />
+          </div>
+          <div className="space-y-2">
+            {filteredEntries.length === 0 && <EmptyState icon="🏭" text="No production entries" />}
+            {filteredEntries.map(e => (
+              <div key={e._id} className="bg-white rounded-2xl border shadow-sm p-4">
+                <div className="flex justify-between gap-2">
+                  <div>
+                    <div className="font-black">{e.workerName} · {e.itemName}</div>
+                    <div className="text-xs text-gray-400">📅 {e.date}{e.shift ? ` · ${e.shift}` : ""}{e.color ? ` · ${e.color}` : ""}</div>
+                    <div className="text-sm text-gray-600">{productionQtyText(e)} x {productionRateLabel(e)}</div>
+                    {((+(e.loadingCharge)||0) > 0 || (+(e.unloadingCharge)||0) > 0) && <div className="text-xs text-gray-500">Loading {CURRENCY}{fmt(e.loadingCharge || 0)} | Unloading {CURRENCY}{fmt(e.unloadingCharge || 0)}</div>}
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-green-700">{CURRENCY}{fmt(+(e.totalAmount) || 0)}</div>
+                    {(+(e.paymentGiven) || 0) > 0 && <div className="text-xs text-teal-600">Paid: {CURRENCY}{fmt(+(e.paymentGiven) || 0)}</div>}
+                    {(+(e.amountPending) || 0) > 0 && <div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(e.amountPending) || 0)}</div>}
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => openLedger(e.workerName)} className="text-xs text-amber-600 font-bold hover:underline">View Worker Ledger →</button>
+                  {isAdminLike(user.role) && <button onClick={() => openProductionEdit(e)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-bold">Edit</button>}
+                  {isAdminLike(user.role) && <button onClick={() => deleteProductionEntry(e)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg text-xs font-bold">Delete</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tab === "ledger" && (
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <input className="flex-1 border rounded-xl px-3 py-2.5 text-sm bg-gray-50" placeholder="🔍 Search Worker Name" value={workerSearch} onChange={e => setWorkerSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && openLedger(workerSearch)} />
+            <button onClick={() => openLedger(workerSearch)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold shrink-0">Search</button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "month", label: "This Month" }, { id: "custom", label: "Custom Date" }, { id: "range", label: "Date Range" }].map(d => (
+              <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{d.label}</button>
+            ))}
+          </div>
+          {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
+          {filters.datePreset === "range" && (
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+              <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+            </div>
+          )}
+          {ledgerLoading && <div className="text-xs text-amber-600">Loading...</div>}
+          {ledger?.worker && (
+            <div className="bg-white rounded-2xl border-2 border-amber-200 overflow-hidden">
+              <div className="bg-violet-700 px-4 py-3 text-white font-black">🏭 {ledger.worker.name} <span className="text-xs font-normal opacity-80">· Production Only</span></div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <StatCard label="Total Production Qty" value={fmt(ledger.worker.totalQuantity)} icon="📦" color="blue" sub={`${fmt(ledger.worker.totalSqft || (ledger.history || []).reduce((a,h)=>a+itemSqft(h, interlockTypes),0))} sqft`} />
+                  <StatCard label="Production Earnings" value={`${CURRENCY}${fmt(ledger.worker.totalEarnings)}`} icon="💰" color="green" />
+                  <StatCard label="Payments Given" value={`${CURRENCY}${fmt(ledger.worker.totalPaid)}`} icon="✅" color="teal" />
+                  <StatCard label="Pending" value={`${CURRENCY}${fmt(ledger.worker.totalPending)}`} icon="⏳" color="red" />
+                </div>
+                {(ledger.itemSummary || []).length > 0 && (
+                  <SectionBox title="Production Summary" icon="📦" color="blue">
+                    <table className="w-full text-xs"><thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty / Sqft</th></tr></thead>
+                      <tbody>{ledger.itemSummary.map((it, i) => <tr key={i} className="border-t"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{qtyWithSqft(it, interlockTypes)}</td></tr>)}</tbody>
+                    </table>
+                  </SectionBox>
+                )}
+                <div className="overflow-x-auto">
+                  <div className="text-xs font-bold mb-1">Production History</div>
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
+                    <tbody>
+                      {(ledger.history || []).map((h, i) => (
+                        <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h, interlockTypes)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            {workers.filter(w => !workerSearch || w.name.toLowerCase().includes(workerSearch.toLowerCase())).map(w => (
+              <div key={w._id} onClick={() => openLedger(w.name)} className="bg-white rounded-2xl border p-4 cursor-pointer hover:border-amber-300">
+                <div className="flex justify-between"><div className="font-black">{w.name}</div><span className="text-gray-300">›</span></div>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-xs">
+                  <div className="text-center bg-green-50 rounded p-1"><div className="font-bold text-green-700">{CURRENCY}{fmt(w.totalEarnings || 0)}</div><div className="text-gray-400">Earned</div></div>
+                  <div className="text-center bg-teal-50 rounded p-1"><div className="font-bold text-teal-700">{CURRENCY}{fmt(w.totalPaid || 0)}</div><div className="text-gray-400">Paid</div></div>
+                  <div className="text-center bg-red-50 rounded p-1"><div className="font-bold text-red-600">{CURRENCY}{fmt(w.totalPending || 0)}</div><div className="text-gray-400">Pending</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === "reports" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            {[{ id: "worker", label: "Worker-wise" }, { id: "item", label: "Item-wise" }, { id: "color", label: "Color-wise" }, { id: "pending", label: "Pending Salary" }].map(t => (
+              <button key={t.id} onClick={() => setReportType(t.id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${reportType === t.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{t.label}</button>
+            ))}
+            <button onClick={loadReports} className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-500 text-white ml-auto">Refresh</button>
+          </div>
+          {reports && (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                <StatCard label="Total Qty" value={fmt(reports.totalQuantity || 0)} icon="📦" color="blue" sub={`${fmt(reports.totalSqft || 0)} sqft`} />
+                <StatCard label="Total Amount" value={`${CURRENCY}${fmt(reports.totalAmount || 0)}`} icon="💰" color="green" />
+                <StatCard label="Entries" value={reports.totalEntries || 0} icon="📋" color="purple" />
+              </div>
+              {reportType === "worker" && (reports.workerWise || []).map((w, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{w.worker}</span><span>{qtyWithSqft(w, interlockTypes)} · {CURRENCY}{fmt(w.earnings)} · Paid {CURRENCY}{fmt(w.paid)}</span></div>
+              ))}
+              {reportType === "item" && (reports.itemWise || []).map((it, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{it.item}</span><span>{qtyWithSqft(it, interlockTypes)} · {CURRENCY}{fmt(it.amount)}</span></div>
+              ))}
+              {reportType === "color" && (reports.colorWise || []).map((c, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3 flex justify-between text-sm"><span className="font-bold">{c.color}</span><span>{qtyWithSqft(c, interlockTypes)} · {CURRENCY}{fmt(c.amount)}</span></div>
+              ))}
+              {reportType === "pending" && (reports.pendingWorkers || []).map((w, i) => (
+                <div key={i} className="bg-white rounded-xl border p-3"><div className="font-bold">{w.name}</div><div className="text-xs text-red-600 mt-1">Pending: {CURRENCY}{fmt(w.totalPending)} · Earned: {CURRENCY}{fmt(w.totalEarnings)} · Paid: {CURRENCY}{fmt(w.totalPaid)}</div></div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title={editingProductionId ? "Edit Production Entry" : "Production Entry"} onClose={() => { setModal(false); setEditingProductionId(""); setSaveError(""); }} wide>
+          <div className="space-y-3">
+            <SectionBox title="Worker Details" icon="👷" color="purple">
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Date *" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+                <Input label="Shift (optional)" value={form.shift} onChange={e => setForm({ ...form, shift: e.target.value })} placeholder="Morning / Evening" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name *</label>
+                <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.workerId} onChange={e => selectWorker(e.target.value)}>
+                  <option value="">-- Select Worker --</option>
+                  {productionWorkers.map(w => <option key={w._id} value={w._id}>{w.name} ({w.role})</option>)}
+                </select>
+                {productionWorkers.length===0&&<div className="text-xs text-red-500 mt-1">No active production workers found.</div>}
+              </div>
+            </SectionBox>
+
+            <SectionBox title="Product Details" icon="🧱" color="amber">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Select Item *</label>
+                <select className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" value={form.itemId} onChange={e => selectItem(e.target.value)}>
+                  <option value="">-- Select Interlock / Hollow Brick --</option>
+                  {interlockTypes.map(it => <option key={`${it.productType}-${it._id}`} value={it._id}>{it.productType === "hollowbrick" ? "Hollow Brick - " : ""}{it.name}{it.color ? ` (${it.color})` : ""}{it.size ? ` - ${it.size}${it.productType==="hollowbrick" ? " inch" : ""}` : ""}</option>)}
+                </select>
+              </div>
+              {form.itemName && (
+                <div className="bg-amber-50 rounded-xl p-2 text-xs space-y-0.5">
+                  <div><b>Item:</b> {form.itemName}</div>
+                  <div><b>Category:</b> {form.category || "-"}</div>
+                  <div><b>Color:</b> {form.color || "—"}</div>
+                  {isHollowProduction() ? <div><b>1 Box Count:</b> {form.boxCount || "0"} pieces</div> : <div><b>1 Piece Sqft:</b> {form.sqftPerPiece || "0"}</div>}
+                  <div><b>Unit:</b> {isHollowProduction() ? "Piece" : form.unitType === "piece" ? "Piece" : form.unitType === "sqft" ? "Sqft" : form.unitType}</div>
+                </div>
+              )}
+              <div className="text-xs text-gray-500 mt-1">Rate is not taken from Master Data — enter manually below.</div>
+            </SectionBox>
+
+            <SectionBox title="Production Details" icon="📦" color="green">
+              <div className="grid grid-cols-2 gap-2">
+                {isHollowProduction()&&<Select label="Production Entry Type" value={form.productionUnit} options={[{value:"unit",label:"Unit / Piece"},{value:"box",label:"Box"}]} onChange={e => {
+                  const productionUnit = e.target.value;
+                  const boxQty = +(form.boxQty || 0);
+                  const boxCount = +(form.boxCount || 0);
+                  setForm({ ...form, productionUnit, producedQty: productionUnit === "box" && boxQty && boxCount ? String(boxQty * boxCount) : form.producedQty });
+                }} />}
+                {isHollowProduction()&&form.productionUnit==="box"&&<Input label="No. of Boxes *" type="number" step="any" value={form.boxQty} onChange={e => {
+                  const boxQty = +(e.target.value || 0);
+                  const boxCount = +(form.boxCount || 0);
+                  setForm({ ...form, boxQty: e.target.value, producedQty: boxQty && boxCount ? String(boxQty * boxCount) : "" });
+                }} placeholder="e.g. 10" />}
+                {isHollowProduction()&&form.productionUnit==="box"&&<div className="text-xs text-gray-500 bg-gray-50 rounded-xl p-2">Using master value: 1 box = <b>{fmt(form.boxCount || 0)}</b> pieces</div>}
+                <Input label={isHollowProduction()&&form.productionUnit==="box" ? "Total Count (auto)" : "Produced Quantity *"} type="number" step="any" value={isHollowProduction()&&form.productionUnit==="box" ? calcProducedQty() : form.producedQty} readOnly={isHollowProduction()&&form.productionUnit==="box"} onChange={e => {
+                  const producedQty = +(e.target.value || 0);
+                  const sqftPerPiece = +(form.sqftPerPiece || 0);
+                  setForm({ ...form, producedQty: e.target.value, sqftQty: sqftPerPiece ? String(producedQty * sqftPerPiece) : form.sqftQty });
+                }} placeholder="e.g. 500" />
+                {!isHollowProduction()&&<Select label="Unit" value={form.unit} options={["sqft", "piece", "sqm"]} onChange={e => setForm({ ...form, unit: e.target.value, unitType: e.target.value })} />}
+                {!isHollowProduction()&&<Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                  const sqftPerPiece = +(e.target.value || 0);
+                  const producedQty = +(form.producedQty || 0);
+                  setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && producedQty ? String(producedQty * sqftPerPiece) : "" });
+                }} placeholder="0" />}
+                {!isHollowProduction()&&<Input label="Total Sqft" type="number" value={calcProductionSqft()} readOnly />}
+                <Input label={`Rate per ${isHollowProduction() && form.productionUnit === "box" ? "Box" : "Unit"} (${CURRENCY}) *`} type="number" step="any" value={form.productionRate} onChange={e => setForm({ ...form, productionRate: e.target.value })} placeholder={isHollowProduction() && form.productionUnit === "box" ? "Rate per box" : "Rate per unit"} />
+                <Input label={`Loading Charge (${CURRENCY})`} type="number" step="any" value={form.loadingCharge} onChange={e => setForm({ ...form, loadingCharge: e.target.value })} placeholder="0" />
+                <Input label={`Unloading Charge (${CURRENCY})`} type="number" step="any" value={form.unloadingCharge} onChange={e => setForm({ ...form, unloadingCharge: e.target.value })} placeholder="0" />
+                <Input label={`Payment Given (${CURRENCY})`} type="number" step="any" value={form.paymentGiven} onChange={e => setForm({ ...form, paymentGiven: e.target.value })} placeholder="0" />
+              </div>
+              {+(form.producedQty) > 0 && +(form.productionRate) > 0 && (
+                <div className="bg-gray-50 rounded-xl p-2 text-xs text-gray-600 text-center">
+                  {isHollowProduction() && form.productionUnit === "box" ? `${fmt(form.boxQty)} box x ${fmt(form.boxCount)} = ${fmt(calcProducedQty())} pieces` : `${form.producedQty} ${form.unit} / ${fmt(calcProductionSqft())} sqft`} x {CURRENCY}{form.productionRate}
+                  {+(form.loadingCharge || 0) > 0 ? ` + Loading ${CURRENCY}${fmt(form.loadingCharge)}` : ""}
+                  {+(form.unloadingCharge || 0) > 0 ? ` + Unloading ${CURRENCY}${fmt(form.unloadingCharge)}` : ""}
+                  {" = "}<b className="text-green-700">{CURRENCY}{fmt(calcTotal())}</b>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                  <div className="text-xs text-gray-400">Total Amount (auto)</div>
+                  <div className="text-xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                  <div className="text-xs text-gray-400">Pending Amount</div>
+                  <div className="text-xl font-black text-red-600">{CURRENCY}{fmt(calcPending())}</div>
+                </div>
+              </div>
+              <Textarea label="Remarks" value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} placeholder="Optional notes" />
+            </SectionBox>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-xs text-blue-700">
+              ✅ On submit: Stock increases automatically · Worker earnings update · Payment reduces pending
+            </div>
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
+            <button onClick={save} disabled={saving} className={`w-full py-3 rounded-xl font-bold text-white ${saving ? "bg-amber-300 cursor-not-allowed" : "bg-amber-500 hover:bg-amber-600"}`}>{saving ? "Saving..." : editingProductionId ? "Update Production" : "Submit Production"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── ATTENDANCE ───────────────────────────────────────────────────────────────
+function LegacyAttendanceReports({ user }) {
+  const [workers, setWorkers] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("mark");
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [markDate, setMarkDate] = useState(today());
+  const [attendance, setAttendance] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/workers"),api("GET","/productionsite"),api("GET","/workerpayments")]).then(([w,e,p])=>{
+      setWorkers(Array.isArray(w)?w:[]);
+      setEntries(Array.isArray(e)?e:[]);
+      setPayments(Array.isArray(p)?p:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  useEffect(()=>{
+    if(workers.length===0) return;
+    const existing=entries.find(e=>e.date===markDate);
+    if(existing) setAttendance(existing.attendance||[]);
+    else setAttendance(workers.map(w=>({workerId:w._id,workerName:w.name,status:"present",workDone:"",workUnit:w.paymentType||"day",rate:+(w.rateAmount||0),total:0})));
+  },[markDate,workers]);
+
+  const updateAtt=(i,field,val)=>{const att=[...attendance];att[i]={...att[i],[field]:val};if(field==="workDone"||field==="rate")att[i].total=+(att[i].workDone||0)*(+(att[i].rate||0));setAttendance(att);};
+
+  const saveAttendance=async()=>{
+    setSaving(true);
+    const totalCost=attendance.reduce((a,x)=>a+(+(x.total)||0),0);
+    const existing=entries.find(e=>e.date===markDate);
+    if(existing){await api("PUT",`/productionsite/${existing._id}`,{attendance,totalCost});setEntries(p=>p.map(x=>x._id===existing._id?{...x,attendance,totalCost}:x));}
+    else{const item=await api("POST","/productionsite",{date:markDate,attendance,totalCost,addedBy:user.name});if(item._id)setEntries(p=>[item,...p]);}
+    setSaving(false);
+  };
+
+  const getWorkerLedger=(wname)=>{
+    const allAtt=entries.flatMap(e=>(e.attendance||[]).filter(a=>a.workerName===wname).map(a=>({...a,date:e.date})));
+    const present=allAtt.filter(a=>a.status==="present");
+    const totalEarned=present.reduce((a,x)=>a+(+(x.total)||0),0);
+    const totalPaid=payments.filter(p=>p.workerName===wname).reduce((a,p)=>a+(+(p.amount)||0),0);
+    return{present,totalDays:present.length,totalEarned,totalPaid,pending:Math.max(0,totalEarned-totalPaid)};
+  };
+
+  if(loading) return <Loader />;
+
+  if(selectedWorker){
+    const {present,totalDays,totalEarned,totalPaid,pending}=getWorkerLedger(selectedWorker.name);
+    const wPay=payments.filter(p=>p.workerName===selectedWorker.name).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    return(
+      <div className="space-y-4">
+        <button onClick={()=>setSelectedWorker(null)} className="text-amber-600 font-bold text-sm">← Back</button>
+        <div className="bg-white rounded-2xl border shadow-sm p-4"><div className="font-black text-xl">{selectedWorker.name}</div><div className="text-xs text-gray-400">{selectedWorker.role} · {CURRENCY}{fmt(selectedWorker.rateAmount||0)}/{selectedWorker.paymentType||"day"}</div></div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-blue-700">{totalDays}</div><div className="text-xs text-gray-400">Work Days</div></div>
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-xs text-gray-400">Earned</div></div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center"><div className="text-xl font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-xs text-gray-400">Paid</div></div>
+          <div className={`${pending>0?"bg-red-50 border-red-200":"bg-green-50 border-green-200"} border rounded-xl p-3 text-center`}><div className={`text-xl font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-xs text-gray-400">Pending</div></div>
+        </div>
+        <div className="font-black text-gray-800">📅 Attendance</div>
+        {present.sort((a,b)=>b.date.localeCompare(a.date)).map((a,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">📅 {a.date}</div>{+(a.workDone||0)>0&&<div className="text-xs text-gray-400">{a.workDone} {a.workUnit}</div>}</div><div className="font-black text-green-700">{CURRENCY}{fmt(a.total)}</div></div>)}
+        <div className="font-black text-gray-800">💸 Payments</div>
+        {wPay.length===0&&<EmptyState icon="💸" text="No payments" />}
+        {wPay.map((p,i)=><div key={i} className="bg-white rounded-xl border shadow-sm p-3 mb-2 flex justify-between"><div><div className="font-bold text-sm">{CURRENCY}{fmt(p.amount)}</div><div className="text-xs text-gray-400">📅 {p.date}{p.note?` · ${p.note}`:""}</div></div><Badge color="green">Paid</Badge></div>)}
+      </div>
+    );
+  }
+
+  return(
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📊 Attendance</h2>
+      <div className="flex gap-1">
+        {["mark","reports","ledger"].map(t=><button key={t} onClick={()=>setTab(t)} className={`flex-1 py-2 rounded-xl text-xs font-bold ${tab===t?"bg-amber-500 text-white":"bg-white border border-gray-200 text-gray-600"}`}>{t==="mark"?"✅ Mark":t==="reports"?"📊 Reports":"👷 Ledger"}</button>)}
+      </div>
+      {tab==="mark"&&(
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={markDate} onChange={e=>setMarkDate(e.target.value)} />
+          {attendance.map((a,i)=><div key={i} className={`rounded-2xl border p-3 space-y-2 ${a.status==="present"?"border-green-200 bg-green-50":"border-red-100 bg-red-50"}`}>
+            <div className="flex items-center justify-between"><div className="font-black text-sm">{a.workerName}</div>
+              <div className="flex gap-1">{["present","absent"].map(s=><button key={s} type="button" onClick={()=>updateAtt(i,"status",s)} className={`px-3 py-1 rounded-xl text-xs font-bold border ${a.status===s?(s==="present"?"bg-green-500 text-white border-green-500":"bg-red-500 text-white border-red-500"):"bg-white text-gray-500 border-gray-200"}`}>{s==="present"?"✓ Present":"✗ Absent"}</button>)}</div>
+            </div>
+            {a.status==="present"&&<div className="grid grid-cols-3 gap-2"><Input label="Work Done" type="number" value={a.workDone||""} onChange={e=>updateAtt(i,"workDone",e.target.value)} placeholder="0" /><Input label="Unit" value={a.workUnit||""} onChange={e=>updateAtt(i,"workUnit",e.target.value)} /><Input label={`Rate(${CURRENCY})`} type="number" value={a.rate||""} onChange={e=>updateAtt(i,"rate",e.target.value)} /></div>}
+            {a.status==="present"&&+(a.workDone||0)>0&&<div className="text-xs font-black text-green-700 text-right">{CURRENCY}{fmt(+(a.workDone||0)*(+(a.rate||0)))}</div>}
+          </div>)}
+          {workers.length>0&&<button onClick={saveAttendance} disabled={saving} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold disabled:opacity-60">{saving?"Saving...":"💾 Save Attendance"}</button>}
+        </div>
+      )}
+      {tab==="ledger"&&(
+        <div className="space-y-3">
+          {workers.map(w=>{
+            const{totalDays,totalEarned,totalPaid,pending}=getWorkerLedger(w.name);
+            return(<div key={w._id} onClick={()=>setSelectedWorker(w)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-center justify-between"><div><div className="font-black">{w.name}</div><div className="text-xs text-gray-400">{w.role} · {CURRENCY}{fmt(w.rateAmount||0)}/{w.paymentType||"day"}</div></div><span className="text-gray-300 text-xl">›</span></div>
+              <div className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{totalDays}</div><div className="text-gray-400">Days</div></div>
+                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(totalEarned)}</div><div className="text-gray-400">Earned</div></div>
+                <div className="bg-amber-50 rounded-lg p-1.5 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+                <div className={`${pending>0?"bg-red-50":"bg-green-50"} rounded-lg p-1.5 text-center`}><div className={`font-black ${pending>0?"text-red-600":"text-green-600"}`}>{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+              </div>
+            </div>);
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WORK PLANNING ────────────────────────────────────────────────────────────
+function AttendanceReports({ user }) {
+  const [people,setPeople]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [saveMessage,setSaveMessage]=useState("");
+  const [tab,setTab]=useState("entry");
+  const [entryDate,setEntryDate]=useState(today());
+  const [attendance,setAttendance]=useState([]);
+  const [dailyDate,setDailyDate]=useState(today());
+  const [month,setMonth]=useState(today().slice(0,7));
+  const [filters,setFilters]=useState({personName:"",designation:"",status:"",recordedBy:""});
+
+  const designationOfWorker=worker=>workerTypeOf(worker)==="Site Worker"?"Site Worker":"Production Worker";
+  const load=()=>{
+    setLoading(true);
+    Promise.all([api("GET","/workers"),api("GET","/users"),api("GET","/attendance-register")]).then(([workers,users,data])=>{
+      const workerPeople=(Array.isArray(workers)?workers:[]).filter(worker=>String(worker.status||"Active").toLowerCase()!=="inactive").map(worker=>({personId:String(worker._id),personName:worker.name,personType:designationOfWorker(worker)==="Site Worker"?"site-worker":"production-worker",designation:designationOfWorker(worker)}));
+      const userPeople=(Array.isArray(users)?users:[]).filter(person=>["driver","supervisor","user"].includes(person.role)&&person.active!==false).map(person=>({personId:String(person._id),personName:person.name,personType:person.role,designation:person.role==="user"?"Office User":person.role.charAt(0).toUpperCase()+person.role.slice(1)}));
+      setPeople([...workerPeople,...userPeople].sort((a,b)=>a.designation.localeCompare(b.designation)||a.personName.localeCompare(b.personName)));
+      setRecords(Array.isArray(data)?data:[]);
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  };
+  useEffect(()=>{load();},[]);
+  useEffect(()=>{
+    if(!people.length)return;
+    const existing=records.find(record=>record.date===entryDate);
+    const existingMap=new Map((existing?.entries||[]).map(row=>[`${row.personType}|${row.personId||row.personName}`,row]));
+    setAttendance(people.map(person=>{
+      const saved=existingMap.get(`${person.personType}|${person.personId}`)||existingMap.get(`${person.personType}|${person.personName}`);
+      return {...person,status:saved?saved.status:""};
+    }));
+  },[entryDate,people,records]);
+
+  const saveAttendance=async()=>{
+    if(!attendance.length)return;
+    const unmarked=attendance.filter(row=>!row.status);
+    if(unmarked.length){window.alert(`Please mark Present or Absent for all employees. ${unmarked.length} still unmarked.`);return;}
+    setSaving(true);
+    setSaveMessage("");
+    const saved=await api("POST","/attendance-register",{date:entryDate,entries:attendance,recordedBy:user.name,updatedBy:user.name});
+    if(saved?._id){setRecords(previous=>[saved,...previous.filter(record=>record._id!==saved._id&&record.date!==saved.date)]);setSaveMessage("Attendance saved successfully.");}
+    else if(saved?.message)window.alert(saved.message);
+    setSaving(false);
+  };
+  const setAll=status=>setAttendance(rows=>rows.map(row=>({...row,status})));
+  const personNames=[...new Set([...people.map(person=>person.personName),...records.flatMap(record=>(record.entries||[]).map(entry=>entry.personName))].filter(Boolean))].sort();
+  const designations=[...new Set([...people.map(person=>person.designation),...records.flatMap(record=>(record.entries||[]).map(entry=>entry.designation))].filter(Boolean))].sort();
+  const recorders=[...new Set(records.flatMap(record=>[record.recordedBy,record.updatedBy]).filter(Boolean))].sort();
+  const rowMatches=row=>(!filters.personName||row.personName===filters.personName)&&(!filters.designation||row.designation===filters.designation)&&(!filters.status||row.status===filters.status);
+  const dailyRecords=records.filter(record=>record.date===dailyDate&&(!filters.recordedBy||record.recordedBy===filters.recordedBy||record.updatedBy===filters.recordedBy));
+  const dailyRows=dailyRecords.flatMap(record=>(record.entries||[]).filter(rowMatches).map(row=>({...row,date:record.date,recordedBy:record.updatedBy||record.recordedBy||"-",entryTime:record.updatedAt||record.createdAt})));
+  const monthlyRecords=records.filter(record=>String(record.date||"").startsWith(month)&&(!filters.recordedBy||record.recordedBy===filters.recordedBy||record.updatedBy===filters.recordedBy));
+  const monthlyMap={};
+  monthlyRecords.forEach(record=>(record.entries||[]).filter(rowMatches).forEach(row=>{
+    const key=`${row.personType}|${row.personId||row.personName}`;
+    if(!monthlyMap[key])monthlyMap[key]={...row,present:0,absent:0,total:0};
+    monthlyMap[key][row.status==="absent"?"absent":"present"]+=1;
+    monthlyMap[key].total+=1;
+  }));
+  const monthlyRows=Object.values(monthlyMap).sort((a,b)=>a.designation.localeCompare(b.designation)||a.personName.localeCompare(b.personName));
+  const dailyPresent=dailyRows.filter(row=>row.status==="present").length;
+  const dailyAbsent=dailyRows.filter(row=>row.status==="absent").length;
+  const entryPresent=attendance.filter(row=>row.status==="present").length;
+  const entryAbsent=attendance.filter(row=>row.status==="absent").length;
+  const entryUnmarked=attendance.length-entryPresent-entryAbsent;
+  const formatDateTime=value=>value?new Date(value).toLocaleString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+  const printLedger=()=>{
+    const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const isMonthly=tab==="monthly";
+    const body=isMonthly?monthlyRows.map(row=>`<tr><td>${esc(row.personName)}</td><td>${esc(row.designation)}</td><td class="center">${row.present}</td><td class="center">${row.absent}</td><td class="center">${row.total}</td></tr>`).join(""):dailyRows.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(row.personName)}</td><td>${esc(row.designation)}</td><td>${esc(row.status)}</td><td>${esc(row.recordedBy)}</td><td>${esc(formatDateTime(row.entryTime))}</td></tr>`).join("");
+    const headings=isMonthly?"<th>Name</th><th>Designation</th><th>Present</th><th>Absent</th><th>Total Marked Days</th>":"<th>Date</th><th>Name</th><th>Designation</th><th>Status</th><th>Recorded By</th><th>Entry Time</th>";
+    const html=`<!doctype html><html><head><title>Attendance Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.center{text-align:center;text-transform:capitalize}@media print{body{margin:8mm}}</style></head><body><h1>${isMonthly?"Monthly":"Daily"} Attendance Ledger</h1><p>${esc(isMonthly?month:dailyDate)} | ${esc(filters.personName||"All employees")} | ${esc(filters.designation||"All designations")}</p><table><thead><tr>${headings}</tr></thead><tbody>${body||`<tr><td colspan="${isMonthly?5:6}">No attendance records</td></tr>`}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup=window.open("","_blank");popup.document.write(html);popup.document.close();
+  };
+  const filterPanel=<div className="bg-white rounded-xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3"><Select label="Employee Name" value={filters.personName} options={[{value:"",label:"All Employees"},...personNames.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,personName:e.target.value})}/><Select label="Designation" value={filters.designation} options={[{value:"",label:"All Designations"},...designations.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,designation:e.target.value})}/><Select label="Status" value={filters.status} options={[{value:"",label:"Present & Absent"},{value:"present",label:"Present"},{value:"absent",label:"Absent"}]} onChange={e=>setFilters({...filters,status:e.target.value})}/><Select label="Recorded By User" value={filters.recordedBy} options={[{value:"",label:"All Users"},...recorders.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,recordedBy:e.target.value})}/></div>;
+
+  if(loading)return <Loader/>;
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-xl font-black text-gray-900">Attendance Register</h2><div className="text-xs text-gray-400">Workers, drivers, supervisors and office users</div></div>{tab!=="entry"&&<button onClick={printLedger} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>}</div>
+    <div className="grid grid-cols-3 gap-2"><button onClick={()=>setTab("entry")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="entry"?"bg-amber-500 border-amber-500 text-white":"bg-white text-gray-600"}`}>Daily Entry</button><button onClick={()=>setTab("daily")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="daily"?"bg-blue-600 border-blue-600 text-white":"bg-white text-gray-600"}`}>Daily Ledger</button><button onClick={()=>setTab("monthly")} className={`py-2.5 rounded-lg text-xs font-bold border ${tab==="monthly"?"bg-violet-600 border-violet-600 text-white":"bg-white text-gray-600"}`}>Monthly Ledger</button></div>
+    {tab==="entry"&&<>
+      <div className="bg-white rounded-xl border shadow-sm p-4 space-y-3"><div className="flex flex-wrap items-end gap-3"><div className="min-w-[210px]"><Input label="Attendance Date" type="date" value={entryDate} onChange={e=>{setEntryDate(e.target.value);setSaveMessage("");}}/></div><button type="button" onClick={()=>setAll("present")} className="bg-green-600 text-white border border-green-700 px-3 py-2.5 rounded-lg text-xs font-bold">Mark All Present</button><button type="button" onClick={()=>setAll("absent")} className="bg-red-600 text-white border border-red-700 px-3 py-2.5 rounded-lg text-xs font-bold">Mark All Absent</button></div><div className="grid grid-cols-3 gap-2 text-center text-xs font-bold"><div className="rounded-lg bg-green-100 text-green-800 px-2 py-2">Present: {entryPresent}</div><div className="rounded-lg bg-red-100 text-red-800 px-2 py-2">Absent: {entryAbsent}</div><div className="rounded-lg bg-amber-100 text-amber-800 px-2 py-2">Unmarked: {entryUnmarked}</div></div></div>
+      <div className="bg-white rounded-xl border shadow-sm overflow-hidden"><div className="hidden sm:grid grid-cols-[1fr_140px_220px] gap-2 bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500"><span>Name</span><span>Designation</span><span className="text-center">Attendance</span></div>{attendance.map((row,index)=><div key={`${row.personType}-${row.personId}`} className={`grid grid-cols-1 sm:grid-cols-[1fr_140px_220px] gap-2 items-center border-t border-l-4 px-3 py-3 text-sm transition-colors ${row.status==="present"?"border-l-green-600 bg-green-50":row.status==="absent"?"border-l-red-600 bg-red-50":"border-l-amber-400 bg-white"}`}><div><b className="block min-w-0 truncate">{row.personName}</b><span className={`inline-block mt-1 rounded px-2 py-0.5 text-[10px] font-black ${row.status==="present"?"bg-green-600 text-white":row.status==="absent"?"bg-red-600 text-white":"bg-amber-100 text-amber-800"}`}>{row.status?row.status.toUpperCase():"NOT MARKED"}</span><span className="sm:hidden block text-xs text-gray-500 mt-1">{row.designation}</span></div><span className="hidden sm:block text-xs text-gray-500">{row.designation}</span><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={row.status==="present"} onClick={()=>{setSaveMessage("");setAttendance(items=>items.map((item,i)=>i===index?{...item,status:"present"}:item));}} className={`py-2.5 rounded-lg text-xs font-black border-2 transition-colors ${row.status==="present"?"bg-green-600 border-green-700 text-white shadow-sm":"bg-white border-green-200 text-green-700"}`}>{row.status==="present"?"✓ PRESENT":"Present"}</button><button type="button" aria-pressed={row.status==="absent"} onClick={()=>{setSaveMessage("");setAttendance(items=>items.map((item,i)=>i===index?{...item,status:"absent"}:item));}} className={`py-2.5 rounded-lg text-xs font-black border-2 transition-colors ${row.status==="absent"?"bg-red-600 border-red-700 text-white shadow-sm":"bg-white border-red-200 text-red-700"}`}>{row.status==="absent"?"✓ ABSENT":"Absent"}</button></div></div>)}</div>
+      {saveMessage&&<div className="rounded-lg border border-green-300 bg-green-100 px-4 py-3 text-sm font-bold text-green-800">{saveMessage}</div>}
+      <button onClick={saveAttendance} disabled={saving||!attendance.length} className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white py-3 rounded-lg font-black">{saving?"Saving...":"Save Daily Attendance"}</button>
+    </>}
+    {tab==="daily"&&<><div className="bg-white rounded-xl border p-4 max-w-xs"><Input label="Ledger Date" type="date" value={dailyDate} onChange={e=>setDailyDate(e.target.value)}/></div>{filterPanel}<div className="grid grid-cols-3 gap-3"><StatCard label="Total" value={dailyRows.length} icon="N" color="blue"/><StatCard label="Present" value={dailyPresent} icon="P" color="green"/><StatCard label="Absent" value={dailyAbsent} icon="A" color="red"/></div>{dailyRows.length===0?<EmptyState icon="ATT" text="No attendance records for this date"/>:<div className="bg-white rounded-xl border shadow-sm overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Status</th><th className="p-2 text-left">Recorded By</th><th className="p-2 text-left">Entry Time</th></tr></thead><tbody>{dailyRows.map((row,index)=><tr key={`${row.personType}-${row.personId}-${index}`} className="border-t"><td className="p-2">{row.date}</td><td className="p-2 font-bold">{row.personName}</td><td className="p-2">{row.designation}</td><td className={`p-2 font-bold capitalize ${row.status==="present"?"text-green-700":"text-red-600"}`}>{row.status}</td><td className="p-2">{row.recordedBy}</td><td className="p-2">{formatDateTime(row.entryTime)}</td></tr>)}</tbody></table></div>}</>}
+    {tab==="monthly"&&<><div className="bg-white rounded-xl border p-4 max-w-xs"><Input label="Ledger Month" type="month" value={month} onChange={e=>setMonth(e.target.value)}/></div>{filterPanel}<div className="grid grid-cols-2 gap-3"><StatCard label="Employees" value={monthlyRows.length} icon="N" color="blue"/><StatCard label="Working Dates" value={monthlyRecords.length} icon="D" color="violet"/></div>{monthlyRows.length===0?<EmptyState icon="ATT" text="No attendance records for this month"/>:<div className="bg-white rounded-xl border shadow-sm overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Name</th><th className="p-2 text-left">Designation</th><th className="p-2 text-center">Present</th><th className="p-2 text-center">Absent</th><th className="p-2 text-center">Total Marked Days</th></tr></thead><tbody>{monthlyRows.map(row=><tr key={`${row.personType}-${row.personId||row.personName}`} className="border-t"><td className="p-2 font-bold">{row.personName}</td><td className="p-2">{row.designation}</td><td className="p-2 text-center font-black text-green-700">{row.present}</td><td className="p-2 text-center font-black text-red-600">{row.absent}</td><td className="p-2 text-center font-black">{row.total}</td></tr>)}</tbody></table></div>}</>}
+  </div>;
+}
+
+function WorkPlanning({ siteWorks, user }) {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const emptyForm = { date:today(), siteName:"", plannedWork:"", supervisor:"", workersAllocated:"", materialsNeeded:"", estimatedCost:"", notes:"", status:"Planned" };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(()=>{ api("GET",`/workplan${showArchive?"?archive=true&role=admin":""}`).then(d=>{ setPlans(Array.isArray(d)?d:[]); setLoading(false); }); },[showArchive]);
+
+  const save = async () => {
+    if (!form.siteName) return;
+    const payload = {...form, task:form.plannedWork, workers:form.workersAllocated, materials:form.materialsNeeded, note:form.notes, estimatedCost:+form.estimatedCost||0, addedBy:user.name};
+    const item = editItem ? await api("PUT",`/workplan/${editItem._id}`,payload) : await api("POST","/workplan",payload);
+    if (item._id) {
+      setPlans(p=>editItem?p.map(x=>x._id===item._id?item:x):[item,...p]);
+      setModal(false); setEditItem(null); setForm(emptyForm);
+    }
+  };
+
+  const updateStatus = async (id, status) => { await api("PUT",`/workplan/${id}`,{status}); setPlans(p=>p.map(x=>x._id===id?{...x,status}:x)); };
+  const openEdit = (p) => {
+    setEditItem(p);
+    setForm({
+      date:p.date||today(), siteName:p.siteName||p.site||"", plannedWork:p.plannedWork||p.task||"",
+      supervisor:p.supervisor||"", workersAllocated:p.workersAllocated||p.workers||"",
+      materialsNeeded:p.materialsNeeded||p.materials||"", estimatedCost:p.estimatedCost||"",
+      notes:p.notes||p.note||"", status:p.status||"Planned"
+    });
+    setModal(true);
+  };
+
+  if (loading) return <Loader />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">📅 Work Planning</h2>
+        <div className="flex gap-2">
+          {isAdminLike(user.role)&&<button onClick={()=>setShowArchive(!showArchive)} className="bg-gray-100 text-gray-700 px-3 py-2 rounded-xl text-xs font-bold">{showArchive?"Current Plans":"Archive"}</button>}
+          <button onClick={()=>{setEditItem(null);setForm(emptyForm);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Plan</button>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {plans.length===0&&<EmptyState icon="📅" text="No plans yet" />}
+        {plans.map(p=>(
+          <div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1"><div className="font-black">{p.siteName}</div><div className="text-xs text-gray-400">📅 {p.date}{(p.plannedWork||p.task)?` · ${p.plannedWork||p.task}`:""}</div><div className="text-xs text-gray-400">{p.supervisor?`Supervisor: ${p.supervisor} · `:""}Workers: {p.workersAllocated||p.workers||"—"}</div></div>
+              <Badge color={p.status==="Completed"?"green":p.status==="Cancelled"?"red":p.status==="In Progress"?"amber":"blue"}>{p.status}</Badge>
+            </div>
+            <div className="mt-2 flex gap-1">{["Planned","In Progress","Completed","Cancelled"].map(s=><button key={s} onClick={()=>updateStatus(p._id,s)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${p.status===s?"bg-amber-500 text-white border-amber-500":"bg-gray-50 text-gray-500 border-gray-200"}`}>{s}</button>)}</div>
+            <button onClick={()=>openEdit(p)} className="mt-2 w-full bg-blue-50 text-blue-700 py-1.5 rounded-xl text-xs font-bold">Edit Plan</button>
+          </div>
+        ))}
+      </div>
+      {modal&&<Modal title={editItem?"Edit Work Plan":"Add Work Plan"} onClose={()=>{setModal(false);setEditItem(null);}}>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Site Name *" value={form.siteName} onChange={e=>setForm({...form,siteName:e.target.value})} placeholder="Site / project" />
+          <Textarea label="Planned Work" value={form.plannedWork} onChange={e=>setForm({...form,plannedWork:e.target.value})} />
+          <Input label="Supervisor" value={form.supervisor} onChange={e=>setForm({...form,supervisor:e.target.value})} />
+          <Input label="Workers Planned" value={form.workersAllocated} onChange={e=>setForm({...form,workersAllocated:e.target.value})} />
+          <Input label="Materials Needed" value={form.materialsNeeded} onChange={e=>setForm({...form,materialsNeeded:e.target.value})} />
+          <Input label={`Estimated Cost (${CURRENCY})`} type="number" value={form.estimatedCost} onChange={e=>setForm({...form,estimatedCost:e.target.value})} />
+          <Select label="Status" value={form.status} options={["Planned","In Progress","Completed","Cancelled"]} onChange={e=>setForm({...form,status:e.target.value})} />
+          <Textarea label="Notes" value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} />
+          <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">{editItem?"Save Plan":"Add Plan"}</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── STOCK ────────────────────────────────────────────────────────────────────
+function Stock({ stock, setStock, user }) {
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const emptyForm = { name:"", category:"", productType:"", color:"", size:"", quantity:0, unit:"piece", sqftPerPiece:0, minStock:0, price:0 };
+  const [form, setForm] = useState(emptyForm);
+
+  const save = async () => {
+    if (editItem) {
+      const ids = editItem._ids?.length ? editItem._ids : [editItem._id];
+      const payload = { ...form };
+      delete payload._ids; delete payload.duplicateCount; delete payload._editName;
+      const saved = await api("PUT",`/stock/${ids[0]}`,payload);
+      if (ids.length > 1) await Promise.all(ids.slice(1).map(id=>api("DELETE",`/stock/${id}`)));
+      if (saved?._id) setStock(p=>[...p.filter(x=>!ids.includes(x._id)),saved]);
+      setEditItem(null);
+    }
+    else { const item=await api("POST","/stock",form); if(item._id) setStock(p=>[...p,item]); }
+    setModal(false); setForm(emptyForm);
+  };
+
+  const del = async (item) => { if(!window.confirm("Delete this stock item?")) return; const ids=item._ids?.length?item._ids:[item._id]; await Promise.all(ids.map(id=>api("DELETE",`/stock/${id}`))); setStock(p=>p.filter(x=>!ids.includes(x._id))); };
+
+  const stockTone = (item) => {
+    const clue = `${item.color || ""} ${item.category || ""} ${item.name || ""}`.toLowerCase();
+    if (/red|maroon|rose|pink/.test(clue)) return { card:"bg-rose-50/80 border-rose-200", icon:"bg-rose-100 text-rose-700 border-rose-200", qty:"text-rose-700" };
+    if (/green|olive/.test(clue)) return { card:"bg-emerald-50/80 border-emerald-200", icon:"bg-emerald-100 text-emerald-700 border-emerald-200", qty:"text-emerald-700" };
+    if (/blue|navy/.test(clue)) return { card:"bg-blue-50/80 border-blue-200", icon:"bg-blue-100 text-blue-700 border-blue-200", qty:"text-blue-700" };
+    if (/yellow|gold|cream/.test(clue)) return { card:"bg-amber-50/80 border-amber-200", icon:"bg-amber-100 text-amber-700 border-amber-200", qty:"text-amber-700" };
+    if (/black|grey|gray|charcoal/.test(clue)) return { card:"bg-slate-100/90 border-slate-300", icon:"bg-slate-200 text-slate-700 border-slate-300", qty:"text-slate-800" };
+    if (item.productType === "hollowbrick") return { card:"bg-orange-50/80 border-orange-200", icon:"bg-orange-100 text-orange-700 border-orange-200", qty:"text-orange-700" };
+    return { card:"bg-cyan-50/80 border-cyan-200", icon:"bg-cyan-100 text-cyan-700 border-cyan-200", qty:"text-cyan-700" };
+  };
+
+
+  const groupedStock = Object.values((stock || []).reduce((acc, s) => {
+    const prefix = s.category ? `${s.category} - ` : "";
+    const rawName = String(s.name || "").trim();
+    const cleanName = prefix && rawName.toLowerCase().startsWith(prefix.toLowerCase()) ? rawName.slice(prefix.length).trim() : rawName;
+    const sizeKey = s.productType === "hollowbrick" ? String(s.size || "").trim().toLowerCase() : "";
+    const key = `${String(s.productType || "").trim().toLowerCase()}|${String(s.category || "").trim().toLowerCase()}|${cleanName.trim().toLowerCase()}|${String(s.color || "").trim().toLowerCase()}|${sizeKey}|${String(s.unit || "").trim().toLowerCase()}`;
+    const displayName = s.productType === "hollowbrick" && s.size ? `${cleanName || s.name} - ${withUnit(s.size,"inch")}` : (cleanName || s.name);
+    if (!acc[key]) acc[key] = { ...s, name: displayName, _editName:s.name, quantity: 0, sqftQuantity: 0, _ids: [], duplicateCount: 0 };
+    acc[key].quantity += +(s.quantity) || 0;
+    acc[key].sqftPerPiece = s.productType === "hollowbrick" ? 0 : (acc[key].sqftPerPiece || +(s.sqftPerPiece || 0));
+    acc[key].sqftQuantity += s.productType === "hollowbrick" ? 0 : (+(s.sqftQuantity || 0) || ((+(s.quantity)||0) * (+(s.sqftPerPiece)||0)));
+    acc[key]._ids.push(s._id);
+    acc[key].duplicateCount += 1;
+    acc[key].price = acc[key].price || s.price;
+    return acc;
+  }, {}));
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">📦 Stock</h2>
+        {isAdminLike(user.role)&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        {groupedStock.length===0&&<EmptyState icon="BOX" text="No stock items" />}
+        {groupedStock.map(s=>{const tone=stockTone(s);const isOut=+(s.quantity||0)<=0;const isLow=!isOut&&+(s.minStock||0)>0&&+(s.quantity||0)<=+(s.minStock||0);return (
+          <article key={s._id} className={`relative overflow-hidden min-h-[190px] rounded-lg border shadow-sm p-4 flex flex-col justify-between ${tone.card}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tone.icon}`}><UiIcon icon={s.productType==="hollowbrick"?Blocks:Package} size={21}/></div>
+              <div className="flex items-center gap-1.5">{(isOut||isLow)&&<span className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-black uppercase text-red-700">{isOut?"Out of stock":"Low stock"}</span>}{isAdminLike(user.role)&&<><button onClick={()=>{setForm({...s,name:s._editName||s.name});setEditItem(s);setModal(true);}} className="w-8 h-8 rounded-lg border border-white/80 bg-white/80 text-blue-700 flex items-center justify-center hover:bg-white" title="Edit stock" aria-label="Edit stock"><Pencil size={14}/></button><button onClick={()=>del(s)} className="w-8 h-8 rounded-lg border border-red-200 bg-white/80 text-red-600 flex items-center justify-center hover:bg-red-50" title="Delete stock" aria-label="Delete stock"><Trash2 size={14}/></button></> }</div>
+            </div>
+            <div className="py-4"><div className="font-black text-slate-950 text-base leading-tight">{s.name}</div><div className="text-xs font-semibold text-slate-500 mt-1">{[s.productType==="hollowbrick"?"Hollow Brick":"Interlock",s.category,s.color].filter(Boolean).join(" / ")}</div></div>
+            <div className="border-t border-slate-900/10 pt-3 flex items-end justify-between gap-3"><div><div className={`text-2xl font-black leading-none ${tone.qty}`}>{fmt(s.quantity)}</div><div className="text-[10px] font-black uppercase text-slate-500 mt-1">Piece{+(s.quantity)!==1?"s":""}{(+(s.sqftQuantity)||0)>0?` / ${fmt(s.sqftQuantity)} sqft`:""}</div></div><div className="text-right text-xs text-slate-500">{s.sqftPerPiece>0&&<div>1 pc = <b>{fmt(s.sqftPerPiece)} sqft</b></div>}{s.price>0&&<div>Rate <b className="text-slate-800">{CURRENCY}{fmt(s.price)}</b></div>}{s.duplicateCount>1&&<div className="font-bold text-blue-700">{s.duplicateCount} combined</div>}</div></div>
+          </article>
+        )})}
+      </div>
+      {modal&&<Modal title={editItem?"Edit":"Add Stock"} onClose={()=>{setModal(false);setEditItem(null);}}>
+        <div className="space-y-3">
+          <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Category" value={form.category||""} onChange={e=>setForm({...form,category:e.target.value})} />
+            <Select label="Product Type" value={form.productType||""} options={[{value:"",label:"General"},{value:"interlock",label:"Interlock"},{value:"hollowbrick",label:"Hollow Brick"}]} onChange={e=>setForm({...form,productType:e.target.value})} />
+            <Input label="Color" value={form.color||""} onChange={e=>setForm({...form,color:e.target.value})} />
+            <Input label={form.productType==="interlock"?"Size (inch)":"Size"} value={form.size||""} onChange={e=>setForm({...form,size:e.target.value})} placeholder={form.productType==="hollowbrick"?"e.g. 6 inch":form.productType==="interlock"?"e.g. 8x4":"e.g. 20x10x6"} />
+            {form.productType==="interlock"&&<Input label="Thickness (inch)" value={form.thickness||""} onChange={e=>setForm({...form,thickness:e.target.value})} placeholder="e.g. 2.5" />}
+            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value,sqftQuantity:(+e.target.value||0)*(+(form.sqftPerPiece)||0)})} />
+            {form.productType!=="hollowbrick"&&<Input label="1 Piece Sqft" type="number" step="any" value={form.sqftPerPiece||""} onChange={e=>setForm({...form,sqftPerPiece:+e.target.value,sqftQuantity:(+(form.quantity)||0)*(+e.target.value||0)})} />}
+            <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} />
+            <Input label="Min Stock" type="number" value={form.minStock} onChange={e=>setForm({...form,minStock:+e.target.value})} />
+            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
+          </div>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add"}</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── RAW MATERIAL ─────────────────────────────────────────────────────────────
+function RawMaterial({ raw, setRaw, user }) {
+  const [modal, setModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const emptyForm = { name:"", quantity:0, unit:"bag", price:0, supplier:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  const save = async () => {
+    if (editItem) { await api("PUT",`/raw/${editItem._id}`,form); setRaw(p=>p.map(x=>x._id===editItem._id?{...x,...form}:x)); setEditItem(null); }
+    else { const item=await api("POST","/raw",form); if(item._id) setRaw(p=>[...p,item]); }
+    setModal(false); setForm(emptyForm);
+  };
+
+  const del = async (id) => { if(!window.confirm("Delete?")) return; await api("DELETE",`/raw/${id}`); setRaw(p=>p.filter(x=>x._id!==id)); };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🧱 Raw Material</h2>
+        {isAdminLike(user.role)&&<button onClick={()=>{setForm(emptyForm);setEditItem(null);setModal(true);}} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add</button>}
+      </div>
+      <div className="space-y-2">
+        {raw.length===0&&<EmptyState icon="🧱" text="No raw materials" />}
+        {raw.map(r=>(
+          <div key={r._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+            <div><div className="font-black">{r.name||r.material}</div><div className="text-sm text-gray-600">{r.quantity||r.qty} {r.unit}</div>{r.supplier&&<div className="text-xs text-gray-400">Supplier: {r.supplier}</div>}</div>
+            {isAdminLike(user.role)&&<div className="flex gap-1"><button onClick={()=>{setForm({...r});setEditItem(r);setModal(true);}} className="bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg text-xs font-bold">✏️</button><button onClick={()=>del(r._id)} className="bg-red-50 text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-bold">🗑️</button></div>}
+          </div>
+        ))}
+      </div>
+      {modal&&<Modal title={editItem?"Edit":"Add Raw Material"} onClose={()=>{setModal(false);setEditItem(null);}}>
+        <div className="space-y-3">
+          <Input label="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Qty" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:+e.target.value})} />
+            <Select label="Unit" value={form.unit} options={["bag","kg","ton","litre","load","nos"]} onChange={e=>setForm({...form,unit:e.target.value})} />
+            <Input label={`Price(${CURRENCY})`} type="number" value={form.price} onChange={e=>setForm({...form,price:+e.target.value})} />
+            <Input label="Supplier" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})} />
+          </div>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">{editItem?"Save":"Add"}</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── PRODUCTION ───────────────────────────────────────────────────────────────
+function Production({ production, setProduction, stock, user }) {
+  const [modal, setModal] = useState(false);
+  const emptyForm = { date:today(), product:"", target:0, produced:0, status:"pending", note:"" };
+  const [form, setForm] = useState(emptyForm);
+
+  const save = async () => {
+    const item=await api("POST","/production",{...form,target:+form.target,produced:+form.produced,supervisor:user.name,status:isAdminLike(user.role)?"approved":"pending",product:form.product||stock[0]?.name||"Standard Interlock"});
+    if(item._id){setProduction(p=>[item,...p]);setModal(false);setForm(emptyForm);}
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">🏭 Production</h2>
+        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Log</button>
+      </div>
+      <div className="space-y-3">
+        {production.length===0&&<EmptyState icon="🏭" text="No production logs" />}
+        {production.map(p=><div key={p._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between"><div><div className="font-black">{p.product}</div><div className="text-xs text-gray-400">📅 {p.date} · By: {p.supervisor}</div><div className="text-sm text-gray-600">Target: {p.target} · Done: <span className="font-bold text-green-700">{p.produced}</span></div></div><Badge color={p.status==="approved"?"green":p.status==="rejected"?"red":"yellow"}>{p.status}</Badge></div>)}
+      </div>
+      {modal&&<Modal title="Log Production" onClose={()=>setModal(false)}>
+        <div className="space-y-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Select label="Product" value={form.product} options={["",...stock.map(s=>s.name)]} onChange={e=>setForm({...form,product:e.target.value})} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Target" type="number" value={form.target} onChange={e=>setForm({...form,target:+e.target.value})} />
+            <Input label="Produced" type="number" value={form.produced} onChange={e=>setForm({...form,produced:+e.target.value})} />
+          </div>
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Submit</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── SALES HELPERS ────────────────────────────────────────────────────────────
+function salesDateRange(preset) {
+  const now = new Date();
+  const td = today();
+  if (preset === "today") return { from: td, to: td };
+  if (preset === "yesterday") {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    const ds = y.toISOString().split("T")[0];
+    return { from: ds, to: ds };
+  }
+  if (preset === "thismonth") {
+    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    return { from, to: td };
+  }
+  return null;
+}
+
+function filterSalesList(sales, { quickSearch, mobile, customer, datePreset, customDate, fromDate, toDate, invoice }) {
+  let from = fromDate, to = toDate;
+  if (datePreset && datePreset !== "custom" && datePreset !== "range") {
+    const r = salesDateRange(datePreset);
+    if (r) { from = r.from; to = r.to; }
+  } else if (datePreset === "custom" && customDate) {
+    from = customDate; to = customDate;
+  }
+  const q = (quickSearch || "").toLowerCase().trim();
+  const mob = (mobile || "").replace(/\D/g, "");
+  return sales.filter(s => {
+    if (q && !(s.mobileNumber || "").includes(q) && !(s.customer || "").toLowerCase().includes(q)) return false;
+    if (mob && !(s.mobileNumber || "").includes(mob)) return false;
+    if (customer && !(s.customer || "").toLowerCase().includes(customer.toLowerCase())) return false;
+    if (invoice && !(s.invoiceNumber || "").toLowerCase().includes(invoice.toLowerCase())) return false;
+    if (from && s.date < from) return false;
+    if (to && s.date > to) return false;
+    return true;
+  });
+}
+
+// ─── SALES ────────────────────────────────────────────────────────────────────
+function Sales({ sales, setSales, stock, setStock, user, branding = COMPANY }) {
+  const [modal, setModal] = useState(false);
+  const [editSale, setEditSale] = useState(null);
+  const [interlockTypes, setInterlockTypes] = useState([]);
+  const [customerMaster, setCustomerMaster] = useState([]);
+  const [salesWorkers, setSalesWorkers] = useState([]);
+  const [customerMode, setCustomerMode] = useState("existing");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [saveToMaster, setSaveToMaster] = useState(true);
+  const [quickSearch, setQuickSearch] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [customerPreview, setCustomerPreview] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [printSale, setPrintSale] = useState(null);
+  const [printOptions, setPrintOptions] = useState({ billType: "without_gst", gstNumber: "", cgstPercent: "", sgstPercent: "" });
+  const [customerPayModal, setCustomerPayModal] = useState(null);
+  const [customerPayForm, setCustomerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
+  const [filters, setFilters] = useState({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" });
+
+  const emptyForm = { date: today(), product: "", productType: "interlock", itemId: "", category: "", shape: "", color: "", size: "", thickness: "", interlockDetails: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", price: "", discount: "", amountPaid: "", customer: "", mobileNumber: "", address: "", gstNumber: "", state: "Kerala", stateCode: "32", reverseCharge: "No", transportMode: "", vehicleNumber: "", dateOfSupply: today(), placeOfSupply: "", hsnSac: "", bankName: "", bankAccount: "", bankIfsc: "", terms: "", billType: "without_gst", cgstPercent: "", sgstPercent: "", paymentMode: "Cash", workerCharges: [] };
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(() => {
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers"), api("GET", "/workers")]).then(([d, h, c, w]) => {
+      const interlocks = Array.isArray(d) ? d.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
+      setInterlockTypes([...interlocks, ...hollow]);
+      setCustomerMaster(Array.isArray(c) ? c : []);
+      setSalesWorkers(Array.isArray(w) ? w.filter(x => !x.status || x.status === "Active") : []);
+    });
+  }, []);
+
+  const isHollow = (sale = form) => sale?.productType === "hollowbrick";
+  const isOther = (sale = form) => sale?.productType === "other";
+  const hasSqftSale = (sale = form) => !isHollow(sale) && (+(sale?.sqftPerPiece || 0) > 0 || +(sale?.sqftQty || 0) > 0);
+  const calcSqftQty = () => isHollow() ? 0 : (+(form.sqftQty || 0) || ((+(form.quantity || 0)) * (+(form.sqftPerPiece || 0))));
+  const calcSubtotal = () => (isHollow() || (isOther() && !hasSqftSale()) ? +(form.quantity || 0) : calcSqftQty()) * +(form.price || 0);
+  const calcTaxable = () => Math.max(0, calcSubtotal() - +(form.discount || 0));
+  const calcCgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.cgstPercent || 0)) / 100 : 0;
+  const calcSgst = () => form.billType === "with_gst" ? calcTaxable() * (+(form.sgstPercent || 0)) / 100 : 0;
+  const calcTotal = () => Math.max(0, calcTaxable() + calcCgst() + calcSgst());
+  const calcPending = () => Math.max(0, calcTotal() - +(form.amountPaid || 0));
+  const billBaseAmount = (sale, opts = {}) => {
+    if (sale?.taxableAmount != null) return +(sale.taxableAmount) || 0;
+    if ((opts.billType || sale?.billType) === "with_gst" && (+(sale?.cgstAmount) || +(sale?.sgstAmount))) {
+      return Math.max(0, (+(sale?.total) || 0) - (+(sale?.cgstAmount) || 0) - (+(sale?.sgstAmount) || 0));
+    }
+    return +(sale?.total) || 0;
+  };
+  const printTax = (sale, opts) => {
+    const taxable = billBaseAmount(sale, opts);
+    const withGst = opts.billType === "with_gst";
+    const cgstPercent = withGst ? +(opts.cgstPercent || sale?.cgstPercent || 0) : 0;
+    const sgstPercent = withGst ? +(opts.sgstPercent || sale?.sgstPercent || 0) : 0;
+    const cgstAmount = taxable * cgstPercent / 100;
+    const sgstAmount = taxable * sgstPercent / 100;
+    return { taxable, cgstPercent, sgstPercent, cgstAmount, sgstAmount, total: taxable + cgstAmount + sgstAmount };
+  };
+  const saleSqftOf = (sale) => hasSqftSale(sale) ? (+(sale?.sqftQty || 0) || ((+(sale?.quantity || 0)) * (+(sale?.sqftPerPiece || 0)))) : 0;
+  const saleQtyText = (sale) => isHollow(sale)
+    ? `${fmt(sale?.quantity || 0)} numbers`
+    : hasSqftSale(sale)
+      ? `${fmt(sale?.quantity || 0)} ${sale?.unit || "pcs"} / ${fmt(saleSqftOf(sale))} sqft`
+      : `${fmt(sale?.quantity || 0)} ${sale?.unit || "pcs"}`;
+
+  const lookupCustomer = async (mobile) => {
+    const m = mobile.replace(/\D/g, "").slice(-10);
+    if (m.length < 10) { setCustomerPreview(null); return; }
+    setLookupLoading(true);
+    const data = await api("GET", `/customers/mobile/${m}`);
+    setLookupLoading(false);
+    if (data?.customer) {
+      setCustomerPreview(data);
+      setForm(f => ({ ...f, customer: data.customer.name || f.customer, address: data.customer.address || f.address, mobileNumber: m }));
+    } else {
+      setCustomerPreview(null);
+    }
+  };
+
+  const ledgerQuery = () => {
+    const q = [];
+    if (filters.fromDate || filters.toDate) {
+      if (filters.fromDate) q.push(`fromDate=${filters.fromDate}`);
+      if (filters.toDate) q.push(`toDate=${filters.toDate}`);
+    } else if (filters.datePreset && filters.datePreset !== "custom" && filters.datePreset !== "range") {
+      const r = salesDateRange(filters.datePreset);
+      if (r) { if (r.from) q.push(`fromDate=${r.from}`); if (r.to) q.push(`toDate=${r.to}`); }
+    } else if (filters.datePreset === "custom" && filters.customDate) {
+      q.push(`fromDate=${filters.customDate}`, `toDate=${filters.customDate}`);
+    }
+    return q.length ? `?${q.join("&")}` : "";
+  };
+
+  const openLedger = async (mobile, name) => {
+    setLedgerLoading(true);
+    let data;
+    if (mobile) {
+      const m = (mobile || "").replace(/\D/g, "").slice(-10);
+      if (m.length < 10) { setLedgerLoading(false); return; }
+      data = await api("GET", `/customers/mobile/${m}${ledgerQuery()}`);
+    } else if (name) {
+      data = await api("GET", `/customers/search?name=${encodeURIComponent(name)}${ledgerQuery().replace("?", "&")}`);
+    }
+    setLedgerLoading(false);
+    if (data?.customer) setLedger(data);
+    else if (data?.customers?.length) setLedger({ pickList: data.customers });
+  };
+
+  const handleQuickSearch = async () => {
+    const q = quickSearch.trim();
+    if (!q) { setLedger(null); return; }
+    const isMobile = /^\d{6,}$/.test(q.replace(/\D/g, ""));
+    if (isMobile) await openLedger(q.replace(/\D/g, "").slice(-10));
+    else await openLedger(null, q);
+  };
+
+  const receiveCustomerCash = async () => {
+    const mobile = customerPayModal?.mobile;
+    const amount = +(customerPayForm.amount || 0);
+    if (!mobile || amount <= 0) return;
+    const updated = await api("POST", `/customers/${mobile}/payment`, { ...customerPayForm, amount, addedBy: user.name });
+    if (updated?.ok) {
+      setLedger({ customer: updated.customer, purchases: updated.purchases || [], itemSummary: updated.itemSummary || [] });
+      setCustomerPayModal(null);
+      setCustomerPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      api("GET", "/sales").then(sa => setSales(Array.isArray(sa) ? sa : []));
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+    } else if (updated?.message) {
+      window.alert(updated.message);
+    }
+  };
+
+  const selectMasterCustomer = (id) => {
+    setSelectedCustomerId(id);
+    const c = customerMaster.find(x => x._id === id);
+    if (!c) return;
+    setForm(f => ({ ...f, customer: c.name, mobileNumber: c.mobile, address: c.address || "", gstNumber: c.gstNumber || "" }));
+    lookupCustomer(c.mobile);
+  };
+
+  const save = async () => {
+    setSaveError("");
+    const mobile = (form.mobileNumber || "").replace(/\D/g, "").slice(-10);
+    if (!mobile || mobile.length < 10) { setSaveError("Mobile number is required (10 digits)"); return; }
+    if (!form.customer) { setSaveError("Customer name is required"); return; }
+    if (!form.product) { setSaveError("Select a product"); return; }
+    const workerCharges = (form.workerCharges || []).filter(x => x.enabled).map(x => ({ operation: x.operation, workerId: x.workerId, rate: +(x.rate || 0) }));
+    if (workerCharges.some(x => !x.workerId || x.rate <= 0)) { setSaveError("Choose an employee and enter a charge per unit for each selected loading/unloading task"); return; }
+    const total = calcTotal();
+    const amountPaid = +(form.amountPaid || 0);
+    const payload = {
+      ...form, mobileNumber: mobile, total, discount: +(form.discount || 0),
+      workerCharges,
+      taxableAmount: calcTaxable(), sqftPerPiece: isHollow() ? 0 : +(form.sqftPerPiece || 0), sqftQty: hasSqftSale() ? calcSqftQty() : 0, cgstPercent: +(form.cgstPercent || 0), sgstPercent: +(form.sgstPercent || 0),
+      cgstAmount: calcCgst(), sgstAmount: calcSgst(),
+      amountPaid, amountPending: Math.max(0, total - amountPaid),
+      quantity: +form.quantity, price: +form.price, addedBy: user.name,
+      saveToCustomerMaster: customerMode === "new" ? saveToMaster : true,
+    };
+    const audit = editSale ? requestAuditReason("edit", "sale report", user) : null;
+    if (editSale && !audit) return;
+    const item = await api(editSale ? "PUT" : "POST", editSale ? `/sales/${editSale._id}` : "/sales", editSale ? { ...payload, ...audit } : payload);
+    if (item._id) {
+      setSales(p => editSale ? p.map(x => x._id === item._id ? item : x) : [item, ...p]);
+      setModal(false);
+      setEditSale(null);
+      setForm(emptyForm);
+      setCustomerPreview(null);
+      setSelectedCustomerId("");
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+    } else {
+      setSaveError(item.message || "Failed to save sale");
+    }
+  };
+
+  const deleteSale = async (sale) => {
+    if (!isAdminLike(user.role) || !sale?._id) return;
+    if (!window.confirm("Delete this sale? Stock and customer pending will be updated.")) return;
+    const audit = requestAuditReason("delete", "sale report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/sales/${sale._id}`, audit);
+    if (deleted?.ok) {
+      setSales(p => p.filter(x => x._id !== sale._id));
+      api("GET", "/customers").then(c => setCustomerMaster(Array.isArray(c) ? c : []));
+      api("GET", "/stock").then(s => setStock?.(Array.isArray(s) ? s : []));
+      if (ledger?.customer?.mobile) openLedger(ledger.customer.mobile);
+    } else if (deleted?.message) {
+      window.alert(deleted.message);
+    }
+  };
+
+  const openEditSale = (sale) => {
+    setEditSale(sale);
+    setForm({
+      ...emptyForm,
+      ...sale,
+      date: sale.date || today(),
+      quantity: String(sale.quantity ?? ""),
+      sqftPerPiece: String(sale.sqftPerPiece ?? ""),
+      sqftQty: String(sale.sqftQty ?? ""),
+      price: String(sale.price ?? ""),
+      discount: String(sale.discount ?? ""),
+      amountPaid: String(sale.amountPaid ?? ""),
+      cgstPercent: String(sale.cgstPercent ?? ""),
+      sgstPercent: String(sale.sgstPercent ?? ""),
+      workerCharges: (sale.workerCharges || []).map(x => ({ ...x, enabled: true, rate: String(x.rate ?? "") })),
+    });
+    setCustomerMode("new");
+    setSelectedCustomerId("");
+    setCustomerPreview(null);
+    setSaveToMaster(true);
+    setSaveError("");
+    setModal(true);
+  };
+
+  const openPrintBill = (sale) => {
+    setPrintSale(sale);
+    setPrintOptions({
+      billType: sale.billType === "with_gst" ? "with_gst" : "without_gst",
+      gstNumber: sale.gstNumber || "",
+      cgstPercent: sale.cgstPercent ? String(sale.cgstPercent) : "",
+      sgstPercent: sale.sgstPercent ? String(sale.sgstPercent) : "",
+    });
+  };
+
+  const printBill = () => {
+    if (!printSale) return;
+    const brand = { ...COMPANY, ...(branding || {}) };
+    const tax = printTax(printSale, printOptions);
+    const withGst = printOptions.billType === "with_gst";
+    const invoiceNo = printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase() || "";
+    const details = isOther(printSale)
+      ? [printSale.category, printSale.color, printSale.size].filter(Boolean).join(" / ")
+      : [printSale.shape, printSale.color, withUnit(printSale.size,"inch"), printSale.thickness ? `${withUnit(printSale.thickness,"inch")} thick` : ""].filter(Boolean).join(" / ");
+    const countOnly = isHollow(printSale) || (isOther(printSale) && !hasSqftSale(printSale));
+    const saleSqft = countOnly ? 0 : saleSqftOf(printSale);
+    const itemAmount = tax.taxable;
+    const cgstRate = withGst ? tax.cgstPercent : 0;
+    const sgstRate = withGst ? tax.sgstPercent : 0;
+    const igstRate = 0;
+    const fullDetails = [
+      printSale.interlockDetails || details,
+      printSale.category ? `Category: ${printSale.category}` : "",
+      printSale.shape ? `Shape: ${printSale.shape}` : "",
+      printSale.color ? `Color: ${printSale.color}` : "",
+      printSale.size ? `Size/No.: ${isOther(printSale) ? printSale.size : withUnit(printSale.size,"inch")}` : "",
+      printSale.thickness && !isOther(printSale) ? `Thickness: ${withUnit(printSale.thickness,"inch")}` : "",
+      printSale.sqftPerPiece && !countOnly ? `1 piece = ${fmt(printSale.sqftPerPiece)} sqft` : "",
+      printSale.unit ? `Unit: ${printSale.unit}` : ""
+    ].filter(Boolean).join("<br>");
+    if (!withGst) {
+      const smallQty = countOnly ? `${fmt(printSale.quantity)} ${printSale.unit || "piece"}` : `${fmt(printSale.quantity)} pcs${saleSqft ? ` / ${fmt(saleSqft)} sqft` : ""}`;
+      const smallHtml = `<!doctype html><html><head><title>Bill ${invoiceNo}</title>
+        <style>
+          *{box-sizing:border-box}body{margin:0;background:#f8fafc;color:#111;font-family:Arial,"Times New Roman",serif}.printbtn{position:fixed;right:12px;top:10px;padding:8px 14px;border:0;border-radius:8px;background:#111827;color:white;font-weight:700}
+          .bill{width:148mm;min-height:105mm;background:white;margin:12px auto;padding:5mm 6mm;border:1.5px solid #222}
+          .head{text-align:center;line-height:1.2}.head h1{font-family:"Times New Roman",serif;font-size:20px;margin:0 0 2px;font-weight:900;letter-spacing:.3px}.addr{font-size:13px;font-weight:700}.phone{font-size:12px;font-weight:700;margin-top:2px}
+          .meta{display:grid;grid-template-columns:1fr 1fr;align-items:end;margin:4mm 0 2mm;font-size:13px}.no{color:#b91c1c;font-size:19px;letter-spacing:2px}.date{text-align:right;font-style:italic;font-weight:700}.dots{display:inline-block;min-width:34mm;border-bottom:1px dotted #333;height:14px;vertical-align:bottom}
+          table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1.5px solid #222;padding:5px 6px;font-size:13px;vertical-align:top}th{text-align:center;font-weight:800}.datecol{width:24mm}.qty{width:24mm;text-align:center}.amt{width:28mm;text-align:right}.particulars{height:40mm}.total td{font-weight:900}.signature{text-align:right;font-style:italic;font-weight:700;padding-top:2mm;font-size:15px}
+          @media print{body{background:white}.printbtn{display:none}@page{size:A6 landscape;margin:4mm}.bill{width:148mm;min-height:105mm;margin:0;border:1.5px solid #222;box-shadow:none}}
+        </style></head><body>
+        <button class="printbtn" onclick="window.print()">Print</button>
+        <div class="bill">
+          <div class="head">
+            <h1>${brand.companyName || COMPANY.companyName}</h1>
+            <div class="addr">${brand.address || ""}</div>
+            <div class="phone">PH : ${[brand.phone1, brand.phone2].filter(Boolean).join(", ") || "-"}</div>
+          </div>
+          <div class="meta"><div class="no">${invoiceNo}</div><div class="date">Date <span class="dots">${printSale.date || ""}</span></div></div>
+          <table>
+            <thead><tr><th class="datecol">Date</th><th>Particulars</th><th class="qty">Qty</th><th class="amt">Amount</th></tr></thead>
+            <tbody>
+              <tr class="particulars"><td>${printSale.date || ""}</td><td><b>${printSale.product || "-"}</b><br>${fullDetails || ""}<br>${printSale.customer ? `Customer: ${printSale.customer}` : ""}</td><td class="qty">${smallQty}</td><td class="amt">${CURRENCY}${fmt(tax.total)}</td></tr>
+              <tr class="total"><td colspan="2" style="text-align:right">Total</td><td></td><td class="amt">${CURRENCY}${fmt(tax.total)}</td></tr>
+            </tbody>
+          </table>
+          <div class="signature">Signature</div>
+        </div>
+        <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+      const w = window.open("", "_blank", "width=700,height=520");
+      if (!w) return;
+      w.document.open();
+      w.document.write(smallHtml);
+      w.document.close();
+      return;
+    }
+    const rows = `
+      <tr>
+        <td class="center">1</td>
+        <td><b>${printSale.product || "-"}</b><br><span>${fullDetails || ""}</span></td>
+        <td class="center">${printSale.hsnSac || "-"}</td>
+        <td class="right">${fmt(printSale.quantity)}</td>
+        <td class="right">${countOnly ? (printSale.unit || "piece") : fmt(saleSqft)}</td>
+        <td class="right">${CURRENCY}${fmt(printSale.price)}</td>
+        <td class="right">${CURRENCY}${fmt(itemAmount)}</td>
+        <td class="right">${cgstRate || ""}</td>
+        <td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td>
+        <td class="right">${sgstRate || ""}</td>
+        <td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td>
+        <td class="right">${igstRate || ""}</td>
+        <td class="right"></td>
+        <td class="right">${CURRENCY}${fmt(tax.total)}</td>
+      </tr>`;
+    const html = `<!doctype html><html><head><title>Invoice ${invoiceNo}</title>
+      <style>
+        *{box-sizing:border-box}body{font-family:Arial,"Times New Roman",serif;color:#172554;margin:18px;background:#f8fafc}.invoice{background:#fff;border:2px solid #172554;max-width:1120px;margin:auto;box-shadow:0 18px 50px rgba(15,23,42,.12)}
+        .printbtn{position:fixed;right:18px;top:12px;padding:9px 16px;border:0;border-radius:8px;background:#172554;color:white;font-weight:700}.title{display:grid;grid-template-columns:1.05fr 2fr 1.05fr;border-bottom:2px solid #172554;min-height:118px}
+        .title>div{padding:10px}.brand{text-align:center}.brand h1{font-size:29px;margin:6px 0 4px;letter-spacing:.4px;color:#111827}.brand .addr{font-size:13px;font-weight:700;line-height:1.45;color:#1f2937}.brand .gst{display:inline-block;margin-top:5px;border:1px solid #172554;padding:3px 10px;font-size:12px;font-weight:700}
+        .side{font-size:13px;line-height:1.75}.side.right{text-align:right}.pill{display:inline-block;border:1px solid #172554;border-radius:3px;padding:2px 8px;margin-top:3px}.grid2{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid #172554}.cell{padding:0;border-right:2px solid #172554;min-height:154px}.cell:last-child{border-right:0}.cell-body{padding:8px 10px}
+        .line{display:grid;grid-template-columns:145px 1fr;font-size:13px;line-height:1.65;gap:6px}.label{font-weight:700;color:#111827}.section-title{text-align:center;font-weight:800;border-bottom:1px solid #172554;padding:6px 4px;font-size:12px;background:#eff6ff;letter-spacing:.3px}
+        table{width:100%;border-collapse:collapse}th,td{border:1px solid #172554;padding:6px;font-size:12px;vertical-align:top}th{font-weight:800;text-align:center;background:#f8fafc}.right{text-align:right}.center{text-align:center}.total-row td{font-weight:800;background:#f8fafc}
+        .words{border-top:2px solid #172554;padding:9px 10px;font-size:13px}.bottom{display:grid;grid-template-columns:1.15fr 1fr;border-top:2px solid #172554}.bank,.amounts{min-height:190px}.bank{border-right:2px solid #172554}.bank .body{padding:10px 12px;font-size:13px;line-height:1.75}.amounts table td{height:23px}.amounts table tr:last-child td{font-size:13px;background:#eff6ff}
+        .footer{display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #172554;min-height:96px}.seal{border-right:2px solid #172554;text-align:center;padding-top:36px;font-size:13px;color:#64748b}.sign{text-align:right;padding:10px 14px;font-size:13px}.sign b{display:block;margin-top:40px}
+        @media print{.printbtn{display:none}body{margin:7mm;background:#fff}.invoice{max-width:none;box-shadow:none}th{background:#fff}.section-title,.amounts table tr:last-child td{background:#fff}}
+      </style></head><body>
+      <button class="printbtn" onclick="window.print()">Print</button>
+      <div class="invoice">
+        <div class="title">
+          <div class="side"><b><i>${brand.invoiceTitle || "TAX INVOICE"}</i></b><br>Invoice No. : <b>${invoiceNo}</b><br>Invoice Date : <b>${printSale.date || ""}</b><br>Reverse Charge : ${printSale.reverseCharge || "No"}<br><span class="pill">State Code: ${printSale.stateCode || brand.stateCode || "32"}</span></div>
+          <div class="brand"><h1>${brand.companyName || COMPANY.companyName}</h1><div class="addr">${brand.address || "-"}<br>State: ${brand.state || "Kerala"}</div><div class="gst">GSTIN: ${brand.gstin || "-"}</div></div>
+          <div class="side right"><b>PH:</b> ${brand.phone1 || "-"}<br>${brand.phone2 || ""}<br><br>Date: <b>${printSale.date || ""}</b></div>
+        </div>
+        <div class="grid2">
+          <div class="cell">
+            <div class="section-title">Details of Receiver / Billed to</div>
+            <div class="cell-body">
+            <div class="line"><span class="label">Name</span><span>: ${printSale.customer || "-"}</span></div>
+            <div class="line"><span class="label">Mobile</span><span>: ${printSale.mobileNumber || "-"}</span></div>
+            <div class="line"><span class="label">GSTIN</span><span>: ${withGst ? (printOptions.gstNumber || printSale.gstNumber || "-") : "-"}</span></div>
+            <div class="line"><span class="label">Address</span><span>: ${printSale.address || "-"}</span></div>
+            <div class="line"><span class="label">State</span><span>: ${printSale.state || "Kerala"}</span></div>
+            <div class="line"><span class="label">State Code</span><span>: ${printSale.stateCode || "32"}</span></div>
+            </div>
+          </div>
+          <div class="cell">
+            <div class="section-title">Details of Consignee / Shipped to</div>
+            <div class="cell-body">
+            <div class="line"><span class="label">Transportation Mode</span><span>: ${printSale.transportMode || "-"}</span></div>
+            <div class="line"><span class="label">Vehicle Number</span><span>: ${printSale.vehicleNumber || "-"}</span></div>
+            <div class="line"><span class="label">Date of Supply</span><span>: ${printSale.dateOfSupply || printSale.date || "-"}</span></div>
+            <div class="line"><span class="label">Place of Supply</span><span>: ${printSale.placeOfSupply || "-"}</span></div>
+            <div class="line"><span class="label">Payment Mode</span><span>: ${printSale.paymentMode || "-"}</span></div>
+            </div>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Sl.<br>No.</th><th>Name of Product / Service</th><th>HSN/SAC</th><th>Qty</th><th>${countOnly ? "Unit" : "Sqft"}</th><th>Rate</th><th>Taxable<br>Value</th><th colspan="2">CGST</th><th colspan="2">SGST</th><th colspan="2">IGST</th><th>Total</th></tr>
+          <tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th></th></tr></thead>
+          <tbody>${rows}<tr class="total-row"><td colspan="6" class="right">Total</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td><td></td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td><td></td><td></td><td class="right">${CURRENCY}${fmt(tax.total)}</td></tr></tbody>
+        </table>
+        <div class="words"><b>Total Invoice Amount:</b> ${CURRENCY}${fmt(tax.total)} only</div>
+        <div class="bottom">
+          <div class="bank">
+            <div class="section-title">BANK DETAILS</div>
+            <div class="body">Name of Bank : ${printSale.bankName || brand.bankName || "-"}<br>Bank A/C No. : ${printSale.bankAccount || brand.bankAccount || "-"}<br>Bank Branch IFSC : ${printSale.bankIfsc || brand.bankIfsc || "-"}<br><br><b>Terms & Conditions:</b><br>${printSale.terms || brand.terms || "Certified that the particulars given above are true and correct."}</div>
+          </div>
+          <div class="amounts">
+            <table><tbody>
+              <tr><td>Total Amount Before Tax</td><td class="right">${CURRENCY}${fmt(tax.taxable)}</td></tr>
+              <tr><td>Discount</td><td class="right">${CURRENCY}${fmt(printSale.discount || 0)}</td></tr>
+              <tr><td>Add : CGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount) : ""}</td></tr>
+              <tr><td>Add : SGST</td><td class="right">${withGst ? CURRENCY + fmt(tax.sgstAmount) : ""}</td></tr>
+              <tr><td>Add : IGST</td><td class="right"></td></tr>
+              <tr><td>Tax Amount : GST</td><td class="right">${withGst ? CURRENCY + fmt(tax.cgstAmount + tax.sgstAmount) : ""}</td></tr>
+              <tr><td>Total Amount After Tax</td><td class="right"><b>${CURRENCY}${fmt(tax.total)}</b></td></tr>
+              <tr><td>Payment Mode</td><td class="right">${printSale.paymentMode || "-"}</td></tr>
+              <tr><td>Paid</td><td class="right">${CURRENCY}${fmt(printSale.amountPaid)}</td></tr>
+              <tr><td>Pending</td><td class="right">${CURRENCY}${fmt(Math.max(0, tax.total - (+(printSale.amountPaid)||0)))}</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="footer"><div class="seal">(Common Seal)</div><div class="sign">For ${brand.signatureName || brand.shortName || brand.companyName || COMPANY.shortName}<b>Authorised Signatory</b></div></div>
+      </div>
+      <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const filtered = filterSalesList(sales, { quickSearch, ...filters });
+  const filteredTotal = filtered.reduce((a, s) => a + (+(s.total) || 0), 0);
+  const filteredPaid = filtered.reduce((a, s) => a + (+(s.amountPaid) || 0), 0);
+  const filteredPending = filtered.reduce((a, s) => a + (+(s.amountPending) || 0), 0);
+  const filteredQty = filtered.reduce((a, s) => a + (+(s.quantity) || 0), 0);
+  const filteredSqft = filtered.reduce((a, s) => a + saleSqftOf(s), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">💰 Sales</h2>
+        <button onClick={() => { setEditSale(null); setForm(emptyForm); setSelectedCustomerId(""); setModal(true); setSaveError(""); setCustomerPreview(null); setCustomerMode("existing"); setSaveToMaster(true); }} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Sale</button>
+      </div>
+
+      {/* Quick Search */}
+      <div className="bg-white rounded-2xl border shadow-sm p-3">
+        <div className="flex gap-2">
+          <input
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50"
+            placeholder="🔍 Search by Mobile Number / Customer Name"
+            value={quickSearch}
+            onChange={e => setQuickSearch(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleQuickSearch()}
+          />
+          <button onClick={handleQuickSearch} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shrink-0">Search</button>
+        </div>
+        {ledgerLoading && <div className="text-xs text-amber-600 mt-2">Loading customer...</div>}
+      </div>
+
+      {/* Customer pick list */}
+      {ledger?.pickList && (
+        <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+          <div className="font-bold text-sm">Multiple customers found — select one:</div>
+          {ledger.pickList.map(c => (
+            <button key={c._id} onClick={() => openLedger(c.mobile)} className="w-full text-left bg-gray-50 hover:bg-amber-50 border rounded-xl p-3 text-sm">
+              <div className="font-bold">{c.name}</div>
+              <div className="text-xs text-gray-400">📱 {c.mobile} · Pending: {CURRENCY}{fmt(c.totalPending || 0)}</div>
+            </button>
+          ))}
+          <button onClick={() => setLedger(null)} className="text-xs text-red-500 font-bold">Cancel</button>
+        </div>
+      )}
+
+      {/* Customer Ledger */}
+      {ledger?.customer && (
+        <div className="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden">
+          <div className="bg-amber-600 px-4 py-3 flex items-center justify-between">
+            <div className="text-white font-black">📒 Customer Ledger</div>
+            <button onClick={() => setLedger(null)} className="text-white/80 hover:text-white text-xl leading-none">×</button>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-gray-400 text-xs">Customer</span><div className="font-bold">{ledger.customer.name || "—"}</div></div>
+              <div><span className="text-gray-400 text-xs">Mobile</span><div className="font-bold">{ledger.customer.mobile}</div></div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <StatCard label="Total Purchases" value={ledger.customer.totalPurchases} icon="🛒" color="blue" />
+              <StatCard label="Sales Amount" value={`${CURRENCY}${fmt(ledger.customer.totalSalesAmount)}`} icon="💰" color="green" />
+              <StatCard label="Total Quantity" value={fmt(ledger.customer.totalQuantity)} icon="📦" color="purple" />
+              <StatCard label="Discount Given" value={`${CURRENCY}${fmt(ledger.customer.totalDiscount)}`} icon="🏷️" color="amber" />
+              <StatCard label="Total Paid" value={`${CURRENCY}${fmt(ledger.customer.totalPaid)}`} icon="✅" color="teal" />
+              <StatCard label="Total Pending" value={`${CURRENCY}${fmt(ledger.customer.totalPending)}`} icon="⏳" color="red" />
+            </div>
+            {+(ledger.customer.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setCustomerPayModal(ledger.customer);
+                  setCustomerPayForm({ amount: String(ledger.customer.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Receive Cash from Customer
+              </button>
+            )}
+            {(ledger.itemSummary || []).length > 0 && (
+              <SectionBox title="Purchased Items Summary" icon="📦" color="blue">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400"><th className="text-left p-1">Item</th><th className="text-right p-1">Total Qty / Sqft</th></tr></thead>
+                  <tbody>
+                    {ledger.itemSummary.map((it, i) => (
+                      <tr key={i} className="border-t border-gray-100"><td className="p-1 font-semibold">{it.item}</td><td className="p-1 text-right">{qtyWithSqft(it)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SectionBox>
+            )}
+            <div className="overflow-x-auto">
+              <div className="text-xs font-bold text-gray-600 mb-1">Complete Purchase History</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500">
+                    <th className="text-left p-2">Date</th>
+                    <th className="text-left p-2">Item</th>
+                    <th className="text-right p-2">Qty</th>
+                    <th className="text-right p-2">Amount</th>
+                    <th className="text-right p-2">Discount</th>
+                    <th className="text-right p-2">Paid</th>
+                    <th className="text-right p-2">Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(ledger.purchases || []).map(p => (
+                    <tr key={p._id} className="border-t border-gray-100">
+                      <td className="p-2">{p.date}</td>
+                      <td className="p-2 font-semibold">{p.product}</td>
+                      <td className="p-2 text-right">{saleQtyText(p)}</td>
+                      <td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(+(p.total) || 0)}</td>
+                      <td className="p-2 text-right text-amber-600">{CURRENCY}{fmt(+(p.discount) || 0)}</td>
+                      <td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(p.amountPaid) || 0)}</td>
+                      <td className="p-2 text-right text-red-600">{CURRENCY}{fmt(+(p.amountPending) || 0)}</td>
+                    </tr>
+                  ))}
+                  {(ledger.purchases || []).length === 0 && (
+                    <tr><td colSpan={7} className="p-4 text-center text-gray-400">No purchases found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Search Filters */}
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-gray-700 hover:bg-gray-50">
+          <span>🔎 Sales Reports & Filters</span>
+          <span>{showFilters ? "▲" : "▼"}</span>
+        </button>
+        {showFilters && (
+          <div className="px-4 pb-4 space-y-3 border-t border-gray-100 pt-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile Number" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} placeholder="9876543210" />
+              <Input label="Customer Name" value={filters.customer} onChange={e => setFilters({ ...filters, customer: e.target.value })} placeholder="Name" />
+            </div>
+            <Input label="Invoice Number" value={filters.invoice} onChange={e => setFilters({ ...filters, invoice: e.target.value })} placeholder="Future use" />
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Date Filter</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "yesterday", label: "Yesterday" }, { id: "thismonth", label: "This Month" }, { id: "custom", label: "Custom Date" }, { id: "range", label: "Date Range" }].map(d => (
+                  <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white border-amber-500" : "bg-gray-50 text-gray-600 border-gray-200"}`}>{d.label}</button>
+                ))}
+              </div>
+            </div>
+            {filters.datePreset === "custom" && (
+              <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />
+            )}
+            {filters.datePreset === "range" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+                <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+              </div>
+            )}
+            <button onClick={() => setFilters({ mobile: "", customer: "", datePreset: "", customDate: "", fromDate: "", toDate: "", invoice: "" })} className="text-xs text-red-500 font-bold">Clear Filters</button>
+          </div>
+        )}
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard label="Total Sales" value={`${CURRENCY}${fmt(filteredTotal)}`} icon="💰" color="green" sub={`${filtered.length} record(s)`} />
+        <StatCard label="Total Qty" value={fmt(filteredQty)} icon="📦" color="blue" sub={filteredSqft ? `${fmt(filteredSqft)} sqft` : "Numbers only"} />
+        <StatCard label="Total Paid" value={`${CURRENCY}${fmt(filteredPaid)}`} icon="✅" color="teal" />
+        <StatCard label="Total Pending" value={`${CURRENCY}${fmt(filteredPending)}`} icon="⏳" color="red" />
+      </div>
+
+      {/* Sales List */}
+      <div className="space-y-2">
+        {filtered.length === 0 && <EmptyState icon="💰" text="No sales found" />}
+        {filtered.map(s => (
+          <div key={s._id} className="bg-white rounded-2xl border shadow-sm p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-black text-gray-900">{s.product}</div>
+                {s.interlockDetails && <div className="text-xs text-amber-600">{cleanDisplayUnits(s.interlockDetails)}</div>}
+                <div className="text-xs text-gray-400 mt-0.5">📅 {s.date}{s.customer ? ` · 👤 ${s.customer}` : ""}</div>
+                {s.mobileNumber && <div className="text-xs text-gray-500">📱 {s.mobileNumber}</div>}
+                <div className="text-sm text-gray-600">{saleQtyText(s)} x {CURRENCY}{s.price}{isHollow(s) ? "" : ""}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-black text-green-700">{CURRENCY}{fmt(+(s.total) || 0)}</div>
+                {(+(s.amountPaid) || 0) > 0 && <div className="text-xs text-teal-600">Paid: {CURRENCY}{fmt(+(s.amountPaid) || 0)}</div>}
+                {(+(s.amountPending) || 0) > 0 && <div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.amountPending) || 0)}</div>}
+                <Badge color={s.paymentMode === "Cash" ? "green" : s.paymentMode === "Credit" ? "red" : "blue"}>{s.paymentMode}</Badge>
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {s.mobileNumber && (
+                <button onClick={() => openLedger(s.mobileNumber)} className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 font-bold hover:bg-slate-50 inline-flex items-center gap-1.5"><BookOpen size={14}/>Customer Ledger</button>
+              )}
+              <button onClick={() => openPrintBill(s)} className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 inline-flex items-center gap-1.5"><Printer size={14}/>Print Bill</button>
+              {isAdminLike(user.role) && (
+                <>
+                  <button onClick={() => openEditSale(s)} className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-blue-700 hover:bg-blue-50 inline-flex items-center justify-center" title="Edit sale" aria-label="Edit sale"><Pencil size={15}/></button>
+                  <button onClick={() => deleteSale(s)} className="h-9 w-9 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center justify-center" title="Delete sale" aria-label="Delete sale"><Trash2 size={15}/></button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Record Sale Modal */}
+      {modal && (
+        <Modal title={editSale ? "Edit Sale" : "Record Sale"} onClose={() => { setModal(false); setEditSale(null); setSaveError(""); setCustomerPreview(null); }} wide>
+          <div className="space-y-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-blue-700">Customer Details</div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setCustomerMode("existing")} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${customerMode === "existing" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600"}`}>Select Existing</button>
+                <button type="button" onClick={() => { setCustomerMode("new"); setSelectedCustomerId(""); setCustomerPreview(null); }} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${customerMode === "new" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600"}`}>New Customer</button>
+              </div>
+              {customerMode === "existing" ? (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Select Customer *</label>
+                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white" value={selectedCustomerId} onChange={e => selectMasterCustomer(e.target.value)}>
+                    <option value="">-- Select from Customer Master --</option>
+                    {customerMaster.map(c => <option key={c._id} value={c._id}>{c.name} ({c.mobile})</option>)}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <Input label="Mobile Number *" value={form.mobileNumber} onChange={e => setForm({ ...form, mobileNumber: e.target.value })} onBlur={e => lookupCustomer(e.target.value)} placeholder="10-digit mobile" />
+                  <Input label="Customer Name *" value={form.customer} onChange={e => setForm({ ...form, customer: e.target.value })} placeholder="Customer name" />
+                  <Input label="Address (optional)" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="Address" />
+                  <Input label="GST Number (optional)" value={form.gstNumber} onChange={e => setForm({ ...form, gstNumber: e.target.value })} placeholder="GSTIN" />
+                  <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                    <input type="checkbox" checked={saveToMaster} onChange={e => setSaveToMaster(e.target.checked)} className="rounded" />
+                    Save to Customer Master
+                  </label>
+                </>
+              )}
+              {lookupLoading && <div className="text-xs text-amber-600">Looking up customer...</div>}
+              {customerPreview?.customer && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-xs space-y-1">
+                  <div className="font-bold text-green-700">✅ Existing Customer Found</div>
+                  <div>Previous Purchases: <b>{customerPreview.customer.totalPurchases}</b></div>
+                  <div>Total Paid: <b>{CURRENCY}{fmt(customerPreview.customer.totalPaid)}</b></div>
+                  <div>Total Pending: <b className="text-red-600">{CURRENCY}{fmt(customerPreview.customer.totalPending)}</b></div>
+                </div>
+              )}
+              {customerMode === "existing" && selectedCustomerId && (
+                <div className="text-xs text-gray-600 bg-white rounded-xl p-2 border">
+                  <div><b>Name:</b> {form.customer}</div>
+                  <div><b>Mobile:</b> {form.mobileNumber}</div>
+                  <div><b>Address:</b> {form.address || "—"}</div>
+                </div>
+              )}
+            </div>
+
+            <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-gray-600">Invoice & Transport Details</div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Invoice Number" value={form.invoiceNumber || ""} onChange={e => setForm({ ...form, invoiceNumber: e.target.value })} placeholder="Auto if blank" />
+                <Select label="Reverse Charge" value={form.reverseCharge || "No"} options={["No", "Yes"]} onChange={e => setForm({ ...form, reverseCharge: e.target.value })} />
+                <Input label="State" value={form.state || ""} onChange={e => setForm({ ...form, state: e.target.value })} placeholder="Kerala" />
+                <Input label="State Code" value={form.stateCode || ""} onChange={e => setForm({ ...form, stateCode: e.target.value })} placeholder="32" />
+                <Input label="Transport Mode" value={form.transportMode || ""} onChange={e => setForm({ ...form, transportMode: e.target.value })} placeholder="Road / Own Vehicle" />
+                <Input label="Vehicle Number" value={form.vehicleNumber || ""} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} placeholder="KL-00-0000" />
+                <Input label="Date of Supply" type="date" value={form.dateOfSupply || ""} onChange={e => setForm({ ...form, dateOfSupply: e.target.value })} />
+                <Input label="Place of Supply" value={form.placeOfSupply || ""} onChange={e => setForm({ ...form, placeOfSupply: e.target.value })} placeholder="Place" />
+                <Input label="HSN / SAC" value={form.hsnSac || ""} onChange={e => setForm({ ...form, hsnSac: e.target.value })} placeholder="HSN/SAC" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Product *</label>
+              <select className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-gray-50" value={isOther() ? "__other" : form.itemId} onChange={e => {
+                if (e.target.value === "__other") {
+                  setForm({ ...form, itemId: "", productType: "other", product: "", category: "", shape: "", color: "", size: "", thickness: "", sqftPerPiece: "", sqftQty: "", interlockDetails: "", unit: "piece", price: "" });
+                  return;
+                }
+                const it = interlockTypes.find(x => x._id === e.target.value);
+                const isHb = it?.productType === "hollowbrick";
+                const details = it ? (isHb ? [it.category, it.size ? `${it.size} inch` : ""].filter(Boolean).join(" / ") : [it.shape, it.color, it.size ? `${it.size} inch` : "", it.thickness ? `${it.thickness} inch thick` : ""].filter(Boolean).join(" / ")) : "";
+                const price = isHb ? (it?.price || 0) : (it?.pricePerSqft || 0);
+                const sqftPerPiece = isHb ? 0 : +(it?.sqftPerPiece || 0);
+                const pieces = +(form.quantity || 0);
+                setForm({ ...form, itemId: it?._id || "", productType: it?.productType || "interlock", product: it?.name || "", category: it?.category || "", shape: it?.shape || "", color: it?.color || "", size: it?.size || "", thickness: it?.thickness || "", sqftPerPiece: String(sqftPerPiece || ""), sqftQty: pieces && sqftPerPiece ? String(pieces * sqftPerPiece) : "", unit: "piece", interlockDetails: details, price: String(price) });
+              }}>
+                <option value="">-- Select Product --</option>
+                {interlockTypes.map(i => (
+                  <option key={`${i.productType}-${i._id}`} value={i._id}>{i.productType === "hollowbrick" ? "Hollow Brick - " : ""}{i.name}{i.color ? ` (${i.color})` : ""}{i.size ? ` - ${i.size}${i.productType==="hollowbrick" ? " inch" : ""}` : ""}</option>
+                ))}
+                <option value="__other">Other - Manual Product</option>
+              </select>
+              {isOther() && (
+                <div className="mt-2 bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input label="Product Name" value={form.product} onChange={e => setForm({ ...form, product: e.target.value })} placeholder="Type product name" />
+                    <Input label="Category" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Category" />
+                    <Input label="Color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} placeholder="Color" />
+                    <Input label="Size / No." value={form.size} onChange={e => setForm({ ...form, size: e.target.value })} placeholder="Size, No., model" />
+                    <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value || "piece" })} placeholder="piece / load / number" />
+                    <Input label="Extra Details" value={form.interlockDetails} onChange={e => setForm({ ...form, interlockDetails: e.target.value })} placeholder="Any bill description" />
+                  </div>
+                </div>
+              )}
+              {form.product && interlockTypes.find(x => x._id === form.itemId) && (
+                <div className="mt-1 bg-amber-50 rounded-xl p-2 text-xs text-gray-600">
+                  {form.category && <div>Category: {form.category}</div>}
+                  {form.interlockDetails && <div>{form.interlockDetails}</div>}
+                  {!isHollow() && interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece && <div>1 piece = {fmt(interlockTypes.find(x => x._id === form.itemId)?.sqftPerPiece)} sqft</div>}
+                  <div className="text-amber-700 font-bold">Rate: {CURRENCY}{form.price || 0}{isHollow() ? " / piece" : ""}</div>
+                </div>
+              )}
+              {interlockTypes.length === 0 && <div className="text-xs text-red-500 mt-1">No interlock types found. Add them in ⚙️ Master Data first!</div>}
+            </div>
+            <div className={`grid grid-cols-2 ${isHollow() ? "md:grid-cols-2" : "md:grid-cols-4"} gap-2`}>
+              <Input label={isHollow() ? "Numbers" : isOther() ? "Quantity / No." : "Pieces"} type="number" value={form.quantity} onChange={e => {
+                const pieces = +(e.target.value || 0);
+                const sqftPerPiece = +(form.sqftPerPiece || 0);
+                setForm({ ...form, quantity: e.target.value, sqftQty: !isHollow() && sqftPerPiece ? String(pieces * sqftPerPiece) : "" });
+              }} placeholder="0" />
+              {!isHollow() && <>
+                <Input label={isOther() ? "1 Unit Sqft (optional)" : "1 Piece Sqft"} type="number" step="any" value={form.sqftPerPiece} onChange={e => {
+                  const sqftPerPiece = +(e.target.value || 0);
+                  const pieces = +(form.quantity || 0);
+                  setForm({ ...form, sqftPerPiece: e.target.value, sqftQty: sqftPerPiece && pieces ? String(pieces * sqftPerPiece) : "" });
+                }} placeholder="0" />
+                <Input label="Total Sqft" type="number" value={calcSqftQty()} readOnly />
+              </>}
+              <Input label={`Rate (${CURRENCY})`} type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0" />
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-3">
+              <div className="text-sm font-bold text-amber-900">Loading & Unloading Worker Earnings</div>
+              <div className="text-xs text-amber-800">Optional. Earnings are added to the selected workers' ledger and are not included on the sales bill.</div>
+              {[{ operation: "load", label: "Loading" }, { operation: "unload", label: "Unloading" }].map(task => {
+                const assignment = (form.workerCharges || []).find(x => x.operation === task.operation) || { operation: task.operation, enabled: false, workerId: "", rate: "" };
+                const earning = (+form.quantity || 0) * (+assignment.rate || 0);
+                return <div key={task.operation} className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr_auto] gap-2 items-end">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 pb-2"><input type="checkbox" checked={!!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: e.target.checked ? [...next, { ...assignment, enabled: true }] : next });
+                  }} />{task.label}</label>
+                  <Select label="Employee" value={assignment.workerId} options={[{ value: "", label: "Select employee" }, ...salesWorkers.map(w => ({ value: w._id, label: w.name }))]} disabled={!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: [...next, { ...assignment, workerId: e.target.value }] });
+                  }} />
+                  <Input label={`Charge per unit (${CURRENCY})`} type="number" min="0" step="any" value={assignment.rate} disabled={!assignment.enabled} onChange={e => {
+                    const next = (form.workerCharges || []).filter(x => x.operation !== task.operation);
+                    setForm({ ...form, workerCharges: [...next, { ...assignment, rate: e.target.value }] });
+                  }} placeholder="0" />
+                  <div className="pb-2 text-xs text-gray-600">Earning: <b>{CURRENCY}{fmt(earning)}</b></div>
+                </div>;
+              })}
+            </div>
+            <Input label={`Discount (${CURRENCY})`} type="number" value={form.discount} onChange={e => setForm({ ...form, discount: e.target.value })} placeholder="0" />
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+              <Select label="Bill Type" value={form.billType} options={[{ value: "without_gst", label: "Without GST" }, { value: "with_gst", label: "With GST" }]} onChange={e => setForm({ ...form, billType: e.target.value })} />
+              {form.billType === "with_gst" && (
+                <>
+                  <Input label="Customer GST Number" value={form.gstNumber} onChange={e => setForm({ ...form, gstNumber: e.target.value })} placeholder="GSTIN" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input label="CGST %" type="number" step="any" value={form.cgstPercent} onChange={e => setForm({ ...form, cgstPercent: e.target.value })} placeholder="9" />
+                    <Input label="SGST %" type="number" step="any" value={form.sgstPercent} onChange={e => setForm({ ...form, sgstPercent: e.target.value })} placeholder="9" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcTaxable())}</div><div className="text-gray-400">Taxable</div></div>
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcCgst())}</div><div className="text-gray-400">CGST</div></div>
+                    <div className="bg-white rounded-xl p-2"><div className="font-black">{CURRENCY}{fmt(calcSgst())}</div><div className="text-gray-400">SGST</div></div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+              <div className="text-xs text-gray-400">Total Amount</div>
+              <div className="text-2xl font-black text-green-700">{CURRENCY}{fmt(calcTotal())}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label={`Amount Paid (${CURRENCY})`} type="number" value={form.amountPaid} onChange={e => setForm({ ...form, amountPaid: e.target.value })} placeholder="0" />
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Pending Amount</label>
+                <div className="w-full border border-red-200 rounded-xl px-3 py-2.5 text-sm bg-red-50 text-red-700 font-bold">{CURRENCY}{fmt(calcPending())}</div>
+              </div>
+            </div>
+            <Select label="Payment Mode" value={form.paymentMode} options={["Cash", "Bank", "GPay", "UPI", "Credit"]} onChange={e => {
+              const mode = e.target.value;
+              setForm({ ...form, paymentMode: mode, amountPaid: mode === "Credit" ? form.amountPaid : String(calcTotal()) });
+            }} />
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+              <div className="text-xs font-bold text-gray-600">Bank Details & Terms</div>
+              <Input label="Bank Name" value={form.bankName || ""} onChange={e => setForm({ ...form, bankName: e.target.value })} placeholder="Bank name" />
+              <div className="grid grid-cols-2 gap-2">
+                <Input label="Bank A/C No." value={form.bankAccount || ""} onChange={e => setForm({ ...form, bankAccount: e.target.value })} placeholder="Account number" />
+                <Input label="Bank IFSC" value={form.bankIfsc || ""} onChange={e => setForm({ ...form, bankIfsc: e.target.value })} placeholder="IFSC" />
+              </div>
+              <Textarea label="Terms & Conditions" value={form.terms || ""} onChange={e => setForm({ ...form, terms: e.target.value })} placeholder="Terms & conditions" />
+            </div>
+            {saveError && <div className="text-xs text-red-600 font-bold bg-red-50 border border-red-200 rounded-xl p-2">{saveError}</div>}
+            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{editSale ? "Save Sale" : "Record Sale"}</button>
+          </div>
+        </Modal>
+      )}
+      {customerPayModal && (
+        <Modal title="Receive Cash from Customer" onClose={() => setCustomerPayModal(null)}>
+          <div className="space-y-3">
+            <div className="bg-red-50 rounded-xl p-3 text-sm">
+              <div className="font-bold">{customerPayModal.name || "-"}</div>
+              <div>Pending: <b>{CURRENCY}{fmt(customerPayModal.totalPending || 0)}</b></div>
+            </div>
+            <Input label="Payment Date" type="date" value={customerPayForm.date} onChange={e => setCustomerPayForm({ ...customerPayForm, date: e.target.value })} />
+            <Input label={`Amount (${CURRENCY})`} type="number" value={customerPayForm.amount} onChange={e => setCustomerPayForm({ ...customerPayForm, amount: e.target.value })} />
+            <Select label="Mode" value={customerPayForm.mode} options={["Cash", "UPI", "Bank Transfer", "Cheque"]} onChange={e => setCustomerPayForm({ ...customerPayForm, mode: e.target.value })} />
+            <Input label="Note" value={customerPayForm.note} onChange={e => setCustomerPayForm({ ...customerPayForm, note: e.target.value })} />
+            <button onClick={receiveCustomerCash} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Receive Payment</button>
+          </div>
+        </Modal>
+      )}
+      {printSale && (
+        <Modal title="Print Bill" onClose={() => setPrintSale(null)}>
+          <div className="space-y-3">
+            <div className="bg-gray-50 border rounded-xl p-3 text-sm">
+              <div className="font-black">{printSale.customer || "-"}</div>
+              <div className="text-xs text-gray-500">{printSale.product || "-"} · {printSale.date}</div>
+              <div className="text-xs text-gray-500">Invoice: {printSale.invoiceNumber || printSale._id?.slice(-8)?.toUpperCase()}</div>
+            </div>
+            <Select label="Bill Format" value={printOptions.billType} options={[{ value: "without_gst", label: "Without GST" }, { value: "with_gst", label: "With GST" }]} onChange={e => setPrintOptions({ ...printOptions, billType: e.target.value })} />
+            {printOptions.billType === "with_gst" && (
+              <>
+                <Input label="Customer GST Number" value={printOptions.gstNumber} onChange={e => setPrintOptions({ ...printOptions, gstNumber: e.target.value })} placeholder="GSTIN" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input label="CGST %" type="number" step="any" value={printOptions.cgstPercent} onChange={e => setPrintOptions({ ...printOptions, cgstPercent: e.target.value })} placeholder="9" />
+                  <Input label="SGST %" type="number" step="any" value={printOptions.sgstPercent} onChange={e => setPrintOptions({ ...printOptions, sgstPercent: e.target.value })} placeholder="9" />
+                </div>
+              </>
+            )}
+            {(() => {
+              const tax = printTax(printSale, printOptions);
+              return (
+                <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                  <div className="bg-blue-50 rounded-xl p-2"><div className="font-black text-blue-700">{CURRENCY}{fmt(tax.taxable)}</div><div className="text-gray-400">Taxable</div></div>
+                  <div className="bg-green-50 rounded-xl p-2"><div className="font-black text-green-700">{CURRENCY}{fmt(tax.total)}</div><div className="text-gray-400">Bill Total</div></div>
+                  {printOptions.billType === "with_gst" && <div className="bg-amber-50 rounded-xl p-2"><div className="font-black text-amber-700">{CURRENCY}{fmt(tax.cgstAmount)}</div><div className="text-gray-400">CGST</div></div>}
+                  {printOptions.billType === "with_gst" && <div className="bg-purple-50 rounded-xl p-2"><div className="font-black text-purple-700">{CURRENCY}{fmt(tax.sgstAmount)}</div><div className="text-gray-400">SGST</div></div>}
+                </div>
+              );
+            })()}
+            <button onClick={printBill} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700">Print Bill</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── USERS ────────────────────────────────────────────────────────────────────
+function Users({ currentUser, allUsers, setAllUsers }) {
+  const [modal, setModal] = useState(false);
+  const emptyUserForm = { name:"", username:"", password:"", role:"user", mobile:"", vehicleName:"", vehicleNumber:"" };
+  const [form, setForm] = useState(emptyUserForm);
+  const [saveError, setSaveError] = useState("");
+
+  const save = async () => {
+    if (!form.name||!form.username||!form.password) { setSaveError("All fields required"); return; }
+    setSaveError("");
+    const user=await api("POST","/users",form);
+    if(user._id){setAllUsers(p=>[...p,user]);setModal(false);setForm(emptyUserForm);}
+    else setSaveError(user.message||"Failed to add user");
+  };
+
+  const toggleActive = async (u) => {
+    if(u._id===currentUser._id) return;
+    await api("PUT",`/users/${u._id}`,{active:!u.active});
+    setAllUsers(p=>p.map(x=>x._id===u._id?{...x,active:!x.active}:x));
+  };
+
+  const deleteUser = async (u) => {
+    if (u._id===currentUser._id) return;
+    if (!window.confirm(`Delete user ${u.name}? This login will be removed permanently.`)) return;
+    const result = await api("DELETE",`/users/${u._id}`);
+    if (result?.ok) setAllUsers(p=>p.filter(x=>x._id!==u._id));
+    else if (result?.message) window.alert(result.message);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-black text-gray-900">👥 Users</h2>
+        <button onClick={()=>setModal(true)} className="bg-amber-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-600 shadow">+ Add User</button>
+      </div>
+      <div className="space-y-2">
+        {allUsers.map(u=>(
+          <div key={u._id} className="bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between">
+            <div><div className="flex items-center gap-2"><span className="font-black">{u.name}</span><Badge color={u.role==="admin"?"purple":u.role==="supervisor"?"green":u.role==="driver"?"amber":"blue"}>{u.role}</Badge>{!u.active&&<Badge color="red">Inactive</Badge>}</div><div className="text-xs text-gray-400">@{u.username}{u.role==="driver"&&` | ${u.mobile || "-"} | ${u.vehicleNumber || "-"}`}</div></div>
+            {u._id!==currentUser._id&&<div className="flex gap-2"><button onClick={()=>toggleActive(u)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${u.active?"bg-amber-50 text-amber-700 border-amber-200":"bg-green-50 text-green-600 border-green-200"}`}>{u.active?"Deactivate":"Activate"}</button><button onClick={()=>deleteUser(u)} className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-red-50 text-red-600 border-red-200">Delete</button></div>}
+          </div>
+        ))}
+      </div>
+      {modal&&<Modal title="Add User" onClose={()=>{setModal(false);setSaveError("");}}>
+        <div className="space-y-3">
+          <Input label="Full Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} />
+          <Input label="Username" value={form.username} onChange={e=>setForm({...form,username:e.target.value})} />
+          <Input label="Password" type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} />
+          <Select label="Role" value={form.role} options={["admin","user","supervisor","driver"]} onChange={e=>setForm({...form,role:e.target.value})} />
+          {form.role==="driver"&&(
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Mobile Number" value={form.mobile} onChange={e=>setForm({...form,mobile:e.target.value})} />
+              <Input label="Vehicle Name" value={form.vehicleName} onChange={e=>setForm({...form,vehicleName:e.target.value})} />
+              <Input label="Vehicle Number" value={form.vehicleNumber} onChange={e=>setForm({...form,vehicleNumber:e.target.value})} />
+            </div>
+          )}
+          {saveError&&<div className="text-xs text-red-600 font-semibold bg-red-50 rounded-xl p-3">{saveError}</div>}
+          <button onClick={save} className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold">Add User</button>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── ADMIN SITE REPORT ────────────────────────────────────────────────────────
+function AdminSiteReport({ user, onEditReport }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [editReport, setEditReport] = useState(null);
+  const [editDayReports, setEditDayReports] = useState([]);
+  const [editSitePayment, setEditSitePayment] = useState(null);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      setSiteWorks(Array.isArray(sw)?sw:[]);
+      setDailyReports(Array.isArray(dr)?dr:[]);
+      setLoading(false);
+    });
+  },[]);
+
+  const getSiteReports = (site) => {
+    const siteName = String(site.customerName||"").trim().toLowerCase();
+    let r = dailyReports.filter(report=>{
+      if (String(report.siteId||"")===String(site._id||"")) return true;
+      return [report.siteName,report.runningSite,report.newSite]
+        .some(name=>String(name||"").trim().toLowerCase()===siteName);
+    });
+    if (filterFrom) r = r.filter(x=>x.date>=filterFrom);
+    if (filterTo) r = r.filter(x=>x.date<=filterTo);
+    return r.sort((a,b)=>b.date.localeCompare(a.date));
+  };
+
+  const siteDisplayStatus = (site, reports = getSiteReports(site)) =>
+    site.status==="completed" || site.completionApprovalStatus==="approved" || reports.some(report=>report.siteStatus==="completed")
+      ? "completed"
+      : (site.status||"running");
+
+  const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
+
+  useEffect(()=>{
+    if (!editReport?._id) return;
+    setEditDayReports(rows=>rows.map(row=>row._id===editReport._id?editReport:row));
+  },[editReport]);
+
+  const openDayReportEditor = (report, reports) => {
+    markReportsRead(reports.filter(row=>row.date===report.date).map(row=>row._id));
+    const clone = row=>({...row,workerEntries:(row.workerEntries||[]).map(item=>({...item})),payments:(row.payments||[]).map(item=>({...item}))});
+    const dayRows = reports.filter(row=>row.date===report.date).map(clone);
+    setEditDayReports(dayRows);
+    setEditReport(dayRows.find(row=>row._id===report._id)||clone(report));
+  };
+
+  const saveReportEdit = async () => {
+    if (!editReport?._id) return;
+    const audit = requestAuditReason("edit", "day's site report entries", user);
+    if (!audit) return;
+    const rowsToSave = editDayReports.map(row=>row._id===editReport._id?editReport:row);
+    const updatedRows = [];
+    for (const row of rowsToSave) {
+      const updated = await api("PUT", `/dailyreport/${row._id}`, { ...row, ...audit, addedBy:row.addedBy || user.name });
+      if (!updated?._id) return window.alert(updated?.message||"Unable to update this report entry");
+      updatedRows.push(updated);
+    }
+    if (updatedRows.length) {
+      const updatedById = new Map(updatedRows.map(row=>[row._id,row]));
+      setDailyReports(rows=>rows.map(row=>updatedById.get(row._id)||row));
+      setEditReport(null);
+      setEditDayReports([]);
+      api("GET","/sitework").then(rows=>setSiteWorks(Array.isArray(rows)?rows:[]));
+    }
+  };
+
+  const deleteReportEntry = async (report) => {
+    const audit = requestAuditReason("delete", "site report entry", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/dailyreport/${report._id}`, audit);
+    if (deleted?.ok) {
+      setDailyReports(rows=>rows.filter(row=>row._id!==report._id));
+      api("GET","/sitework").then(rows=>setSiteWorks(Array.isArray(rows)?rows:[]));
+    } else if (deleted?.message) window.alert(deleted.message);
+  };
+
+  const applyUpdatedSite = (updated) => {
+    if (!updated?._id) return false;
+    setSiteWorks(rows=>rows.map(row=>row._id===updated._id?{...row,...updated}:row));
+    setSelectedSite(site=>site?._id===updated._id?{...site,...updated}:site);
+    return true;
+  };
+
+  const saveSitePayment = async () => {
+    if (!selectedSite?._id || editSitePayment?.paymentIndex===undefined) return;
+    const audit = requestAuditReason("edit", "site payment", user);
+    if (!audit) return;
+    const updated = await api("PUT", `/sitework/${selectedSite._id}/payments/${editSitePayment.paymentIndex}`, { ...editSitePayment, ...audit });
+    if (applyUpdatedSite(updated)) setEditSitePayment(null);
+    else window.alert(updated?.message || "Unable to update this site payment");
+  };
+
+  const deleteSitePayment = async (payment) => {
+    if (!selectedSite?._id || payment?.paymentIndex===undefined) return;
+    const audit = requestAuditReason("delete", "site payment", user);
+    if (!audit) return;
+    const updated = await api("DELETE", `/sitework/${selectedSite._id}/payments/${payment.paymentIndex}`, audit);
+    if (!applyUpdatedSite(updated)) window.alert(updated?.message || "Unable to delete this site payment");
+  };
+
+  const updateEditWorker = (index, field, value) => setEditReport(report=>({ ...report, workerEntries:(report.workerEntries||[]).map((row,i)=>i===index?{...row,[field]:value}:row) }));
+  const updateEditPayment = (index, field, value) => setEditReport(report=>({ ...report, payments:(report.payments||[]).map((row,i)=>i===index?{...row,[field]:value}:row) }));
+
+  if (loading) return <Loader />;
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const selectedStatus = siteDisplayStatus(selectedSite, sr);
+    const groupedReports = mergeDailyReportsByDate(sr);
+    const siteReportDocs = dailyReports.filter(r=>r.siteName===selectedSite.customerName||r.siteId===selectedSite._id);
+    const allPayments = siteReportDocs.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const supervisorSitePayments = allPayments.filter(p=>p.type==="Client Payment Received"||p.type==="Site Payment Received").map(p=>({...p,source:"Supervisor Daily Report"}));
+    const dailySiteReceived = supervisorSitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const siteWorkPayments = directSitePaymentRows(selectedSite, dailySiteReceived);
+    const paymentHistory = [...siteWorkPayments, ...supervisorSitePayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const allWorkerDetails = siteReportDocs.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    // Also get worker entry payments (salary paid via worker section)
+    const allWorkerEntryPayments = siteReportDocs.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,paidTo:w.workerName,amount:+(w.paymentGiven||0),mode:"Cash",date:r.date,remarks:w.remarks||"",fromWorkerEntry:true})));
+    const allWorkerPayments = allWorkerEntryPayments;
+    const clientPayments = paymentHistory;
+    const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
+    const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
+    const otherPayments = allPayments.filter(p=>p.type==="Other Expense");
+    const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalWorkerExp = allWorkerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalMatExp = materialPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalEquipExp = equipmentPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalExpenses = totalWorkerExp + totalMatExp + totalEquipExp + otherPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const siteCost = +(selectedSite.totalCost||selectedSite.totalAmount||0);
+    const dynamicPending = Math.max(0, siteCost - totalReceived);
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const workerSummary = {
+      totalWorkers: new Set(allWorkerDetails.map(w=>w.workerName).filter(Boolean)).size,
+      totalArea: allWorkerDetails.reduce((a,w)=>a+(+(w.workArea)||0),0),
+      totalCost: allWorkerDetails.reduce((a,w)=>a+(+(w.amountEarned||w.salary)||0),0),
+      totalPaid: allWorkerDetails.reduce((a,w)=>a+(+(w.paymentGiven)||0),0),
+      totalPending: allWorkerDetails.reduce((a,w)=>a+(+(w.pending)||0),0),
+    };
+    const allMats = sr.filter(r=>r.materialsUnloaded);
+    const allExtra = sr.filter(r=>r.extraWorkDesc);
+    const allComplaints = sr.filter(r=>r.complaints);
+    const dateReport = selectedDate ? groupedReports.find(r=>r.date===selectedDate) : null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          <div className="flex items-center gap-2">
+            <Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge>
+            {selectedSite.completionApprovalStatus&&<Badge color={selectedSite.completionApprovalStatus==="approved"?"green":selectedSite.completionApprovalStatus==="rejected"?"red":"blue"}>{selectedSite.completionApprovalStatus.replaceAll('_',' ')}</Badge>}
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"} · By: {selectedSite.addedBy||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+          {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
+        </div>
+        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailySiteReceived} onEditPayment={setEditSitePayment} onDeletePayment={deleteSitePayment} />
+        {editSitePayment&&<Modal title="Edit Site Payment" onClose={()=>setEditSitePayment(null)}>
+          <div className="space-y-3 p-4 sm:p-5">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">This is a Site Work receipt. Saving it recalculates received and pending totals across reports and the dashboard.</div>
+            <Input label="Payment Date" type="date" value={String(editSitePayment.date||"").slice(0,10)} onChange={e=>setEditSitePayment(p=>({...p,date:e.target.value}))}/>
+            <Input label={`Amount (${CURRENCY})`} type="number" min="0" value={editSitePayment.amount??""} onChange={e=>setEditSitePayment(p=>({...p,amount:e.target.value}))}/>
+            <Select label="Payment Mode" value={editSitePayment.mode||editSitePayment.paymentMode||"Cash"} options={["Cash","UPI","Bank Transfer","Cheque","Other"]} onChange={e=>setEditSitePayment(p=>({...p,mode:e.target.value}))}/>
+            <Input label="Remarks" value={editSitePayment.remarks||""} onChange={e=>setEditSitePayment(p=>({...p,remarks:e.target.value}))} placeholder="Optional"/>
+            <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={()=>setEditSitePayment(null)} className="h-10 px-4 rounded-lg border border-slate-300 font-bold text-sm">Cancel</button><button type="button" onClick={saveSitePayment} className="h-10 px-4 rounded-lg bg-blue-600 text-white font-black text-sm">Save Payment</button></div>
+          </div>
+        </Modal>}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Site Cost</div></div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Amount Received</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dynamicPending)}</div><div className="text-xs text-gray-400">🔴 Pending Amount</div></div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-orange-700">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Total Expenses</div></div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalWorkerExp)}</div><div className="text-gray-400">👷 Workers</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(totalMatExp)}</div><div className="text-gray-400">🧱 Materials</div></div>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center"><div className="font-black text-purple-700">{CURRENCY}{fmt(totalEquipExp)}</div><div className="text-gray-400">🔧 Equipment</div></div>
+        </div>
+        {paymentHistory.length>0&&(
+          <SectionBox title="Payment History" icon="💳" color="blue">
+            {paymentHistory.map((p,i)=><div key={i} className="grid grid-cols-4 gap-2 text-xs py-1 border-b border-blue-100">
+              <span>{p.date||"—"}{p.time?` ${p.time}`:""}</span><span>{p.source}</span><span>{p.mode||p.paymentMode||"—"}</span><span className="text-right font-bold text-blue-700">{CURRENCY}{fmt(p.amount)}</span>
+            </div>)}
+          </SectionBox>
+        )}
+        {allWorkerDetails.length>0&&(
+          <SectionBox title="Worker Work Details" icon="👷" color="teal">
+            <div className="grid grid-cols-5 gap-1 text-xs">
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black">{workerSummary.totalWorkers}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black">{fmt(workerSummary.totalArea)}</div><div className="text-gray-400">Area</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(workerSummary.totalCost)}</div><div className="text-gray-400">Cost</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(workerSummary.totalPaid)}</div><div className="text-gray-400">Paid</div></div>
+              <div className="bg-white rounded-lg p-1 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(workerSummary.totalPending)}</div><div className="text-gray-400">Pending</div></div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[760px]">
+                <thead><tr className="text-gray-400"><th className="text-left p-1">Date</th><th className="text-left p-1">Worker</th><th className="text-left p-1">Category</th><th className="text-right p-1">Area</th><th className="p-1">Unit</th><th className="text-right p-1">Rate</th><th className="text-right p-1">Amount</th><th className="text-right p-1">Paid</th><th className="text-right p-1">Pending</th></tr></thead>
+                <tbody>{allWorkerDetails.map((w,i)=><tr key={i} className="border-t"><td className="p-1">{w.date}</td><td className="p-1 font-bold">{w.workerName}</td><td className="p-1">{w.workCategory||"—"}</td><td className="p-1 text-right">{fmt(w.workArea)}</td><td className="p-1">{w.unit||"—"}</td><td className="p-1 text-right">{CURRENCY}{fmt(w.rate)}</td><td className="p-1 text-right text-green-700">{CURRENCY}{fmt(w.amountEarned||w.salary)}</td><td className="p-1 text-right text-blue-700">{CURRENCY}{fmt(w.paymentGiven)}</td><td className="p-1 text-right text-red-600">{CURRENCY}{fmt(w.pending)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </SectionBox>
+        )}
+
+        <SectionBox title={`Submitted Report Entries (${sr.length})`} icon="RP" color="purple">
+          {sr.length===0?<div className="text-xs text-slate-400">No submitted reports</div>:<div className="space-y-2">{sr.map(report=><div key={report._id} className="rounded-lg border border-violet-100 bg-white p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><div className="font-black text-sm text-slate-900 inline-flex items-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>{report.date||"No date"} · {(report.entrySection||report.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</div><div className="text-xs text-slate-500">Submitted by {report.addedBy||"-"}{(report.workerEntries||[]).length?` · ${report.workerEntries.length} worker entry(s)`:""}{(report.payments||[]).length?` · ${report.payments.length} payment entry(s)`:""}</div></div><div className="flex gap-2"><button type="button" onClick={()=>{markReportsRead(report._id);onEditReport?.(report);}} className="h-9 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black inline-flex items-center gap-1.5"><Pencil size={14}/>Edit in Original Form</button><button type="button" onClick={()=>deleteReportEntry(report)} className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-black inline-flex items-center gap-1.5"><Trash2 size={14}/>Delete</button></div></div>)}</div>}
+        </SectionBox>
+
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+          </select>
+        </div>
+
+        {dateReport?(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate} Activity</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-green-50 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(dateReport.totalPayments||0)}</div><div className="text-gray-400">Payments</div></div>
+            </div>
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Worker Payments" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="bg-white rounded-xl px-3 py-2 mb-1 border border-teal-100">
+                    <div className="flex items-center justify-between">
+                      <span className="font-black text-sm">{w.workerName}</span>
+                      <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>
+                    </div>
+                    {w.workDone&&<div className="text-xs text-gray-500">Work: {w.workDone}</div>}
+                    <div className="flex justify-between text-xs mt-1">
+                      <span className="text-gray-500">Salary: {CURRENCY}{fmt(w.salary||0)}</span>
+                      {+(w.paymentGiven||0)>0&&<span className="text-green-700 font-black">✅ Paid: {CURRENCY}{fmt(w.paymentGiven)}</span>}
+                      {+(w.pending||0)>0&&<span className="text-red-600 font-bold">🔴 Pending: {CURRENCY}{fmt(w.pending)}</span>}
+                    </div>
+                  </div>
+                ))}
+                {(dateReport.workerEntries||[]).some(w=>+(w.paymentGiven||0)>0)&&(
+                  <div className="text-xs font-black text-green-700 text-right border-t border-teal-200 pt-1">
+                    Total Paid: {CURRENCY}{fmt((dateReport.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven||0)),0))}
+                  </div>
+                )}
+              </SectionBox>
+            )}
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
+              <SectionBox title="Other Payments" icon="💰" color="green">
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <div>
+                      <span className={`font-bold ${p.type==="Site Payment Received"||p.type==="Client Payment Received"?"text-green-700":"text-gray-700"}`}>{p.type}</span>
+                      <span className="text-gray-500 ml-1">→ {p.workerName||p.paidTo||p.receivedFrom||"—"} · {p.mode}</span>
+                    </div>
+                    <span className={`font-black ml-2 ${p.type==="Site Payment Received"||p.type==="Client Payment Received"?"text-green-700":"text-red-600"}`}>
+                      {p.type==="Site Payment Received"||p.type==="Client Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}
+                    </span>
+                  </div>
+                ))}
+                <div className="text-xs font-black text-green-700 text-right pt-1 border-t border-green-200">
+                  Net: {CURRENCY}{fmt((dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").reduce((a,p)=>a+(+(p.amount)||0),0))}
+                </div>
+              </SectionBox>
+            )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+          </div>
+        ):(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
+            {clientPayments.length>0&&<SectionBox title="Client Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date} · {p.paidTo||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
+            {allWorkerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{allWorkerPayments.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span><span className="font-bold">{p.workerName||p.paidTo||"—"}</span> · {p.date} · {p.mode}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-amber-700 text-right pt-1">Total: {CURRENCY}{fmt(allWorkerPayments.reduce((a,p)=>a+(+(p.amount)||0),0))}</div></SectionBox>}
+            {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
+            {allComplaints.length>0&&<SectionBox title="Complaints" icon="⚠️" color="red">{allComplaints.map((r,i)=><div key={i} className="text-xs py-1 border-b border-red-100"><div>{r.date} · {r.complaints}</div>{r.actionTaken&&<div className="text-gray-400">Action: {r.actionTaken}</div>}</div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted" />}
+            {groupedReports.map(r=><div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer"><div className="flex items-center justify-between"><div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft · By: {r.addedBy}</div></div><div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div><Badge color={selectedStatus==="completed"?"green":"amber"}>{selectedStatus}</Badge></div></div></div>)}
+          </div>
+        )}
+        {editReport&&<Modal title="Edit Site Report Entry" onClose={()=>setEditReport(null)} wide>
+          <div className="space-y-4 max-h-[72vh] overflow-y-auto pr-1">
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <div className="text-xs font-black text-violet-800 mb-2">All entries submitted on {editReport.date} ({editDayReports.length})</div>
+              <div className="flex flex-wrap gap-2">{editDayReports.map((row,index)=><button key={row._id} type="button" onClick={()=>setEditReport(row)} className={`px-3 py-2 rounded-lg border text-xs font-black ${row._id===editReport._id?"bg-violet-600 border-violet-700 text-white":"bg-white border-violet-200 text-violet-700"}`}>Entry {index+1}: {(row.entrySection||row.entrySections?.[0]||"site").replace(/^./,c=>c.toUpperCase())}</button>)}</div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input label="Date" type="date" value={editReport.date||""} onChange={e=>setEditReport({...editReport,date:e.target.value})}/>
+              <Input label="Site" value={editReport.siteName||selectedSite.customerName||""} readOnly/>
+              <Select label="Report Section" value={editReport.entrySection||"site"} options={[{value:"site",label:"Site"},{value:"workers",label:"Workers"},{value:"expenses",label:"Expenses"},{value:"office",label:"Office"}]} onChange={e=>setEditReport({...editReport,entrySection:e.target.value})}/>
+              <Select label="Site Status" value={editReport.siteStatus||selectedStatus} options={["pending","running","completed"]} onChange={e=>setEditReport({...editReport,siteStatus:e.target.value})}/>
+              <Input label="Submitted By" value={editReport.addedBy||""} readOnly/>
+            </div>
+            <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-3">
+              <div className="font-black text-sm text-blue-800">Report Details</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Input label="Completed Today (sqft)" type="number" value={editReport.completedToday||""} onChange={e=>setEditReport({...editReport,completedToday:e.target.value})}/>
+                <Input label="Total Completed (sqft)" type="number" value={editReport.totalCompleted||""} onChange={e=>setEditReport({...editReport,totalCompleted:e.target.value})}/>
+                <Input label="Interlock Type" value={editReport.interlockType||""} onChange={e=>setEditReport({...editReport,interlockType:e.target.value})}/>
+                <Input label="Equipment" value={editReport.equipment||""} onChange={e=>setEditReport({...editReport,equipment:e.target.value})}/>
+                <Input label="Materials Unloaded" value={editReport.materialsUnloaded||""} onChange={e=>setEditReport({...editReport,materialsUnloaded:e.target.value})}/>
+                <Input label="Material Quantity" value={editReport.materialQty||""} onChange={e=>setEditReport({...editReport,materialQty:e.target.value})}/>
+                <Input label="Supplier" value={editReport.supplierName||""} onChange={e=>setEditReport({...editReport,supplierName:e.target.value})}/>
+                <Input label="Material Remarks" value={editReport.materialRemarks||""} onChange={e=>setEditReport({...editReport,materialRemarks:e.target.value})}/>
+                <Input label="Extra Work" value={editReport.extraWorkDesc||""} onChange={e=>setEditReport({...editReport,extraWorkDesc:e.target.value})}/>
+                <Input label="Extra Work Quantity" value={editReport.extraWorkQty||""} onChange={e=>setEditReport({...editReport,extraWorkQty:e.target.value})}/>
+                <Input label={`Extra Work Cost (${CURRENCY})`} type="number" value={editReport.extraWorkCost||""} onChange={e=>setEditReport({...editReport,extraWorkCost:e.target.value})}/>
+                <Input label="Extra Work Remarks" value={editReport.extraWorkRemarks||""} onChange={e=>setEditReport({...editReport,extraWorkRemarks:e.target.value})}/>
+              </div>
+              <Textarea label="Day Notes" value={editReport.dayNotes||""} onChange={e=>setEditReport({...editReport,dayNotes:e.target.value})}/>
+              <Textarea label="Complaints" value={editReport.complaints||""} onChange={e=>setEditReport({...editReport,complaints:e.target.value})}/>
+              <Textarea label="Action Taken" value={editReport.actionTaken||""} onChange={e=>setEditReport({...editReport,actionTaken:e.target.value})}/>
+            </div>
+            {(editReport.workerEntries||[]).map((worker,index)=><div key={`worker-${index}`} className="rounded-xl border border-teal-100 bg-teal-50/50 p-3"><div className="font-black text-sm text-teal-800 mb-2">Worker Entry {index+1}</div><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input label="Worker" value={worker.workerName||""} onChange={e=>updateEditWorker(index,"workerName",e.target.value)}/><Select label="Attendance" value={worker.attendance||"present"} options={["present","absent"]} onChange={e=>updateEditWorker(index,"attendance",e.target.value)}/><Input label="Duty Area" value={worker.dutyArea||""} onChange={e=>updateEditWorker(index,"dutyArea",e.target.value)}/><Input label="Work Done" value={worker.workDone||""} onChange={e=>updateEditWorker(index,"workDone",e.target.value)}/><Input label="Category" value={worker.workCategory||""} onChange={e=>updateEditWorker(index,"workCategory",e.target.value)}/><Input label="Area" type="number" value={worker.workArea||""} onChange={e=>updateEditWorker(index,"workArea",e.target.value)}/><Input label="Unit" value={worker.unit||""} onChange={e=>updateEditWorker(index,"unit",e.target.value)}/><Input label="Rate" type="number" value={worker.rate||""} onChange={e=>updateEditWorker(index,"rate",e.target.value)}/><Input label="Earned / Salary" type="number" value={worker.amountEarned||worker.salary||""} onChange={e=>updateEditWorker(index,"amountEarned",e.target.value)}/><Input label="Payment Given" type="number" value={worker.paymentGiven||""} onChange={e=>updateEditWorker(index,"paymentGiven",e.target.value)}/><Input label="Loading Charge" type="number" value={worker.loadingCharge||""} onChange={e=>updateEditWorker(index,"loadingCharge",e.target.value)}/><Input label="Unloading Charge" type="number" value={worker.unloadingCharge||""} onChange={e=>updateEditWorker(index,"unloadingCharge",e.target.value)}/><Input label="Payment Mode" value={worker.paymentMode||""} onChange={e=>updateEditWorker(index,"paymentMode",e.target.value)}/><Input label="Remarks" value={worker.remarks||""} onChange={e=>updateEditWorker(index,"remarks",e.target.value)}/>
+            </div></div>)}
+            {(editReport.payments||[]).map((payment,index)=><div key={`payment-${index}`} className="rounded-xl border border-amber-100 bg-amber-50/50 p-3"><div className="font-black text-sm text-amber-800 mb-2">Payment / Expense {index+1}</div><div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input label="Type" value={payment.type||""} onChange={e=>updateEditPayment(index,"type",e.target.value)}/><Input label="Amount" type="number" value={payment.amount||""} onChange={e=>updateEditPayment(index,"amount",e.target.value)}/><Input label="Pending" type="number" value={payment.pending||""} onChange={e=>updateEditPayment(index,"pending",e.target.value)}/><Input label="Mode" value={payment.mode||""} onChange={e=>updateEditPayment(index,"mode",e.target.value)}/><Input label="Worker / Paid To" value={payment.workerName||payment.paidTo||""} onChange={e=>updateEditPayment(index,payment.workerName!==undefined?"workerName":"paidTo",e.target.value)}/><Input label="Received From" value={payment.receivedFrom||""} onChange={e=>updateEditPayment(index,"receivedFrom",e.target.value)}/><Input label="Material" value={payment.materialName||""} onChange={e=>updateEditPayment(index,"materialName",e.target.value)}/><Input label="Supplier" value={payment.supplierName||""} onChange={e=>updateEditPayment(index,"supplierName",e.target.value)}/><Input label="Equipment" value={payment.equipmentName||""} onChange={e=>updateEditPayment(index,"equipmentName",e.target.value)}/><Input label="Expense Name" value={payment.expenseName||""} onChange={e=>updateEditPayment(index,"expenseName",e.target.value)}/><Input label="Remarks" value={payment.remarks||""} onChange={e=>updateEditPayment(index,"remarks",e.target.value)}/>
+            </div></div>)}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="font-black text-sm text-slate-700 mb-2">Legacy / Additional Details</div><div className="grid grid-cols-1 sm:grid-cols-2 gap-2"><Input label="New Site" value={editReport.newSite||""} onChange={e=>setEditReport({...editReport,newSite:e.target.value})}/><Input label="Running Site" value={editReport.runningSite||""} onChange={e=>setEditReport({...editReport,runningSite:e.target.value})}/><Textarea label="Worker Details" value={editReport.workersDetail||""} onChange={e=>setEditReport({...editReport,workersDetail:e.target.value})}/><Textarea label="Material Supply" value={editReport.materialSupply||""} onChange={e=>setEditReport({...editReport,materialSupply:e.target.value})}/><Textarea label="Legacy Day Note" value={editReport.dayNote||""} onChange={e=>setEditReport({...editReport,dayNote:e.target.value})}/><Textarea label="Legacy Expenses" value={editReport.expenses||""} onChange={e=>setEditReport({...editReport,expenses:e.target.value})}/></div></div>
+            <div className="flex justify-end gap-2 sticky bottom-0 bg-white pt-3 border-t"><button type="button" className="px-4 py-2 rounded-lg border font-bold text-sm" onClick={()=>{setEditReport(null);setEditDayReports([]);}}>Cancel</button><button type="button" className="px-4 py-2 rounded-lg bg-blue-600 text-white font-black text-sm" onClick={saveReportEdit}>Save All Day Entries</button></div>
+          </div>
+        </Modal>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">🏗️ Site Reports</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search site name or location..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="grid grid-cols-2 gap-2">
+        <Input label="From Date" type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} />
+        <Input label="To Date" type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>siteDisplayStatus(s)!=="completed").length}</div><div className="text-xs text-gray-400">Running</div></div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center"><div className="font-black text-emerald-700">{siteWorks.filter(s=>siteDisplayStatus(s)==="completed").length}</div><div className="text-xs text-gray-400">Completed</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.totalCost||s.totalAmount)||0),0))}</div><div className="text-xs text-gray-400">Total</div></div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-2 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+(+(s.pendingAmount)||0),0))}</div><div className="text-xs text-gray-400">Pending</div></div>
+      </div>
+      <div className="space-y-3">
+        {filteredSites.length===0&&<EmptyState icon="🏗️" text="No sites found" />}
+        {filteredSites.map(s=>{
+          const sr=getSiteReports(s);
+          const displayStatus=siteDisplayStatus(s,sr);
+          const received=dailyReports.filter(r=>r.siteName===s.customerName||r.siteId===s._id).flatMap(r=>(r.payments||[]).filter(p=>p.type==="Client Payment Received")).reduce((a,p)=>a+(+(p.amount)||0),0);
+          return(
+            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-start justify-between">
+                <div><div className="font-black text-gray-900 inline-flex items-center gap-1">{s.customerName}<UnreadReportIcon unread={sr.some(report=>isUnread(report._id))}/></div><div className="text-xs text-gray-400">📍 {s.siteLocation||"—"} · By: {s.addedBy||"—"}</div><div className="text-xs text-gray-400">📅 {s.startDate||"—"} · {sr.length} reports</div></div>
+                <div className="text-right"><Badge color={displayStatus==="completed"?"green":"amber"}>{displayStatus}</Badge><div className="text-xs text-green-600 font-bold mt-1">Received: {CURRENCY}{fmt(received)}</div><div className="text-xs text-red-500">Pending: {CURRENCY}{fmt(+(s.pendingAmount||0))}</div><div className="mt-2 text-xs font-black text-blue-700">Open & Manage Reports →</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── WORKER REPORTS (Production / Site / Overall) ───────────────────────────
+function AdminWorkerReport({ user, initialTab }) {
+  const [workers, setWorkers] = useState([]);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const isSupervisorLedger = user?.role === "supervisor";
+  const [tab, setTab] = useState(isSupervisorLedger ? "site" : (initialTab || "production"));
+  useEffect(()=>{ if (!isSupervisorLedger && initialTab) setTab(initialTab); },[initialTab,isSupervisorLedger]);
+  const [siteSubTab, setSiteSubTab] = useState("daily");
+  const [report, setReport] = useState(null);
+  const [overall, setOverall] = useState(null);
+  const [addModal, setAddModal] = useState(false);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+  const [workerPayModal, setWorkerPayModal] = useState(null);
+  const [workerPayForm, setWorkerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState({ fromDate: "", toDate: "", customDate: "", datePreset: "", item: "", color: "", site: "" });
+  const emptySiteWorkerEntry = { date: today(), workerName: "", siteName: "", siteId: "", workCategory: "Fitting", workArea: "", unit: "Sqft", rate: "", paymentGiven: "", paymentMode: "Cash", remarks: "" };
+  const [siteWorkerEntry, setSiteWorkerEntry] = useState(emptySiteWorkerEntry);
+
+  useEffect(() => {
+    Promise.all([api("GET", "/workers"), api("GET", "/sitework"), api("GET", "/dailyreport")]).then(([w, sw, dr]) => {
+      setWorkers(Array.isArray(w) ? w : []);
+      setSiteWorks(Array.isArray(sw) ? sw : []);
+      setDailyReports(Array.isArray(dr) ? dr : []);
+      setLoading(false);
+    });
+  }, []);
+
+  const permittedSiteWorks = isSupervisorLedger
+    ? siteWorks.filter(s => s.addedBy === user?.name)
+    : siteWorks;
+  const supervisorReportWorkerNames = isSupervisorLedger
+    ? dailyReports.filter(r => r.addedBy === user?.name).flatMap(r => (r.workerEntries || []).map(w => w.workerName).filter(Boolean))
+    : [];
+  const permittedWorkerNames = new Set([...permittedSiteWorks.flatMap(s => s.selectedWorkers || []), ...supervisorReportWorkerNames]);
+  const visibleWorkers = workers.filter(w => {
+    if (workerTypeOf(w) !== (tab === "production" ? "Production Worker" : "Site Worker")) return false;
+    if (!isActiveWorker(w)) return false;
+    if (isSupervisorLedger && !permittedWorkerNames.has(w.name)) return false;
+    if (search && !w.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const queryParams = () => {
+    const q = [];
+    if (filters.datePreset === "today") { const r = salesDateRange("today"); q.push(`fromDate=${r.from}`, `toDate=${r.to}`); }
+    else if (filters.datePreset === "month") {
+      const now = new Date();
+      q.push(`fromDate=${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, `toDate=${today()}`);
+    } else if (filters.datePreset === "custom" && filters.customDate) q.push(`date=${filters.customDate}`);
+    else {
+      if (filters.fromDate) q.push(`fromDate=${filters.fromDate}`);
+      if (filters.toDate) q.push(`toDate=${filters.toDate}`);
+    }
+    if (filters.item) q.push(`item=${encodeURIComponent(filters.item)}`);
+    if (filters.color) q.push(`color=${encodeURIComponent(filters.color)}`);
+    if (filters.site) q.push(`site=${encodeURIComponent(filters.site)}`);
+    return q.length ? `&${q.join("&")}` : "";
+  };
+
+  const loadReport = async (name) => {
+    if (!name) return;
+    setSelectedWorker(name);
+    setSelectedSite(null);
+    const accessParams = `&role=${encodeURIComponent(user?.role || "")}&userName=${encodeURIComponent(user?.name || "")}`;
+    if (tab === "production") {
+      const data = await api("GET", `/workers/reports/production?name=${encodeURIComponent(name)}${queryParams()}`);
+      setReport(data);
+      setOverall(null);
+    } else if (tab === "site") {
+      const data = await api("GET", `/workers/reports/site?name=${encodeURIComponent(name)}${queryParams()}${accessParams}`);
+      setReport(data);
+      setOverall(null);
+    } else {
+      const data = await api("GET", `/workers/reports/overall?name=${encodeURIComponent(name)}${queryParams()}`);
+      setOverall(data);
+      setReport(null);
+    }
+  };
+
+  const makeWorkerPayment = async () => {
+    if (!workerPayModal?.name) return;
+    const amount = +(workerPayForm.amount || 0);
+    if (amount <= 0) return;
+    const source = tab === "site" ? "worker-ledger-site" : "worker-ledger-production";
+    const saved = await api("POST", "/workerpayments", {
+      workerName: workerPayModal.name,
+      amount,
+      date: workerPayForm.date,
+      mode: workerPayForm.mode,
+      note: workerPayForm.note || `${tab === "site" ? "Site" : "Production"} worker wage payment`,
+      addedBy: user.name,
+      source
+    });
+    if (saved?._id) {
+      const name = workerPayModal.name;
+      setWorkerPayModal(null);
+      setWorkerPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      loadReport(name);
+    } else if (saved?.message) {
+      window.alert(saved.message);
+    }
+  };
+
+  const saveSiteWorkerEntry = async () => {
+    if (!siteWorkerEntry.date || !siteWorkerEntry.workerName || !siteWorkerEntry.siteName || !siteWorkerEntry.workCategory) return;
+    const normalize = (v) => String(v || "").trim().toLowerCase();
+    const site = siteWorks.find(s => s.customerName === siteWorkerEntry.siteName || s._id === siteWorkerEntry.siteId);
+    const existingReport = dailyReports.find(r =>
+      r.date === siteWorkerEntry.date &&
+      (normalize(r.siteName) === normalize(siteWorkerEntry.siteName) || (siteWorkerEntry.siteId && r.siteId === siteWorkerEntry.siteId))
+    );
+    const hasDuplicate = (existingReport?.workerEntries || []).some(w =>
+      normalize(w.workerName) === normalize(siteWorkerEntry.workerName) &&
+      normalize(w.workCategory) === normalize(siteWorkerEntry.workCategory)
+    );
+    if (hasDuplicate) {
+      window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
+      return;
+    }
+
+    const area = parseFloat(siteWorkerEntry.workArea) || 0;
+    const rate = parseFloat(siteWorkerEntry.rate) || 0;
+    const earned = area * rate;
+    const paid = parseFloat(siteWorkerEntry.paymentGiven) || 0;
+    const entry = {
+      workerName: siteWorkerEntry.workerName,
+      attendance: "present",
+      dutyArea: "",
+      workDone: siteWorkerEntry.workCategory,
+      workCategory: siteWorkerEntry.workCategory,
+      workArea: area,
+      unit: siteWorkerEntry.unit,
+      rate,
+      salary: String(earned),
+      amountEarned: earned,
+      paymentGiven: paid,
+      paymentMode: siteWorkerEntry.paymentMode,
+      pending: String(Math.max(0, earned - paid)),
+      remarks: siteWorkerEntry.remarks
+    };
+
+    const paymentsTotal = (rows, payments) =>
+      (payments || []).filter(p => p.type !== "Worker Payment").reduce((a, p) => a + (+(p.amount) || 0), 0) +
+      (rows || []).reduce((a, w) => a + (+(w.paymentGiven) || 0), 0);
+
+    let saved;
+    if (existingReport?._id) {
+      const audit = requestAuditReason("edit", "daily report", user);
+      if (!audit) return;
+      const workerEntries = [...(existingReport.workerEntries || []), entry];
+      const payments = (existingReport.payments || []).filter(p => p.type !== "Worker Payment");
+      saved = await api("PUT", `/dailyreport/${existingReport._id}`, {
+        ...existingReport,
+        payments,
+        workerEntries,
+        totalPayments: paymentsTotal(workerEntries, payments),
+        ...audit
+      });
+      if (saved?._id) setDailyReports(p => p.map(r => r._id === saved._id ? saved : r));
+    } else {
+      const body = {
+        date: siteWorkerEntry.date,
+        siteName: siteWorkerEntry.siteName,
+        siteId: site?._id || siteWorkerEntry.siteId || "",
+        siteStatus: site?.status || "running",
+        interlockType: site?.interlockType || "",
+        workerEntries: [entry],
+        payments: [],
+        totalPayments: paid,
+        totalReceived: 0,
+        addedBy: user?.name || "Office"
+      };
+      saved = await api("POST", "/dailyreport", body);
+      if (saved?._id) setDailyReports(p => [saved, ...p]);
+    }
+
+    if (saved?._id) {
+      setAddModal(false);
+      setSiteWorkerEntry(emptySiteWorkerEntry);
+      if (selectedWorker) loadReport(selectedWorker);
+    } else if (saved?.message) {
+      window.alert(saved.message);
+    }
+  };
+
+  if (loading) return <Loader />;
+
+  const FilterBar = () => (
+    <div className="space-y-2">
+      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search worker name..." className="w-full border rounded-xl px-3 py-2.5 text-sm bg-white" onKeyDown={e => e.key === "Enter" && loadReport(search)} />
+      <div className="flex flex-wrap gap-1.5">
+        {[{ id: "", label: "All" }, { id: "today", label: "Today" }, { id: "month", label: "This Month" }, { id: "custom", label: "Custom" }, { id: "range", label: "Range" }].map(d => (
+          <button key={d.id} onClick={() => setFilters({ ...filters, datePreset: d.id })} className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${filters.datePreset === d.id ? "bg-amber-500 text-white" : "bg-gray-50"}`}>{d.label}</button>
+        ))}
+      </div>
+      {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
+      {filters.datePreset === "range" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />
+          <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />
+        </div>
+      )}
+      {tab === "production" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Item Name" value={filters.item} onChange={e => setFilters({ ...filters, item: e.target.value })} placeholder="Filter by item" />
+          <Input label="Color" value={filters.color} onChange={e => setFilters({ ...filters, color: e.target.value })} placeholder="Filter by color" />
+        </div>
+      )}
+      {tab === "site" && (
+        <div className="grid grid-cols-2 gap-2">
+          <Input label="Site Name" value={filters.site} onChange={e => setFilters({ ...filters, site: e.target.value })} placeholder="Filter by site" />
+          <Input label="Work Category" value={filters.item} onChange={e => setFilters({ ...filters, item: e.target.value })} placeholder="Filter by category" />
+        </div>
+      )}
+    </div>
+  );
+
+  if (selectedSite && report?.sites) {
+    const site = report.sites.find(s => s.siteName === selectedSite);
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedSite(null)} className="text-amber-600 font-bold text-sm">← Back to Site List</button>
+        <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-4">
+          <div>
+            <h3 className="font-black text-xl text-gray-800">🏗️ Site: {site?.siteName}</h3>
+            <div className="text-xs text-gray-400 mt-1">Work Category: <span className="font-semibold text-gray-700">{site?.workCategory}</span></div>
+          </div>
+          
+          <div className="grid grid-cols-4 gap-2 text-center text-xs">
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-2.5">
+              <div className="font-black text-blue-700">{site?.totalArea || 0} {site?.unit || "Sqft"}</div>
+              <div className="text-gray-400 mt-0.5">Total Area</div>
+            </div>
+            <div className="bg-green-50 border border-green-100 rounded-xl p-2.5">
+              <div className="font-black text-green-700">{CURRENCY}{fmt(site?.totalEarned || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Total Earned</div>
+            </div>
+            <div className="bg-teal-50 border border-teal-100 rounded-xl p-2.5">
+              <div className="font-black text-teal-700">{CURRENCY}{fmt(site?.totalPaid || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Total Paid</div>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-xl p-2.5">
+              <div className="font-black text-red-600">{CURRENCY}{fmt(site?.pending || 0)}</div>
+              <div className="text-gray-400 mt-0.5">Pending</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+          <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📅 Chronological Entries & Pending Logic</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500">
+                  <th className="p-2 text-left">Date</th>
+                  <th className="p-2 text-left">Work Category</th>
+                  <th className="p-2 text-right">Area</th>
+                  <th className="p-2">Unit</th>
+                  <th className="p-2 text-right">Rate</th>
+                  <th className="p-2 text-right">Earned</th>
+                  <th className="p-2 text-right">Paid</th>
+                  <th className="p-2 text-right">Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(site?.entries || []).map((h, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="p-2">{h.date}</td>
+                    <td className="p-2">{h.workCategory || "—"}</td>
+                    <td className="p-2 text-right">{h.workArea || 0}</td>
+                    <td className="p-2">{h.unit || "—"}</td>
+                    <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                    <td className="p-2 text-right font-semibold text-green-700">{CURRENCY}{fmt(h.amountEarned)}</td>
+                    <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                    <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedWorker && (report || overall)) {
+    const filteredDailyHistory = (report?.history || []).filter(h => {
+      if (h.isExtraPayment) return false;
+      if (filters.site && !(h.siteName || "").toLowerCase().includes(filters.site.toLowerCase())) return false;
+      if (filters.item && !(h.workCategory || "").toLowerCase().includes(filters.item.toLowerCase())) return false;
+      return true;
+    });
+    const workerPaymentHistory = (report?.history || []).filter(h => +(h.paid ?? h.paymentGiven ?? 0) > 0);
+    const dailyAreaSum = filteredDailyHistory.reduce((sum, h) => sum + (+(h.workArea) || 0), 0);
+    const dailyEarnedSum = filteredDailyHistory.reduce((sum, h) => sum + (h.amountEarned || 0), 0);
+    const dailyPaidSum = filteredDailyHistory.reduce((sum, h) => sum + (h.paymentGiven || 0), 0);
+    const dailyPendingSum = Math.max(0, dailyEarnedSum - dailyPaidSum);
+
+    return (
+      <div className="space-y-4">
+        <button onClick={() => { setSelectedWorker(null); setReport(null); setOverall(null); }} className="text-amber-600 font-bold text-sm">← Back</button>
+        <FilterBar />
+        <button onClick={() => loadReport(selectedWorker)} className="w-full bg-amber-500 text-white py-2 rounded-xl text-sm font-bold">Apply Filters</button>
+
+        {tab === "production" && report?.worker && (
+          <>
+            <div className="bg-white rounded-2xl border p-4"><div className="font-black text-xl">🏭 {report.worker.name}</div><div className="text-xs text-gray-400">Production Workers Report</div></div>
+            <div className="grid grid-cols-2 gap-2">
+              <StatCard label="Total Production Qty" value={fmt(report.worker.totalQuantity)} icon="📦" color="blue" sub={`${fmt(report.worker.totalSqft || (report.history || []).reduce((a,h)=>a+itemSqft(h),0))} sqft`} />
+              <StatCard label="Production Earnings" value={`${CURRENCY}${fmt(report.worker.totalEarnings)}`} icon="💰" color="green" />
+              <StatCard label="Payments Given" value={`${CURRENCY}${fmt(report.worker.totalPaid)}`} icon="✅" color="teal" />
+              <StatCard label="Pending" value={`${CURRENCY}${fmt(report.worker.totalPending)}`} icon="⏳" color="red" />
+            </div>
+            {isAdminLike(user.role) && +(report.worker.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setWorkerPayModal(report.worker);
+                  setWorkerPayForm({ amount: String(report.worker.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Make Worker Payment
+              </button>
+            )}
+            {(report.itemSummary || []).length > 0 && (
+              <SectionBox title="Production Summary" icon="📦" color="blue">
+                {report.itemSummary.map((it, i) => <div key={i} className="flex justify-between text-sm py-1 border-b"><span className="font-bold">{it.item}</span><span>{qtyWithSqft(it)}</span></div>)}
+              </SectionBox>
+            )}
+            <div className="overflow-x-auto">
+              <div className="text-xs font-bold mb-1">Production History</div>
+              <table className="w-full text-xs">
+                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2">Date</th><th className="p-2">Item</th><th className="p-2">Color</th><th className="p-2 text-right">Qty / Sqft</th><th className="p-2">Unit</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Paid</th></tr></thead>
+                <tbody>
+                  {(report.history || []).filter(h => !h.isExtraPayment).map((h, i) => (
+                    <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-semibold">{h.item}</td><td className="p-2">{h.color || "—"}</td><td className="p-2 text-right">{qtyWithSqft(h)}</td><td className="p-2">{h.unit}</td><td className="p-2 text-right">{CURRENCY}{fmt(+(h.rate) || 0)}</td><td className="p-2 text-right font-bold text-green-700">{CURRENCY}{fmt(+(h.amount) || 0)}</td><td className="p-2 text-right text-teal-700">{CURRENCY}{fmt(+(h.paid) || 0)}{+(h.paid || 0) > 0 && <div className="text-[10px] text-gray-400">By {h.paymentGivenBy || "-"}</div>}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {tab === "site" && report?.worker && (
+          <>
+            <div className="bg-white rounded-2xl border p-4">
+              <div className="font-black text-xl">🏗️ {report.worker.name}</div>
+              <div className="text-xs text-gray-400 font-semibold uppercase tracking-wider text-amber-600 mt-1">Site Worker Ledger</div>
+            </div>
+
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {[{ id: "daily", label: "Daily View" }, { id: "monthly", label: "Monthly View" }, { id: "sitewise", label: "Site-wise View" }, { id: "total", label: "Overall View" }].map(sub => (
+                <button key={sub.id} onClick={() => { setSiteSubTab(sub.id); setSelectedSite(null); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${siteSubTab === sub.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}>{sub.label}</button>
+              ))}
+            </div>
+
+            {isAdminLike(user.role) && +(report.worker.totalPending || 0) > 0 && (
+              <button
+                onClick={() => {
+                  setWorkerPayModal(report.worker);
+                  setWorkerPayForm({ amount: String(report.worker.totalPending || ""), date: today(), mode: "Cash", note: "" });
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+              >
+                Make Worker Payment
+              </button>
+            )}
+
+            {siteSubTab === "daily" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-blue-700">{fmt(dailyAreaSum)}</div>
+                    <div className="text-xs text-gray-400">Total Area</div>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-green-700">{CURRENCY}{fmt(dailyEarnedSum)}</div>
+                    <div className="text-xs text-gray-400">Total Earned</div>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(dailyPaidSum)}</div>
+                    <div className="text-xs text-gray-400">Total Paid</div>
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                    <div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dailyPendingSum)}</div>
+                    <div className="text-xs text-gray-400">Daily Pending</div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                  <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📋 Daily History</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 text-gray-500">
+                          <th className="p-2 text-left">Date</th>
+                          <th className="p-2 text-left">Worker</th>
+                          <th className="p-2 text-left">Site Name</th>
+                          <th className="p-2 text-left">Category</th>
+                          <th className="p-2 text-right">Area</th>
+                          <th className="p-2">Unit</th>
+                          <th className="p-2 text-right">Rate</th>
+                          <th className="p-2 text-right">Amount</th>
+                          <th className="p-2 text-right">Payment Given</th>
+                          <th className="p-2 text-right">Pending</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDailyHistory.length === 0 && (
+                          <tr><td colSpan="10" className="p-4 text-center text-gray-400">No daily entries found</td></tr>
+                        )}
+                        {filteredDailyHistory.map((h, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="p-2">{h.date}</td>
+                            <td className="p-2 font-semibold">{h.workerName || report.worker.name}</td>
+                            <td className="p-2 font-bold">{h.siteName}</td>
+                            <td className="p-2">{h.workCategory || "—"}</td>
+                            <td className="p-2 text-right">{h.workArea || 0}</td>
+                            <td className="p-2">{h.unit || "—"}</td>
+                            <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                            <td className="p-2 text-right text-green-700 font-semibold">{CURRENCY}{fmt(h.amountEarned)}</td>
+                            <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}{+(h.paymentGiven || 0) > 0 && <div className="text-[10px] text-gray-400">By {h.paymentGivenBy || "-"}</div>}</td>
+                            <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {siteSubTab === "monthly" && (() => {
+              const monthMap = filteredDailyHistory.reduce((acc,h)=>{
+                const m = (h.date||"").slice(0,7) || "Unknown";
+                if (!acc[m]) acc[m] = { days:new Set(), area:0, earned:0, paid:0 };
+                acc[m].days.add(h.date);
+                acc[m].area += +(h.workArea)||0;
+                acc[m].earned += +(h.amountEarned)||0;
+                acc[m].paid += +(h.paymentGiven)||0;
+                return acc;
+              },{});
+              return <div className="space-y-3">
+                {Object.entries(monthMap).length===0&&<EmptyState icon="📅" text="No monthly entries found" />}
+                {Object.entries(monthMap).sort((a,b)=>b[0].localeCompare(a[0])).map(([month,m])=>(
+                  <div key={month} className="bg-white rounded-2xl border p-4 shadow-sm">
+                    <div className="font-black mb-2">{month}</div>
+                    <div className="grid grid-cols-5 gap-1 text-xs">
+                      <div className="bg-gray-50 rounded-lg p-1.5 text-center"><div className="font-black">{m.days.size}</div><div className="text-gray-400">Days</div></div>
+                      <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{fmt(m.area)}</div><div className="text-gray-400">Sqft</div></div>
+                      <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(m.earned)}</div><div className="text-gray-400">Earnings</div></div>
+                      <div className="bg-teal-50 rounded-lg p-1.5 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(m.paid)}</div><div className="text-gray-400">Payments</div></div>
+                      <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(Math.max(0,m.earned-m.paid))}</div><div className="text-gray-400">Pending</div></div>
+                    </div>
+                  </div>
+                ))}
+              </div>;
+            })()}
+
+            {siteSubTab === "total" && (
+              <div className="bg-white rounded-2xl border p-5 shadow-sm space-y-4">
+                <h3 className="font-black text-gray-800 text-base border-b pb-2">👷 Worker Overall Summary</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>Worker Name: <span className="font-bold text-gray-900">{report.worker.name}</span></div>
+                  <div>Total Sites Worked: <span className="font-bold text-gray-900">{report.worker.totalSites}</span></div>
+                  <div>Total Area Completed: <span className="font-bold text-gray-900">{report.worker.totalAreaCompleted || 0} Sqft</span></div>
+                  <div>Total Amount Earned: <span className="font-bold text-green-700">{CURRENCY}{fmt(report.worker.totalEarnings)}</span></div>
+                  <div>Total Payments Given: <span className="font-bold text-blue-700">{CURRENCY}{fmt(report.worker.totalPaid)}</span></div>
+                  <div className="col-span-2 bg-red-50 border border-red-200 rounded-xl p-3 flex justify-between font-black text-red-700">
+                    <span>Total Pending Amount:</span>
+                    <span>{CURRENCY}{fmt(report.worker.totalPending)}</span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto border-t pt-3">
+                  <div className="text-xs font-bold text-gray-500 mb-2">Full Daily History</div>
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Site</th><th className="p-2 text-left">Category</th><th className="p-2 text-right">Area</th><th className="p-2 text-right">Rate</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th></tr></thead>
+                    <tbody>
+                      {filteredDailyHistory.length === 0 && <tr><td colSpan="8" className="p-4 text-center text-gray-400">No history found</td></tr>}
+                      {filteredDailyHistory.map((h, i) => (
+                        <tr key={i} className="border-t"><td className="p-2">{h.date}</td><td className="p-2 font-bold">{h.siteName}</td><td className="p-2">{h.workCategory || "—"}</td><td className="p-2 text-right">{h.workArea || 0}</td><td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td><td className="p-2 text-right text-green-700">{CURRENCY}{fmt(h.amountEarned)}</td><td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {siteSubTab === "sitewise" && (
+              <div className="space-y-3">
+                <div className="text-xs font-bold text-gray-400">Site-wise Summary (click a site to view details)</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500">
+                        <th className="p-2 text-left">Site Name</th>
+                        <th className="p-2 text-left">Worker Name</th>
+                        <th className="p-2 text-left">Category</th>
+                        <th className="p-2 text-right">Total Area</th>
+                        <th className="p-2 text-right">Total Earned</th>
+                        <th className="p-2 text-right">Total Paid</th>
+                        <th className="p-2 text-right">Pending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.sites || []).length === 0 && (
+                        <tr><td colSpan="7" className="p-4 text-center text-gray-400">No site data found</td></tr>
+                      )}
+                      {(report.sites || []).map((s, i) => (
+                        <tr key={i} onClick={() => setSelectedSite(s.siteName)} className="border-t hover:bg-amber-50 cursor-pointer transition-all">
+                          <td className="p-2 font-bold text-blue-600 underline">{s.siteName}</td>
+                          <td className="p-2 font-semibold">{report.worker.name}</td>
+                          <td className="p-2">{s.workCategory || "—"}</td>
+                          <td className="p-2 text-right">{s.totalArea || 0}</td>
+                          <td className="p-2 text-right font-semibold text-green-700">{CURRENCY}{fmt(s.totalEarned)}</td>
+                          <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(s.totalPaid)}</td>
+                          <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(s.pending)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {siteSubTab === "datewise" && (
+              <div className="bg-white rounded-2xl border p-4 shadow-sm space-y-2">
+                <h4 className="font-bold text-sm text-gray-700 border-b pb-1">📅 Date-wise View</h4>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500">
+                        <th className="p-2 text-left">Date</th>
+                        <th className="p-2 text-left">Site Name</th>
+                        <th className="p-2 text-left">Work Category</th>
+                        <th className="p-2 text-right">Area</th>
+                        <th className="p-2">Unit</th>
+                        <th className="p-2 text-right">Rate</th>
+                        <th className="p-2 text-right">Amount Earned</th>
+                        <th className="p-2 text-right">Payment Given</th>
+                        <th className="p-2 text-right">Pending Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.history || []).length === 0 && (
+                        <tr><td colSpan="9" className="p-4 text-center text-gray-400">No entries found</td></tr>
+                      )}
+                      {(report.history || []).map((h, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-2">{h.date}</td>
+                          <td className="p-2 font-bold">{h.siteName}</td>
+                          <td className="p-2">{h.workCategory || "—"}</td>
+                          <td className="p-2 text-right">{h.workArea || 0}</td>
+                          <td className="p-2">{h.unit || "—"}</td>
+                          <td className="p-2 text-right">{CURRENCY}{fmt(h.rate || 0)}</td>
+                          <td className="p-2 text-right text-green-700 font-semibold">{CURRENCY}{fmt(h.amountEarned)}</td>
+                          <td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(h.paymentGiven)}</td>
+                          <td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(h.balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {report && workerPaymentHistory.length > 0 && (
+          <SectionBox title="Salary Received / Payment History" icon="PAY" color="green">
+            <div className="space-y-2">
+              {workerPaymentHistory.map((payment, index) => {
+                const amount = payment.paid ?? payment.paymentGiven ?? 0;
+                const source = payment.isExtraPayment
+                  ? "Office salary payment"
+                  : [payment.siteName, payment.item || payment.workCategory].filter(Boolean).join(" / ") || "Work entry payment";
+                return (
+                  <div key={payment._id || `${payment.date}-${index}`} className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-green-50 border border-green-100 rounded-lg p-3 text-xs">
+                    <div><div className="text-gray-400">Date</div><div className="font-bold">{payment.date || "-"}</div></div>
+                    <div><div className="text-gray-400">Amount Received</div><div className="font-black text-green-700">{CURRENCY}{fmt(amount)}</div></div>
+                    <div><div className="text-gray-400">Payment Mode</div><div className="font-bold">{payment.paymentMode || "Cash"}</div></div>
+                    <div><div className="text-gray-400">Given By</div><div className="font-black text-blue-700">{payment.paymentGivenBy || payment.addedBy || "-"}</div></div>
+                    <div className="col-span-2 sm:col-span-1"><div className="text-gray-400">Details</div><div className="font-semibold">{payment.note || payment.remarks || source}</div></div>
+                  </div>
+                );
+              })}
+            </div>
+          </SectionBox>
+        )}
+
+        {tab === "overall" && overall && (
+          <>
+            <div className="bg-white rounded-2xl border p-4"><div className="font-black text-xl">👷 {overall.worker.name}</div><div className="text-xs text-gray-400">Combined Worker Account</div></div>
+            <div className="grid grid-cols-2 gap-2">
+              <StatCard label="Production Earnings" value={`${CURRENCY}${fmt(overall.production.totalEarnings)}`} icon="🏭" color="green" sub={`Pending ${CURRENCY}${fmt(overall.production.totalPending)}`} />
+              <StatCard label="Site Work Earnings" value={`${CURRENCY}${fmt(overall.site.totalEarnings)}`} icon="🏗️" color="blue" sub={`Pending ${CURRENCY}${fmt(overall.site.totalPending)}`} />
+              <StatCard label="Grand Total Earnings" value={`${CURRENCY}${fmt(overall.grandTotal.totalEarnings)}`} icon="💰" color="purple" />
+              <StatCard label="Grand Total Pending" value={`${CURRENCY}${fmt(overall.grandTotal.totalPending)}`} icon="⏳" color="red" sub={`Paid ${CURRENCY}${fmt(overall.grandTotal.totalPaid)}`} />
+            </div>
+          </>
+        )}
+        {workerPayModal && (
+          <Modal title="Make Worker Payment" onClose={() => setWorkerPayModal(null)}>
+            <div className="space-y-3">
+              <div className="bg-red-50 rounded-xl p-3 text-sm">
+                <div className="font-bold">{workerPayModal.name || "-"}</div>
+                <div>Pending: <b>{CURRENCY}{fmt(workerPayModal.totalPending || 0)}</b></div>
+              </div>
+              <Input label="Payment Date" type="date" value={workerPayForm.date} onChange={e => setWorkerPayForm({ ...workerPayForm, date: e.target.value })} />
+              <Input label={`Amount (${CURRENCY})`} type="number" value={workerPayForm.amount} onChange={e => setWorkerPayForm({ ...workerPayForm, amount: e.target.value })} />
+              <Select label="Mode" value={workerPayForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setWorkerPayForm({ ...workerPayForm, mode: e.target.value })} />
+              <Input label="Note" value={workerPayForm.note} onChange={e => setWorkerPayForm({ ...workerPayForm, note: e.target.value })} />
+              <button onClick={makeWorkerPayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button>
+            </div>
+          </Modal>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-xl font-black text-gray-900">{isSupervisorLedger ? "Supervisor Worker Ledger" : "Worker Reports"}</h2>
+      </div>
+      {!isSupervisorLedger && <div className="flex gap-1 overflow-x-auto pb-1">
+        {[{ id: "production", label: "🏭 Production Worker Ledger" }, { id: "site", label: "👷 Site Worker Ledger" }].map(t => (
+          <button key={t.id} onClick={() => { setTab(t.id); setReport(null); setOverall(null); setSelectedWorker(null); setSiteSubTab("daily"); }} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold ${tab === t.id ? "bg-amber-500 text-white" : "bg-white border text-gray-600"}`}>{t.label}</button>
+        ))}
+      </div>}
+      <FilterBar />
+      <div className="space-y-2">
+        {visibleWorkers.length === 0 && <EmptyState icon="ðŸ‘·" text="No workers found" />}
+        {visibleWorkers.map(w => (
+          <div key={w._id} onClick={() => loadReport(w.name)} className="bg-white rounded-2xl border p-4 cursor-pointer hover:border-amber-300">
+            <div className="flex justify-between"><div className="font-black">{w.name}</div><span className="text-gray-300">›</span></div>
+            <div className="text-xs text-gray-400">{w.role} · {w.paymentType || "day"}</div>
+          </div>
+        ))}
+      </div>
+      {false&&addModal&&(
+        <Modal title="Add Worker Entry" onClose={()=>setAddModal(false)}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Date" type="date" value={siteWorkerEntry.date} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,date:e.target.value})} />
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
+                <input list="wr-worker-list" value={siteWorkerEntry.workerName} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" />
+                <datalist id="wr-worker-list">{workers.map(w=><option key={w._id} value={w.name}/>)}</datalist>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Site Name</label>
+              <input list="wr-site-list" value={siteWorkerEntry.siteName} onChange={e=>{
+                const site = siteWorks.find(s=>s.customerName===e.target.value);
+                setSiteWorkerEntry({...siteWorkerEntry,siteName:e.target.value,siteId:site?._id||""});
+              }} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50" />
+              <datalist id="wr-site-list">{siteWorks.map(s=><option key={s._id} value={s.customerName}/>)}</datalist>
+            </div>
+            <Select label="Work Category" value={siteWorkerEntry.workCategory} options={["Fitting","Polish","Levelling","Cutting","Loading","Unloading","Other"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workCategory:e.target.value})} />
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Area" type="number" value={siteWorkerEntry.workArea} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,workArea:e.target.value})} />
+              <Select label="Unit" value={siteWorkerEntry.unit} options={["Sqft","Sqm","Piece","Meter"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,unit:e.target.value})} />
+              <Input label="Rate" type="number" value={siteWorkerEntry.rate} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,rate:e.target.value})} />
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center text-sm font-black text-amber-800">
+              Total Amount: {CURRENCY}{fmt((parseFloat(siteWorkerEntry.workArea)||0)*(parseFloat(siteWorkerEntry.rate)||0))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input label="Payment Given" type="number" value={siteWorkerEntry.paymentGiven} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,paymentGiven:e.target.value})} />
+              <Select label="Payment Mode" value={siteWorkerEntry.paymentMode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,paymentMode:e.target.value})} />
+            </div>
+            <Input label="Remarks" value={siteWorkerEntry.remarks} onChange={e=>setSiteWorkerEntry({...siteWorkerEntry,remarks:e.target.value})} />
+            <button onClick={saveSiteWorkerEntry} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">Save Worker Entry</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── REPORTS ──────────────────────────────────────────────────────────────────
+
+// ─── SUPERVISOR SITE REPORT ───────────────────────────────────────────────────
+function SupervisorSiteReport({ user }) {
+  const { isUnread, markReportsRead } = useReportReadState(user);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSite, setSelectedSite] = useState(null);
+  const [search, setSearch] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  useEffect(()=>{
+    Promise.all([api("GET","/sitework"),api("GET","/dailyreport")]).then(([sw,dr])=>{
+      const ownSites = (Array.isArray(sw)?sw:[]).filter(s=>String(s.addedBy||"").trim().toLowerCase()===String(user.name||"").trim().toLowerCase());
+      const ownSiteIds = new Set(ownSites.map(s=>String(s._id)));
+      const ownSiteNames = new Set(ownSites.map(s=>String(s.customerName||"").trim().toLowerCase()));
+      setSiteWorks(ownSites);
+      setDailyReports((Array.isArray(dr)?dr:[]).filter(r=>r.siteId
+        ? ownSiteIds.has(String(r.siteId))
+        : ownSiteNames.has(String(r.siteName||"").trim().toLowerCase())));
+      setLoading(false);
+    });
+  },[]);
+
+  const getSiteReports = (site) =>
+    dailyReports.filter(r=>r.siteId
+      ? String(r.siteId)===String(site._id)
+      : String(r.siteName||"").trim().toLowerCase()===String(site.customerName||"").trim().toLowerCase())
+      .sort((a,b)=>b.date.localeCompare(a.date));
+
+  const filteredSites = siteWorks.filter(s=>!search||(s.customerName||"").toLowerCase().includes(search.toLowerCase())||(s.siteLocation||"").toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <Loader />;
+
+  if (selectedSite) {
+    const sr = getSiteReports(selectedSite);
+    const groupedReports = mergeDailyReportsByDate(sr);
+    const allPayments = sr.flatMap(r=>(r.payments||[]).filter(p=>p.type!=="Worker Payment").map(p=>({...p,date:r.date})));
+    const dailyClientPayments = allPayments.filter(p=>p.type==="Site Payment Received");
+    const siteWorkPayments = directSitePaymentRows(selectedSite, dailyClientPayments.reduce((a,p)=>a+(+(p.amount)||0),0));
+    const clientPayments = [...siteWorkPayments, ...dailyClientPayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    const workerPayments = sr.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,amount:+(w.paymentGiven||0),mode:w.paymentMode||"Cash",date:r.date,remarks:w.remarks||""})));
+    const materialPayments = allPayments.filter(p=>p.type==="Material Payment");
+    const equipmentPayments = allPayments.filter(p=>p.type==="Equipment Payment");
+    const totalReceived = clientPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalWorkerExp = workerPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalMatExp = materialPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalEquipExp = equipmentPayments.reduce((a,p)=>a+(+(p.amount)||0),0);
+    const totalExpenses = totalWorkerExp+totalMatExp+totalEquipExp;
+    const siteCost = +(selectedSite.totalCost||selectedSite.totalAmount||0);
+    const dynamicPending = Math.max(0, siteCost - totalReceived);
+    const totalComp = sr.reduce((a,r)=>a+(+(r.completedToday||0)),0);
+    const allMats = sr.filter(r=>r.materialsUnloaded);
+    const allExtra = sr.filter(r=>r.extraWorkDesc);
+    const dateReport = selectedDate?groupedReports.find(r=>r.date===selectedDate):null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={()=>{setSelectedSite(null);setSelectedDate(null);}} className="text-amber-600 font-bold text-sm">← Back</button>
+          <div className="flex items-center gap-2">
+            <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status}</Badge>
+            {selectedSite.status!=="completed"&&!['pending_user','pending_admin'].includes(selectedSite.completionApprovalStatus)&&(
+              <button onClick={async()=>{
+                const updated=await api("POST",`/sitework/${selectedSite._id}/completion/submit`,{role:user.role,name:user.name});
+                if(!updated?._id)return window.alert(updated?.message||"Unable to submit completion");
+                setSiteWorks(p=>p.map(s=>s._id===updated._id?updated:s));
+                setSelectedSite(updated);
+                window.alert("Site completion submitted. User approval is pending.");
+              }} className="bg-green-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-green-700">Submit Complete</button>
+            )}
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-4">
+          <div className="font-black text-xl">{selectedSite.customerName}</div>
+          <div className="text-xs text-gray-400">📍 {selectedSite.siteLocation||"—"}</div>
+          <div className="text-xs text-gray-400">🧱 {selectedSite.interlockType||"—"} · {selectedSite.workSize||"—"} sqft</div>
+          {selectedSite.endDate&&<div className="text-xs text-green-600 font-semibold">✅ Completed: {selectedSite.endDate}</div>}
+        </div>
+        <SiteWorkDetailsPanel site={selectedSite} dailyReceived={dailyClientPayments.reduce((a,p)=>a+(+(p.amount)||0),0)} />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-xs text-gray-400">Total Cost</div></div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-blue-700">{CURRENCY}{fmt(totalReceived)}</div><div className="text-xs text-gray-400">✅ Received</div></div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-red-600">{CURRENCY}{fmt(dynamicPending)}</div><div className="text-xs text-gray-400">🔴 Pending</div></div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center"><div className="text-lg font-black text-orange-700">{CURRENCY}{fmt(totalExpenses)}</div><div className="text-xs text-gray-400">Expenses</div></div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{CURRENCY}{fmt(totalWorkerExp)}</div><div className="text-gray-400">👷 Workers</div></div>
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{CURRENCY}{fmt(totalMatExp)}</div><div className="text-gray-400">🧱 Materials</div></div>
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center"><div className="font-black text-purple-700">{CURRENCY}{fmt(totalEquipExp)}</div><div className="text-gray-400">🔧 Equipment</div></div>
+        </div>
+        <div className="bg-white rounded-2xl border shadow-sm p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2">📅 View by Date</div>
+          <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50" value={selectedDate||""} onChange={e=>{const date=e.target.value||null;if(date)markReportsRead(sr.filter(row=>row.date===date).map(row=>row._id));setSelectedDate(date);}}>
+            <option value="">All Dates ({groupedReports.length} days / {sr.length} reports)</option>
+            {groupedReports.map(r=><option key={r.date} value={r.date}>{r.date} - {r.reportCount} report(s), {r.workersCount||0} workers, {r.completedToday||0} sqft</option>)}
+          </select>
+        </div>
+        {dateReport?(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-600 uppercase">📅 {selectedDate} Activity</div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{dateReport.workersCount||0}</div><div className="text-gray-400">Workers</div></div>
+              <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{dateReport.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
+              <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(dateReport.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
+            </div>
+            {dateReport.dayNotes&&<SectionBox title="Day Notes" icon="📝" color="gray"><div className="text-sm">{dateReport.dayNotes}</div></SectionBox>}
+            {(dateReport.workerEntries||[]).length>0&&(
+              <SectionBox title="Workers" icon="👷" color="teal">
+                {dateReport.workerEntries.map((w,i)=>(
+                  <div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100">
+                    <span><span className="font-bold">{w.workerName}</span> · <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge></span>
+                    <span>{w.paymentGiven?`Paid: ${CURRENCY}${fmt(w.paymentGiven)}`:""}{+w.pending>0?` | Pending: ${CURRENCY}${fmt(w.pending)}`:""}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {dateReport.materialsUnloaded&&<SectionBox title="Materials" icon="🧱" color="teal"><div className="text-sm">{dateReport.materialsUnloaded} · {dateReport.materialQty}</div><div className="text-xs text-gray-400">Supplier: {dateReport.supplierName||"—"}</div></SectionBox>}
+            {dateReport.extraWorkDesc&&<SectionBox title="Extra Work" icon="➕" color="orange"><div className="text-sm">{dateReport.extraWorkDesc} · {dateReport.extraWorkQty}</div><div className="text-xs font-bold text-orange-700">{CURRENCY}{fmt(dateReport.extraWorkCost||0)}</div></SectionBox>}
+            {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").length>0&&(
+              <SectionBox title="Payments" icon="💰" color="green">
+                {(dateReport.payments||[]).filter(p=>p.type!=="Worker Payment").map((p,i)=>(
+                  <div key={i} className="flex justify-between text-xs bg-white rounded-lg px-3 py-2 mb-1 border border-green-100">
+                    <span><span className={`font-bold ${p.type==="Site Payment Received"?"text-blue-700":"text-gray-700"}`}>{p.type}</span>{p.workerName?` → ${p.workerName}`:""}{p.receivedFrom?` from ${p.receivedFrom}`:""} · {p.mode}</span>
+                    <span className={`font-black ${p.type==="Site Payment Received"?"text-blue-700":"text-red-600"}`}>{p.type==="Site Payment Received"?"+":"-"}{CURRENCY}{fmt(p.amount)}</span>
+                  </div>
+                ))}
+              </SectionBox>
+            )}
+            {dateReport.complaints&&<SectionBox title="Complaints" icon="⚠️" color="red"><div className="text-sm">{dateReport.complaints}</div>{dateReport.actionTaken&&<div className="text-xs text-gray-400 mt-1">Action: {dateReport.actionTaken}</div>}</SectionBox>}
+          </div>
+        ):(
+          <div className="space-y-3">
+            <div className="text-xs font-black text-gray-500 uppercase">📊 Full Site History</div>
+            {clientPayments.length>0&&<SectionBox title="Site Payments Received" icon="💚" color="green">{clientPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-green-100"><span>{p.date}{p.time?` ${p.time}`:""} · {p.receivedFrom||p.receivedBy||"—"} · {p.mode}</span><span className="font-black text-green-700">+{CURRENCY}{fmt(p.amount)}</span></div>)}<div className="text-xs font-black text-green-700 text-right pt-1">Total: {CURRENCY}{fmt(totalReceived)}</div></SectionBox>}
+            {workerPayments.length>0&&<SectionBox title="Worker Payments" icon="👷" color="amber">{workerPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-amber-100"><span>{p.date} · {p.workerName||p.paidTo||"—"}</span><span className="font-black text-amber-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {materialPayments.length>0&&<SectionBox title="Material Payments" icon="🧱" color="teal">{materialPayments.map((p,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-teal-100"><span>{p.date} · {p.materialName||p.paidTo||"—"}</span><span className="font-black text-teal-700">{CURRENCY}{fmt(p.amount)}</span></div>)}</SectionBox>}
+            {allMats.length>0&&<SectionBox title="Material History" icon="📦" color="blue">{allMats.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-blue-100"><span>{r.date} · {r.materialsUnloaded} ({r.materialQty})</span><span className="text-gray-400">{r.supplierName||"—"}</span></div>)}</SectionBox>}
+            {allExtra.length>0&&<SectionBox title="Extra Work" icon="➕" color="orange">{allExtra.map((r,i)=><div key={i} className="text-xs flex justify-between py-1 border-b border-orange-100"><span>{r.date} · {r.extraWorkDesc}</span><span className="font-black text-orange-700">{CURRENCY}{fmt(r.extraWorkCost||0)}</span></div>)}</SectionBox>}
+            <div className="text-xs font-black text-gray-500 uppercase">Daily Reports ({groupedReports.length} days / {sr.length} reports)</div>
+            {groupedReports.length===0&&<EmptyState icon="Report" text="No reports submitted yet" />}
+            {groupedReports.map(r=>(
+              <div key={r.date} onClick={()=>{markReportsRead(sr.filter(row=>row.date===r.date).map(row=>row._id));setSelectedDate(r.date);}} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 mb-2 cursor-pointer hover:border-amber-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div><div className="font-black inline-flex items-center gap-1">📅 {r.date}<UnreadReportIcon unread={sr.some(row=>row.date===r.date&&isUnread(row._id))}/></div><div className="text-xs text-gray-400">{r.workersCount||0} workers · {r.completedToday||0} sqft</div></div>
+                  <div className="text-right">
+                    {+(r.totalReceived||0)>0&&<div className="font-black text-blue-700 text-xs">+{CURRENCY}{fmt(r.totalReceived)}</div>}
+                    <div className="font-black text-green-700">{CURRENCY}{fmt(r.totalPayments||0)}</div>
+                    <Badge color={selectedSite.status==="completed"?"green":"amber"}>{selectedSite.status||"running"}</Badge>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-black text-gray-900">📊 My Site Reports</h2>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search site..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400" />
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center"><div className="font-black text-amber-700">{siteWorks.filter(s=>s.status==="running").length}</div><div className="text-gray-400">Running</div></div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-2 text-center"><div className="font-black text-green-700">{siteWorks.filter(s=>s.status==="completed").length}</div><div className="text-gray-400">Completed</div></div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(siteWorks.reduce((a,s)=>a+directSitePaymentRows(s, getSiteReports(s).reduce((x,r)=>x+(+(r.totalReceived||0)),0)).reduce((x,p)=>x+(+(p.amount)||0),0),0)+dailyReports.reduce((a,r)=>a+(+(r.totalReceived||0)),0))}</div><div className="text-gray-400">Total Rcvd</div></div>
+      </div>
+      <div className="space-y-3">
+        {filteredSites.length===0&&<EmptyState icon="📊" text="No sites found" />}
+        {filteredSites.map(s=>{
+          const sr = getSiteReports(s);
+          const dailyReceived = sr.reduce((a,r)=>a+(+(r.totalReceived||0)),0);
+          const received = dailyReceived + directSitePaymentRows(s, dailyReceived).reduce((a,p)=>a+(+(p.amount)||0),0);
+          const siteCost = +(s.totalCost||s.totalAmount||0);
+          const pending = Math.max(0, siteCost - received);
+          return (
+            <div key={s._id} onClick={()=>setSelectedSite(s)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-amber-300 transition-all">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-black text-gray-900 inline-flex items-center gap-1">{s.customerName}<UnreadReportIcon unread={sr.some(row=>isUnread(row._id))}/></div>
+                  <div className="text-xs text-gray-400">📍 {s.siteLocation||"—"}</div>
+                  <div className="text-xs text-gray-400">{sr.length} daily reports</div>
+                </div>
+                <Badge color={s.status==="completed"?"green":s.status==="running"?"amber":"gray"}>{s.status}</Badge>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                <div className="bg-green-50 rounded-lg p-1.5 text-center"><div className="font-black text-green-700">{CURRENCY}{fmt(siteCost)}</div><div className="text-gray-400">Cost</div></div>
+                <div className="bg-blue-50 rounded-lg p-1.5 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(received)}</div><div className="text-gray-400">Received</div></div>
+                <div className="bg-red-50 rounded-lg p-1.5 text-center"><div className="font-black text-red-600">{CURRENCY}{fmt(pending)}</div><div className="text-gray-400">Pending</div></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+// ─── SUPERVISOR SITE REPORT ───────────────────────────────────────────────────
+
+
+// ─── SUPERVISOR SITE REPORT VIEW ─────────────────────────────────────────────
+
+
+function OfficeDailyReport({ user }) {
+  const [selectedDate, setSelectedDate] = useState(today());
+  const emptyOfficeReport = { totals: {}, sales: [], purchases: [], supervisorCashReceipts: [], driverReports: [], driverExpenses: [], productionEntries: [], productionItemSummary: [], productionPayments: [] };
+  const [report, setReport] = useState(emptyOfficeReport);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    const params = new URLSearchParams({ date: selectedDate, role: effectiveRoleOf(user.role), name: user.name });
+    api("GET", `/office-daily-report?${params.toString()}`).then(data => {
+      if (!active) return;
+      setReport(data?.totals ? data : emptyOfficeReport);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedDate, user.role, user.name]);
+
+  const total = report.totals || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const detailText = entry => {
+    const inchSized = entry?.productType === "interlock" || entry?.productType === "hollowbrick";
+    return [
+      entry.category,
+      entry.shape,
+      entry.color,
+      entry.size && inchSized ? `${entry.size} inch` : entry.size,
+      entry.thickness && inchSized ? `${entry.thickness} inch thick` : entry.thickness
+    ].filter(Boolean).join(", ");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Office Daily Report</h2>
+          <div className="text-xs text-gray-400">Daily sales, purchases, driver expenses, production, and worker payments</div>
+        </div>
+        <div className="bg-white border rounded-2xl shadow-sm p-3">
+          <Input label="Report Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
+        </div>
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" sub={`${total.salesCount||0} bills`} />
+            <StatCard label="Cash Received" value={money(total.cashReceived)} icon="R" color="green" sub={`Pending ${money(total.salesPending)}`} />
+            <StatCard label="Supervisor Cash" value={money(total.supervisorCashReceived)} icon="SC" color="teal" sub={`${(report.supervisorCashReceipts||[]).length} receipts`} />
+            <StatCard label="Purchase Paid" value={money(total.purchasePaid)} icon="P" color="amber" sub={`Total ${money(total.purchaseAmount)}`} />
+            <StatCard label="Production Paid" value={money(total.productionPayments)} icon="W" color="purple" sub={`Pending ${money(total.productionPending)}`} />
+            <StatCard label="Production Qty" value={fmt(total.productionQuantity)} icon="Q" color="teal" sub={`${fmt(total.productionSqft || 0)} sqft | ${total.productionCount||0} entries`} />
+            <StatCard label="Production Value" value={money(total.productionEarnings)} icon="V" color="green" />
+            <StatCard label="Driver Expenses" value={money(total.driverExpenseTotal)} icon="DE" color="amber" sub={`${(report.driverExpenses||[]).length} entries`} />
+            <StatCard label="Fuel Liters" value={fmt(total.driverFuelLiters || 0)} icon="L" color="blue" />
+            <StatCard label="KM Run" value={fmt(total.driverKmRun || 0)} icon="KM" color="purple" />
+            <StatCard label="Total Cash Paid" value={money(total.cashPaid)} icon="-" color="red" />
+            <StatCard label="Net Cash" value={money(total.netCash)} icon="=" color={+(total.netCash)>=0?"green":"red"} />
+          </div>
+
+          <SectionBox title="Cash Received From Supervisors" icon="SC" color="teal">
+            {(report.supervisorCashReceipts||[]).length===0 ? <div className="text-xs text-gray-400">No supervisor cash received for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Supervisor</th><th>Received By</th><th>Mode</th><th>Note</th><th className="text-right">Amount</th></tr></thead>
+                  <tbody>{report.supervisorCashReceipts.map(r=>(
+                    <tr key={r._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{r.supervisorName||"-"}</td>
+                      <td>{r.receivedBy||"-"}</td>
+                      <td>{r.paymentMode||"-"}</td>
+                      <td>{r.note||"-"}</td>
+                      <td className="text-right text-green-700 font-bold">{money(r.amount)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Production Item-wise Total" icon="P" color="teal">
+            {(report.productionItemSummary||[]).length===0 ? <div className="text-xs text-gray-400">No production for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Item</th><th>Category / Color</th><th className="text-right">Qty / Sqft</th><th>Unit</th><th className="text-right">Amount</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+                  <tbody>{report.productionItemSummary.map((p,i)=>(
+                    <tr key={i} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.item}</td>
+                      <td>{[p.category,p.color].filter(Boolean).join(" / ") || "-"}</td>
+                      <td className="text-right font-bold">{qtyWithSqft(p)}</td>
+                      <td>{p.unit}</td>
+                      <td className="text-right">{money(p.amount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.paid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.pending)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Sales Details" icon="S" color="green">
+            {(report.sales||[]).length===0 ? <div className="text-xs text-gray-400">No sales for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Invoice</th><th>Customer</th><th>Product</th><th className="text-right">Qty</th><th className="text-right">Total</th><th className="text-right">Received</th><th className="text-right">Pending</th></tr></thead>
+                  <tbody>{report.sales.map(s=>(
+                    <tr key={s._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{s.invoiceNumber||"-"}</td>
+                      <td>{s.customer||"-"}</td>
+                      <td><div className="font-semibold">{s.product||s.interlockDetails||"-"}</div><div className="text-gray-400">{detailText(s)}</div></td>
+                      <td className="text-right">{s.productType==="hollowbrick" ? `${fmt(s.quantity)} numbers` : <>{fmt(s.quantity)} pcs<br />{fmt(+(s.sqftQty||0) || (+(s.quantity||0) * +(s.sqftPerPiece||0)))} sqft</>}</td>
+                      <td className="text-right">{money(s.total)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(s.amountPaid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(s.amountPending)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Purchase Details" icon="P" color="amber">
+            {(report.purchases||[]).length===0 ? <div className="text-xs text-gray-400">No purchases for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Supplier</th><th>Material</th><th className="text-right">Qty</th><th className="text-right">Total</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Vehicle</th></tr></thead>
+                  <tbody>{report.purchases.map(p=>(
+                    <tr key={p._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.supplierName||"-"}</td>
+                      <td>{p.itemName||p.itemType||"-"}</td>
+                      <td className="text-right">{fmt(p.quantity)} {p.unit||""}</td>
+                      <td className="text-right">{money(p.totalAmount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.amountPaid)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.amountPending)}</td>
+                      <td>{[p.vehicleNumber,p.driverName].filter(Boolean).join(" / ") || "-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Driver Expenses" icon="DE" color="amber">
+            {(report.driverExpenses||[]).length===0 ? <div className="text-xs text-gray-400">No driver expenses for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Driver</th><th>Vehicle</th><th>Expense</th><th className="text-right">Liters</th><th className="text-right">KM</th><th>Trip / Item</th><th>Route</th><th className="text-right">Amount</th><th>Note</th></tr></thead>
+                  <tbody>{report.driverExpenses.map((e,i)=>(
+                    <tr key={`${e.reportId}-${i}`} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{e.driverName||"-"}</td>
+                      <td>{[e.vehicleName,e.vehicleNumber].filter(Boolean).join(" / ") || "-"}</td>
+                      <td>{e.category||"Other"}</td>
+                      <td className="text-right">{+(e.liters || 0) > 0 ? fmt(e.liters) : "-"}</td>
+                      <td className="text-right">{+(e.vehicleKm?.totalKm || 0) > 0 ? fmt(e.vehicleKm.totalKm) : "-"}</td>
+                      <td>{[e.tripCategory,e.itemName].filter(Boolean).join(" / ") || "-"}</td>
+                      <td>{[e.loadingFrom,e.unloadedLocation].filter(Boolean).join(" -> ") || "-"}</td>
+                      <td className="text-right text-red-600 font-bold">{money(e.amount)}</td>
+                      <td>{e.note||"-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Production Worker Payments" icon="W" color="purple">
+            {(report.productionPayments||[]).length===0 ? <div className="text-xs text-gray-400">No production worker payments for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th className="text-right">Produced / Sqft</th><th className="text-right">Earned</th><th className="text-right">Paid</th><th className="text-right">Pending</th><th>Remarks</th></tr></thead>
+                  <tbody>{report.productionPayments.map((p,i)=>(
+                    <tr key={i} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{p.workerName||"-"}</td>
+                      <td>{p.itemName||p.category||"-"}</td>
+                      <td className="text-right">{qtyWithSqft(p)}</td>
+                      <td className="text-right">{money(p.earned)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(p.amount)}</td>
+                      <td className="text-right text-red-600 font-bold">{money(p.pending)}</td>
+                      <td>{p.remarks||"-"}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+
+          <SectionBox title="Production Entry Details" icon="D" color="blue">
+            {(report.productionEntries||[]).length===0 ? <div className="text-xs text-gray-400">No production entries for this day</div> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Worker</th><th>Item</th><th>Color</th><th className="text-right">Qty / Sqft</th><th className="text-right">Rate</th><th className="text-right">Amount</th><th className="text-right">Paid</th></tr></thead>
+                  <tbody>{report.productionEntries.map(e=>(
+                    <tr key={e._id} className="border-b border-gray-100">
+                      <td className="py-2 font-bold">{e.workerName||"-"}</td>
+                      <td>{e.itemName||e.category||"-"}</td>
+                      <td>{e.color||"-"}</td>
+                      <td className="text-right">{qtyWithSqft(e)}</td>
+                      <td className="text-right">{money(e.productionRate)}</td>
+                      <td className="text-right">{money(e.totalAmount)}</td>
+                      <td className="text-right text-green-700 font-bold">{money(e.paymentGiven)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SectionBox>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuotationDocument({ quotation }) {
+  const q = quotation || {};
+  const withGst = q.billType === "with_gst";
+  const taxLabel = q.taxType === "igst" ? "IGST" : "CGST / SGST";
+  const signature = q.signature?.dataUrl;
+  const formatSignedAt = (value) => value ? new Date(value).toLocaleString("en-IN") : "";
+  return <div className="quotation-document bg-white text-slate-950 border border-slate-900 shadow-sm print:shadow-none print:border-black">
+    <div className="h-3 bg-amber-400 print:bg-amber-400" />
+    <div className="text-center italic text-xs py-2 border-b border-slate-900">Thank-you for doing business with us</div>
+    <div className="p-4 sm:p-6 border-b border-slate-900 flex flex-col sm:flex-row gap-4 justify-between">
+      <div><h1 className="text-xl font-black">{COMPANY.companyName}</h1><div className="text-xs sm:text-sm mt-1 leading-5">{COMPANY.address}<br/>{COMPANY.state} - State Code: {COMPANY.stateCode}<br/>PH: {COMPANY.phone1}, {COMPANY.phone2}<br/>GSTIN: {COMPANY.gstin}</div></div>
+      <div className="text-3xl sm:text-4xl font-black">QUOTATION</div>
+    </div>
+    <div className="grid sm:grid-cols-3 border-b border-slate-900 text-xs sm:text-sm">
+      <div className="p-3 border-b sm:border-b-0 sm:border-r border-slate-900">Quotation Number: <b>{q.quotationNumber || "-"}</b></div>
+      <div className="p-3 border-b sm:border-b-0 sm:border-r border-slate-900">Quotation Validity: <b>{q.validUntil || "-"}</b></div>
+      <div className="p-3">Date: <b>{q.date || "-"}</b></div>
+    </div>
+    <div className="grid sm:grid-cols-2 border-b border-slate-900">
+      <div className="p-3 sm:p-4 border-b sm:border-b-0 sm:border-r border-slate-900 min-h-32"><div className="font-black border-b border-slate-400 pb-2 mb-3">Quotation For</div><h2 className="font-black text-lg">{q.customer}</h2><div className="text-sm whitespace-pre-line mt-1">{q.address}</div><div className="text-xs mt-2">State: {q.state || "-"} | State Code: {q.stateCode || "-"}<br/>GST: {q.gstNumber || "-"}<br/>Mobile: {q.mobileNumber || "-"}</div></div>
+      <div className="p-3 sm:p-4 min-h-32"><div className="font-black border-b border-slate-400 pb-2 mb-3">Ship To <span className="float-right text-xs">{withGst ? taxLabel : "Without GST"}</span></div><h2 className="font-black text-lg">{q.shipToName || q.customer}</h2><div className="text-sm whitespace-pre-line mt-1">{q.shipToAddress || q.address}</div><div className="text-xs mt-2">State: {q.shipToState || q.state || "-"} | State Code: {q.shipToStateCode || q.stateCode || "-"}<br/>GST: {q.shipToGstNumber || q.gstNumber || "-"}</div></div>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] border-collapse text-xs">
+        <thead><tr className="bg-amber-50"><th className="border-r border-b border-slate-900 p-2">No.</th><th className="border-r border-b border-slate-900 p-2 text-left">Product</th><th className="border-r border-b border-slate-900 p-2">Qty</th><th className="border-r border-b border-slate-900 p-2">Unit</th><th className="border-r border-b border-slate-900 p-2">Rate</th><th className="border-r border-b border-slate-900 p-2">Discount</th><th className="border-r border-b border-slate-900 p-2">Taxable</th><th className="border-r border-b border-slate-900 p-2">{taxLabel}</th><th className="border-b border-slate-900 p-2">Total</th></tr></thead>
+        <tbody>{(q.items || []).map((item, index) => {
+          const tax = q.taxType === "igst" ? +(item.igstAmount || 0) : +(item.cgstAmount || 0) + +(item.sgstAmount || 0);
+          const details = [item.description, item.color, item.size, item.thickness, +(item.sqftQty || 0) ? `${fmt(item.sqftQty)} sqft` : ""].filter(Boolean);
+          return <tr key={index}><td className="border-r border-b border-slate-900 p-2 text-center">{index + 1}</td><td className="border-r border-b border-slate-900 p-2"><b>{item.product}</b>{details.length > 0 && <div className="text-slate-500 mt-1">{details.join(" / ")}</div>}</td><td className="border-r border-b border-slate-900 p-2 text-center">{fmt(item.quantity)}</td><td className="border-r border-b border-slate-900 p-2 text-center">{item.unit || "piece"}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.rate)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.discountAmount)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{CURRENCY}{fmt(item.taxableAmount)}</td><td className="border-r border-b border-slate-900 p-2 text-right">{withGst ? `${CURRENCY}${fmt(tax)}` : "-"}</td><td className="border-b border-slate-900 p-2 text-right font-black">{CURRENCY}{fmt(item.total)}</td></tr>;
+        })}</tbody>
+      </table>
+    </div>
+    <div className="grid sm:grid-cols-2 border-b border-slate-900">
+      <div className="p-4 text-center border-b sm:border-b-0 sm:border-r border-slate-900"><b>Total Amount</b><div className="mt-2">{CURRENCY}{fmt(q.total)} only</div></div>
+      <div className="text-sm"><div className="flex justify-between p-2 border-b border-slate-300"><span>Taxable Amount</span><b>{CURRENCY}{fmt(q.taxableAmount)}</b></div><div className="flex justify-between p-2 border-b border-slate-300"><span>Add: Tax</span><span>{CURRENCY}{fmt(q.taxAmount)}</span></div><div className="flex justify-between p-2 border-b border-slate-900"><span>Round Off</span><span>{CURRENCY}{fmt(q.roundOff)}</span></div><div className="flex justify-between p-3 bg-amber-50 text-lg font-black"><span>Total Amount</span><span>{CURRENCY}{fmt(q.total)}</span></div></div>
+    </div>
+    <div className="grid sm:grid-cols-2 min-h-40">
+      <div className="p-4 border-b sm:border-b-0 sm:border-r border-slate-900"><b>Terms and conditions</b><p className="text-xs mt-2 whitespace-pre-line">{q.terms || COMPANY.terms}</p>{q.notes && <p className="text-xs mt-3"><b>Notes:</b> {q.notes}</p>}</div>
+      <div className="p-4 text-center"><div className="text-xs">Customer acceptance and signature</div>{signature ? <><img src={signature} alt="Customer signature" className="h-20 max-w-full object-contain mx-auto mt-2"/><div className="border-t border-slate-700 pt-1 text-xs"><b>{q.signature?.signedBy || q.customer}</b><br/>Signed on {formatSignedAt(q.signature?.signedAt)}</div></> : <div className="h-24 flex items-end justify-center text-xs text-slate-400 border-b border-slate-400 mx-auto max-w-64">Awaiting customer signature</div>}</div>
+    </div>
+  </div>;
+}
+
+function SignaturePad({ onCancel, onSubmit, saving }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const hasInk = useRef(false);
+  const [signedBy, setSignedBy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.round(rect.width * ratio));
+      canvas.height = Math.max(1, Math.round(rect.height * ratio));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#0f172a";
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+
+  const point = (event) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+  const start = (event) => {
+    event.preventDefault();
+    drawing.current = true;
+    hasInk.current = true;
+    const p = point(event);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + 0.1, p.y + 0.1);
+    ctx.stroke();
+    canvasRef.current.setPointerCapture?.(event.pointerId);
+  };
+  const move = (event) => {
+    if (!drawing.current) return;
+    event.preventDefault();
+    const p = point(event);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  };
+  const stop = () => { drawing.current = false; };
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    hasInk.current = false;
+    setError("");
+  };
+  const submit = () => {
+    if (!hasInk.current) return setError("Please draw your signature before submitting.");
+    onSubmit({ signatureData: canvasRef.current.toDataURL("image/png"), signedBy: signedBy.trim() });
+  };
+
+  return <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col p-3 sm:p-6">
+    <div className="flex items-center justify-between text-white mb-3"><div><h2 className="text-lg font-black">Sign Quotation</h2><p className="text-xs text-slate-300">Use your finger or mouse inside the white area</p></div><button onClick={onCancel} className="h-10 w-10 rounded-lg bg-slate-800 text-xl" aria-label="Close">×</button></div>
+    <canvas ref={canvasRef} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} className="flex-1 w-full min-h-0 bg-white rounded-lg touch-none cursor-crosshair" />
+    <div className="mt-3 grid sm:grid-cols-[1fr_auto_auto] gap-2"><input value={signedBy} onChange={e=>setSignedBy(e.target.value)} placeholder="Type signer name (optional)" aria-label="Signer name (optional)" className="h-11 rounded-lg px-3 border border-slate-600"/><button onClick={clear} className="h-11 px-5 rounded-lg bg-slate-700 text-white font-bold">Clear</button><button onClick={submit} disabled={saving} className="h-11 px-6 rounded-lg bg-emerald-600 text-white font-black disabled:opacity-60">{saving ? "Submitting..." : "Submit Signature"}</button></div>
+    {error && <div className="text-red-300 text-sm font-bold mt-2">{error}</div>}
+  </div>;
+}
+
+function PublicQuotationPage({ token }) {
+  const [quotation, setQuotation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    document.title = "Quotation | PK Interlock";
+    fetch(`${API}/public/quotations/${encodeURIComponent(token)}`, { cache:"no-store" }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to open quotation");
+      setQuotation(data);
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+  }, [token]);
+
+  const submitSignature = async (body) => {
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/public/quotations/${encodeURIComponent(token)}/sign`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to submit signature");
+      setQuotation(data);
+      setSigning(false);
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="min-h-screen bg-slate-100 grid place-items-center"><Loader /></div>;
+  if (error && !quotation) return <div className="min-h-screen bg-slate-100 grid place-items-center p-6"><div className="bg-white border border-red-200 p-6 rounded-lg max-w-md text-center"><h1 className="font-black text-xl">Quotation unavailable</h1><p className="text-sm text-slate-600 mt-2">{error}</p></div></div>;
+  return <div className="min-h-screen bg-slate-100 print:bg-white">
+    <header className="sticky top-0 z-20 bg-slate-950 text-white px-4 py-3 print:hidden"><div className="max-w-5xl mx-auto flex items-center gap-3"><img src={COMPANY.logo} alt="PK Interlock" className="w-9 h-9 bg-white rounded-md"/><div className="flex-1"><div className="font-black text-sm">{COMPANY.shortName}</div><div className="text-xs text-slate-400">Customer Quotation</div></div><button onClick={()=>window.print()} className="h-10 px-4 rounded-lg bg-white text-slate-950 font-bold">Print / PDF</button></div></header>
+    <main className="max-w-5xl mx-auto p-2 sm:p-6 print:p-0 print:max-w-none"><QuotationDocument quotation={quotation}/>
+      <div className="my-4 bg-white border border-slate-200 p-4 rounded-lg print:hidden">{quotation.signature?.dataUrl ? <div className="flex items-center gap-3 text-emerald-700 font-black"><span className="text-2xl">✓</span><div>Quotation signed successfully<div className="text-xs font-normal text-slate-500">The signed quotation is ready to print or save as PDF.</div></div></div> : <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3"><div className="flex-1"><div className="font-black">Customer Acceptance</div><div className="text-sm text-slate-500">Review the quotation above, then add your signature.</div></div><button onClick={()=>setSigning(true)} className="w-full sm:w-auto h-11 px-6 bg-emerald-600 text-white rounded-lg font-black">Sign Quotation</button></div>}</div>
+      {error && <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded-lg print:hidden">{error}</div>}
+    </main>
+    {signing && <SignaturePad onCancel={()=>setSigning(false)} onSubmit={submitSignature} saving={saving}/>}
+    <style>{`@media print { @page { size: A4; margin: 10mm; } body { background: white !important; } .quotation-document { box-shadow:none !important; } }`}</style>
+  </div>;
+}
+
+function QuotationModule({ user }) {
+  const emptyItem = { productType: "interlock", itemId: "", product: "", category: "", color: "", size: "", thickness: "", hsnSac: "", description: "", quantity: "", sqftPerPiece: "", sqftQty: "", unit: "piece", rate: "", discountType: "amount", discountValue: "", cgstPercent: "9", sgstPercent: "9", igstPercent: "18" };
+  const emptyForm = { quotationNumber: "", date: today(), validUntil: today(), customer: "", mobileNumber: "", address: "", gstNumber: "", state: COMPANY.state, stateCode: COMPANY.stateCode, shipToName: "", shipToAddress: "", shipToGstNumber: "", shipToState: COMPANY.state, shipToStateCode: COMPANY.stateCode, billType: "with_gst", taxType: "cgst_sgst", placeOfSupply: COMPANY.state, terms: "1. This is an electronically generated quotation. 2. Prices are valid only until the quotation validity date.", notes: "", status: "draft", items: [{ ...emptyItem }] };
+  const [quotations, setQuotations] = useState([]);
+  const [masters, setMasters] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [modal, setModal] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
+  const [editingId, setEditingId] = useState("");
+  const [customerMode, setCustomerMode] = useState("existing");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [saveToMaster, setSaveToMaster] = useState(true);
+  const [form, setForm] = useState(emptyForm);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [shareItem, setShareItem] = useState(null);
+  const [shareMessage, setShareMessage] = useState("");
+
+  const refreshQuotations = async () => {
+    const q = await api("GET", "/quotations");
+    const list = Array.isArray(q) ? q : [];
+    setQuotations(list);
+    setViewItem(current => current ? (list.find(item => item._id === current._id) || current) : current);
+    setShareItem(current => current ? (list.find(item => item._id === current._id) || current) : current);
+    return list;
+  };
+
+  const load = () => {
+    Promise.all([api("GET", "/quotations"), api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/customers")]).then(([q, i, h, c]) => {
+      setQuotations(Array.isArray(q) ? q : []);
+      const interlocks = Array.isArray(i) ? i.map(x => ({ ...x, productType: "interlock" })) : [];
+      const hollow = Array.isArray(h) ? h.map(x => ({ ...x, productType: "hollowbrick" })) : [];
+      setMasters([...interlocks, ...hollow]);
+      setCustomers(Array.isArray(c) ? c : []);
+    });
+  };
+
+  useEffect(() => {
+    load();
+    const refreshTimer = window.setInterval(() => { refreshQuotations().catch(() => {}); }, 15000);
+    return () => window.clearInterval(refreshTimer);
+  }, []);
+
+  const calcLine = (row, source = form) => {
+    const qty = +(row.quantity || 0);
+    const rate = +(row.rate || 0);
+    const sqftQty = +(row.sqftQty || 0) || (qty * (+(row.sqftPerPiece || 0)));
+    const billingQty = row.productType === "hollowbrick" ? qty : (sqftQty || qty);
+    const base = billingQty * rate;
+    const discountValue = +(row.discountValue || 0);
+    const discount = row.discountType === "percent" ? base * discountValue / 100 : discountValue;
+    const taxable = Math.max(0, base - discount);
+    const withGst = source.billType === "with_gst";
+    const cgst = withGst && source.taxType !== "igst" ? taxable * (+(row.cgstPercent || 0)) / 100 : 0;
+    const sgst = withGst && source.taxType !== "igst" ? taxable * (+(row.sgstPercent || 0)) / 100 : 0;
+    const igst = withGst && source.taxType === "igst" ? taxable * (+(row.igstPercent || 0)) / 100 : 0;
+    return { base, discount, taxable, cgst, sgst, igst, total: taxable + cgst + sgst + igst, sqftQty };
+  };
+
+  const totals = (source = form) => {
+    const lines = (source.items || []).map(row => calcLine(row, source));
+    const subtotal = lines.reduce((a, x) => a + x.base, 0);
+    const discount = lines.reduce((a, x) => a + x.discount, 0);
+    const taxable = lines.reduce((a, x) => a + x.taxable, 0);
+    const cgst = lines.reduce((a, x) => a + x.cgst, 0);
+    const sgst = lines.reduce((a, x) => a + x.sgst, 0);
+    const igst = lines.reduce((a, x) => a + x.igst, 0);
+    const beforeRound = taxable + cgst + sgst + igst;
+    const total = Math.round(beforeRound);
+    return { subtotal, discount, taxable, cgst, sgst, igst, tax: cgst + sgst + igst, total, roundOff: total - beforeRound };
+  };
+
+  const setItem = (index, patch) => setForm(f => ({ ...f, items: f.items.map((it, i) => i === index ? { ...it, ...patch } : it) }));
+  const selectCustomer = (id) => {
+    setSelectedCustomerId(id);
+    const c = customers.find(x => x._id === id);
+    if (!c) return;
+    setForm(f => ({ ...f, customer: c.name || "", mobileNumber: c.mobile || "", address: c.address || "", gstNumber: c.gstNumber || "", shipToName: c.name || "", shipToAddress: c.address || "", shipToGstNumber: c.gstNumber || "" }));
+  };
+  const selectProduct = (index, value) => {
+    if (value === "other") return setItem(index, { productType: "other", itemId: "", product: "", unit: "piece", sqftPerPiece: "", sqftQty: "" });
+    const m = masters.find(x => x._id === value);
+    if (!m) return;
+    setItem(index, { productType: m.productType, itemId: m._id, product: m.name || m.category || "", category: m.category || m.name || "", color: m.color || "", size: m.size || "", thickness: m.thickness || "", sqftPerPiece: m.productType === "hollowbrick" ? "" : (m.sqftPerPiece || ""), unit: m.unit || "piece", rate: m.price || m.rate || "" });
+  };
+  const openNew = () => { setEditingId(""); setCustomerMode("existing"); setSelectedCustomerId(""); setForm(emptyForm); setError(""); setModal(true); };
+  const openEdit = (q) => { setEditingId(q._id); setCustomerMode("new"); setSelectedCustomerId(""); setForm({ ...emptyForm, ...q, items: (q.items || []).length ? q.items : [{ ...emptyItem }] }); setError(""); setModal(true); };
+
+  const save = async () => {
+    setError("");
+    const mobile = (form.mobileNumber || "").replace(/\D/g, "").slice(-10);
+    if (!form.customer) return setError("Customer name is required");
+    if (mobile.length < 10) return setError("Valid mobile number is required");
+    const validItems = (form.items || []).filter(x => x.product && +(x.quantity || 0) > 0 && +(x.rate || 0) >= 0);
+    if (!validItems.length) return setError("Add at least one valid product");
+    const body = { ...form, mobileNumber: mobile, addedBy: user.name, saveToCustomerMaster: customerMode === "new" ? saveToMaster : true, items: validItems.map(x => ({ ...x, ...calcLine(x), quantity: +(x.quantity || 0), rate: +(x.rate || 0), sqftPerPiece: +(x.sqftPerPiece || 0), sqftQty: calcLine(x).sqftQty })) };
+    const wasNew = !editingId;
+    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/quotations/${editingId}` : "/quotations", body);
+    if (!saved?._id) return setError(saved.message || "Failed to save quotation");
+    setModal(false);
+    if (wasNew) setShareItem(saved);
+    load();
+  };
+
+  const getShareItem = async (quotation) => {
+    if (quotation.shareToken) return quotation;
+    const shared = await api("POST", `/quotations/${quotation._id}/share`, { addedBy:user.name });
+    if (!shared?.shareToken) throw new Error(shared?.message || "Unable to create share link");
+    setQuotations(list => list.map(item => item._id === shared._id ? shared : item));
+    return shared;
+  };
+  const openShare = async (quotation) => {
+    setShareMessage("");
+    try { setShareItem(await getShareItem(quotation)); }
+    catch (e) { window.alert(e.message); }
+  };
+  const shareUrl = (quotation = shareItem) => quotation?.shareToken ? `${window.location.origin}/quotation/${quotation.shareToken}` : "";
+  const copyShareLink = async () => {
+    const value = shareUrl();
+    try { await navigator.clipboard.writeText(value); }
+    catch {
+      const input = document.createElement("textarea");
+      input.value = value;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+    setShareMessage("Link copied");
+  };
+  const shareText = () => `Quotation ${shareItem?.quotationNumber || ""} from ${COMPANY.companyName}. View and sign here: ${shareUrl()}`;
+  const shareWhatsApp = () => {
+    const mobile = String(shareItem?.mobileNumber || "").replace(/\D/g, "");
+    const whatsappMobile = mobile.length === 10 ? `91${mobile}` : mobile;
+    window.open(`https://wa.me/${whatsappMobile}?text=${encodeURIComponent(shareText())}`, "_blank", "noopener,noreferrer");
+  };
+  const shareEmail = () => {
+    window.location.href = `mailto:?subject=${encodeURIComponent(`Quotation ${shareItem?.quotationNumber || ""} - ${COMPANY.shortName}`)}&body=${encodeURIComponent(shareText())}`;
+  };
+
+  const printQuotation = (q) => {
+    const t = totals(q);
+    const withGst = q.billType === "with_gst";
+    const taxLabel = q.taxType === "igst" ? "IGST" : "CGST / SGST";
+    const rows = (q.items || []).map((it, i) => {
+      const l = calcLineForPrint(it, q);
+      const spec = [it.description, it.color, it.size, it.thickness, l.sqftQty ? `${fmt(l.sqftQty)} sqft` : ""].filter(Boolean).join("<br>");
+      const discount = `${CURRENCY_HTML}${fmt(l.discount)}${it.discountType === "percent" ? ` (${fmt(it.discountValue)}%)` : ""}`;
+      const tax = withGst ? (q.taxType === "igst" ? `${fmt(it.igstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.igst)}` : `${fmt(it.cgstPercent || 0)}% + ${fmt(it.sgstPercent || 0)}%<br>${CURRENCY_HTML}${fmt(l.cgst + l.sgst)}`) : "-";
+      return `<tr><td>${i + 1}</td><td><b>${escapeHtml(it.product)}</b><br><small>${spec}</small></td><td>${fmt(it.quantity)}</td><td>${escapeHtml(it.unit || "piece")}</td><td>${CURRENCY_HTML}${fmt(it.rate)}</td><td>${discount}</td><td>${CURRENCY_HTML}${fmt(l.taxable)}</td><td>${tax}</td><td><b>${CURRENCY_HTML}${fmt(l.total)}</b></td></tr>`;
+    }).join("");
+    const customerSignature = q.signature?.dataUrl
+      ? `<div class="customerAcceptance"><b>Customer Acceptance</b><img src="${q.signature.dataUrl}" alt="Customer signature"><div>${escapeHtml(q.signature.signedBy || q.customer || "")} | ${escapeHtml(q.signature.signedAt ? new Date(q.signature.signedAt).toLocaleString("en-IN") : "")}</div></div>`
+      : `<div class="customerAcceptance awaiting"><b>Customer Acceptance</b><div>Awaiting customer signature</div></div>`;
+    const html = `<!doctype html><html><head><title>Quotation ${q.quotationNumber || ""}</title><style>
+      @page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;color:#111;margin:0}.sheet{border:1px solid #111;min-height:276mm}.top{height:14px;background:#f2c300}.thanks{text-align:center;font-style:italic;font-size:12px;padding:8px}.head{display:flex;justify-content:space-between;border-bottom:1px solid #111;padding:18px}.company h2{margin:0 0 6px;font-size:20px}.company div{font-size:13px;line-height:1.5}.title{font-size:38px;font-weight:900;letter-spacing:1px}.meta{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #111}.meta div{padding:10px;font-size:13px}.partyHead,.totalRow{background:#f8f0d9;font-weight:700}.party{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #111}.party>div{padding:10px;min-height:105px}.party h3{margin:0 0 8px;font-size:17px}.party p{margin:4px 0;font-size:13px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #111;padding:8px;font-size:12px;text-align:left}th{text-align:center;background:#f8f0d9}td:nth-child(1),td:nth-child(3),td:nth-child(4){text-align:center}td:nth-child(n+5){text-align:right}.summary{display:grid;grid-template-columns:1.5fr 1fr;border-bottom:1px solid #111}.words{padding:14px;text-align:center;font-size:13px}.totals div{display:flex;justify-content:space-between;border-bottom:1px solid #ddd;padding:8px 12px;font-size:13px}.totals .grand{background:#f8f0d9;font-weight:900;font-size:20px;padding:14px}.customerAcceptance{text-align:center;padding:10px;border-bottom:1px solid #111;font-size:11px}.customerAcceptance img{display:block;max-width:220px;height:65px;object-fit:contain;margin:5px auto 2px}.customerAcceptance.awaiting div{height:35px;padding-top:16px;color:#777}.bottom{display:grid;grid-template-columns:1.4fr 1fr;min-height:145px}.terms{padding:12px;border-right:1px solid #111}.sign{text-align:center;padding:12px}.line{height:62px}.small{font-size:12px;color:#333}@media print{button{display:none}.sheet{border-color:#111}}</style></head><body><div class="top"></div><div class="thanks">Thank-you for doing business with us</div><div class="sheet">
+      <div class="head"><div class="company"><h2>${escapeHtml(COMPANY.companyName)}</h2><div>${escapeHtml(COMPANY.address)}</div><div>${escapeHtml(COMPANY.state)} - State Code: ${escapeHtml(COMPANY.stateCode)}</div><div>PH: ${escapeHtml(COMPANY.phone1)}, ${escapeHtml(COMPANY.phone2)}</div><div>GSTIN: ${escapeHtml(COMPANY.gstin)}</div></div><div class="title">QUOTATION</div></div>
+      <div class="meta"><div>Quotation Number: <b>${escapeHtml(q.quotationNumber || "")}</b></div><div>Quotation Validity: <b>${escapeHtml(q.validUntil || "")}</b></div><div>Date: <b>${escapeHtml(q.date || "")}</b></div></div>
+      <div class="meta partyHead"><div>Quotation For</div><div>Ship To</div><div>${withGst ? taxLabel : "Without GST"}</div></div>
+      <div class="party"><div><h3>${escapeHtml(q.customer || "")}</h3><p>${escapeHtml(q.address || "")}</p><p>State: ${escapeHtml(q.state || "")}</p><p>GST: ${escapeHtml(q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.stateCode || "")}</p><p>Mobile: ${escapeHtml(q.mobileNumber || "")}</p></div><div><h3>${escapeHtml(q.shipToName || q.customer || "")}</h3><p>${escapeHtml(q.shipToAddress || q.address || "")}</p><p>State: ${escapeHtml(q.shipToState || q.state || "")}</p><p>GST: ${escapeHtml(q.shipToGstNumber || q.gstNumber || "-")} &nbsp; State Code: ${escapeHtml(q.shipToStateCode || q.stateCode || "")}</p></div></div>
+      <table><thead><tr><th>Sr. No.</th><th>Name of Product</th><th>QTY</th><th>Unit</th><th>Rate</th><th>Discount</th><th>Taxable Value</th><th>${taxLabel}</th><th>Total</th></tr></thead><tbody>${rows}<tr class="totalRow"><td></td><td>Total</td><td>${fmt((q.items || []).reduce((a,x)=>a+(+(x.quantity)||0),0))}</td><td></td><td></td><td>${CURRENCY_HTML}${fmt(t.discount)}</td><td>${CURRENCY_HTML}${fmt(t.taxable)}</td><td>${CURRENCY_HTML}${fmt(t.tax)}</td><td>${CURRENCY_HTML}${fmt(t.total)}</td></tr></tbody></table>
+      <div class="summary"><div class="words"><b>Total Amount</b><br>${CURRENCY_HTML}${fmt(t.total)} only</div><div class="totals"><div><span>Taxable Amount</span><b>${CURRENCY_HTML}${fmt(t.taxable)}</b></div><div><span>Add: Tax</span><span>${CURRENCY_HTML}${fmt(t.tax)}</span></div><div><span>Round Off Value</span><span>${CURRENCY_HTML}${fmt(t.roundOff)}</span></div><div class="grand"><span>Total Amount</span><span>${CURRENCY_HTML}${fmt(t.total)}</span></div></div></div>
+      ${customerSignature}
+      <div class="bottom"><div class="terms"><b>Terms and conditions</b><p class="small">${escapeHtml(q.terms || COMPANY.terms)}</p></div><div class="sign"><div>Certified that the particulars given above are true and correct, for</div><h3>${escapeHtml(COMPANY.signatureName)}</h3><div class="line"></div><div>Authorised Signatory</div></div></div>
+      </div><script>window.print()</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const CURRENCY_HTML = "&#8377;";
+  const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  const calcLineForPrint = (row, quotation) => {
+    return calcLine(row, quotation);
+  };
+
+  const filtered = quotations.filter(q => !search || [q.quotationNumber, q.customer, q.mobileNumber].join(" ").toLowerCase().includes(search.toLowerCase()));
+  const t = totals();
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-xl font-black text-gray-900">Quotations</h2><div className="text-xs text-gray-400">Create, edit, view and print customer quotations</div></div>
+        <div className="flex gap-2"><button onClick={()=>refreshQuotations()} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold shadow-sm">Refresh Status</button><button onClick={openNew} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg font-bold shadow-sm">+ New Quotation</button></div>
+      </div>
+      <Input placeholder="Search quotation, customer or mobile" value={search} onChange={e=>setSearch(e.target.value)} />
+      {filtered.length === 0 ? <EmptyState icon="QT" text="No quotations found" /> : <div className="grid gap-3">{filtered.map(q => <div key={q._id} className="bg-white border rounded-xl shadow-sm p-4 flex flex-wrap items-center justify-between gap-3">
+        <div><div className="font-black text-gray-900">{q.quotationNumber}</div><div className="text-sm text-gray-500">{q.customer} - {q.mobileNumber}</div><div className="text-xs text-gray-400">{q.date} | Valid until {q.validUntil || "-"}</div></div>
+        <div className="text-right"><div className="font-black text-green-700">{CURRENCY}{fmt(q.total)}</div><div className="flex gap-1 mt-1"><Badge color={q.billType === "with_gst" ? "blue" : "gray"}>{q.billType === "with_gst" ? "With GST" : "Without GST"}</Badge>{q.signature?.dataUrl&&<Badge color="green">Signed</Badge>}</div></div>
+        <div className="flex flex-wrap gap-2"><button onClick={()=>setViewItem(q)} className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-bold">{q.signature?.dataUrl ? "View Signed" : "View"}</button><button onClick={()=>openEdit(q)} className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-sm font-bold">Edit</button><button onClick={()=>openShare(q)} className="px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-sm font-bold">Share</button><button onClick={()=>printQuotation(q)} className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-bold">{q.signature?.dataUrl ? "Print / Save PDF" : "Print"}</button></div>
+      </div>)}</div>}
+
+      {modal && <Modal title={editingId ? "Edit Quotation" : "New Quotation"} onClose={()=>setModal(false)} wide>
+        <div className="space-y-4">
+          <div className="grid sm:grid-cols-3 gap-3"><Input label="Quotation No." value={form.quotationNumber} onChange={e=>setForm({...form, quotationNumber:e.target.value})} placeholder="Auto" /><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} /><Input label="Valid Until" type="date" value={form.validUntil} onChange={e=>setForm({...form, validUntil:e.target.value})} /></div>
+          <div className="grid sm:grid-cols-3 gap-3"><Select label="Customer" value={customerMode} options={[{value:"existing",label:"Existing Customer"},{value:"new",label:"New Customer"}]} onChange={e=>setCustomerMode(e.target.value)} />{customerMode==="existing"&&<Select label="Select Customer" value={selectedCustomerId} options={[{value:"",label:"Select customer"}, ...customers.map(c=>({value:c._id,label:`${c.name} - ${c.mobile}`}))]} onChange={e=>selectCustomer(e.target.value)} />}<label className="flex items-center gap-2 text-xs font-bold text-slate-600 pt-7"><input type="checkbox" checked={saveToMaster} onChange={e=>setSaveToMaster(e.target.checked)} /> Save new customer</label></div>
+          <div className="grid sm:grid-cols-2 gap-3"><Input label="Customer Name" value={form.customer} onChange={e=>setForm({...form, customer:e.target.value, shipToName: form.shipToName || e.target.value})} /><Input label="Mobile Number" value={form.mobileNumber} onChange={e=>setForm({...form, mobileNumber:e.target.value})} /><Textarea label="Billing Address" value={form.address} onChange={e=>setForm({...form, address:e.target.value, shipToAddress: form.shipToAddress || e.target.value})} /><Textarea label="Shipping Address" value={form.shipToAddress} onChange={e=>setForm({...form, shipToAddress:e.target.value})} /><Input label="GST Number" value={form.gstNumber} onChange={e=>setForm({...form, gstNumber:e.target.value, shipToGstNumber: form.shipToGstNumber || e.target.value})} /><Input label="Place of Supply" value={form.placeOfSupply} onChange={e=>setForm({...form, placeOfSupply:e.target.value})} /></div>
+          <div className="grid sm:grid-cols-2 gap-3"><Select label="Bill Type" value={form.billType} options={[{value:"with_gst",label:"With GST"},{value:"without_gst",label:"Without GST"}]} onChange={e=>setForm({...form, billType:e.target.value})} /><Select label="GST Type" value={form.taxType} options={[{value:"cgst_sgst",label:"CGST + SGST"},{value:"igst",label:"IGST"}]} onChange={e=>setForm({...form, taxType:e.target.value})} /></div>
+          <SectionBox title="Products" icon="QT" color="amber">
+            <div className="space-y-3">{form.items.map((it,i)=>{ const line = calcLine(it); return <div key={i} className="border rounded-xl p-3 space-y-3 bg-slate-50">
+              <div className="flex justify-between items-center"><div className="font-black text-sm">Item {i+1}</div>{form.items.length>1&&<button onClick={()=>setForm(f=>({...f,items:f.items.filter((_,idx)=>idx!==i)}))} className="text-red-600 text-xs font-bold">Remove</button>}</div>
+              <div className="grid sm:grid-cols-3 gap-3"><Select label="Product" value={it.itemId || (it.productType==="other" ? "other" : "")} options={[{value:"",label:"Select product"},{value:"other",label:"Other - type manually"}, ...masters.map(m=>({value:m._id,label:`${m.name || m.category}${m.color?` - ${m.color}`:""}${m.size?` - ${m.size}`:""}`}))]} onChange={e=>selectProduct(i,e.target.value)} /><Input label="Product Name" value={it.product} onChange={e=>setItem(i,{product:e.target.value})} /><Input label="HSN / SAC" value={it.hsnSac} onChange={e=>setItem(i,{hsnSac:e.target.value})} /></div>
+              <div className="grid sm:grid-cols-4 gap-3"><Input label="Qty" type="number" value={it.quantity} onChange={e=>setItem(i,{quantity:e.target.value, sqftQty:(+(e.target.value)||0)*(+(it.sqftPerPiece)||0)})} /><Input label="Sqft / Piece" type="number" value={it.sqftPerPiece} onChange={e=>setItem(i,{sqftPerPiece:e.target.value, sqftQty:(+(it.quantity)||0)*(+(e.target.value)||0)})} /><Input label="Total Sqft" type="number" value={line.sqftQty || ""} onChange={e=>setItem(i,{sqftQty:e.target.value})} /><Input label="Unit" value={it.unit} onChange={e=>setItem(i,{unit:e.target.value})} /></div>
+              <div className="grid sm:grid-cols-4 gap-3"><Input label="Rate" type="number" value={it.rate} onChange={e=>setItem(i,{rate:e.target.value})} /><Select label="Discount Type" value={it.discountType} options={[{value:"amount",label:"Amount"},{value:"percent",label:"Percentage"}]} onChange={e=>setItem(i,{discountType:e.target.value})} /><Input label="Discount" type="number" value={it.discountValue} onChange={e=>setItem(i,{discountValue:e.target.value})} />{form.taxType==="igst"?<Input label="IGST %" type="number" value={it.igstPercent} onChange={e=>setItem(i,{igstPercent:e.target.value})} />:<><Input label="CGST %" type="number" value={it.cgstPercent} onChange={e=>setItem(i,{cgstPercent:e.target.value})} /><Input label="SGST %" type="number" value={it.sgstPercent} onChange={e=>setItem(i,{sgstPercent:e.target.value})} /></>}</div>
+              <Textarea label="Description / Size / Remarks" value={it.description} onChange={e=>setItem(i,{description:e.target.value})} />
+              <div className="grid grid-cols-3 gap-2 text-xs"><div className="bg-white rounded-lg p-2">Taxable<br/><b>{CURRENCY}{fmt(line.taxable)}</b></div><div className="bg-white rounded-lg p-2">Tax<br/><b>{CURRENCY}{fmt(line.cgst+line.sgst+line.igst)}</b></div><div className="bg-white rounded-lg p-2">Total<br/><b>{CURRENCY}{fmt(line.total)}</b></div></div>
+            </div>})}</div>
+            <button onClick={()=>setForm(f=>({...f,items:[...f.items,{...emptyItem}]}))} className="mt-3 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold">+ Add Product</button>
+          </SectionBox>
+          <Textarea label="Terms and Conditions" value={form.terms} onChange={e=>setForm({...form, terms:e.target.value})} />
+          <div className="bg-slate-950 text-white rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm"><div>Subtotal<br/><b>{CURRENCY}{fmt(t.subtotal)}</b></div><div>Discount<br/><b>{CURRENCY}{fmt(t.discount)}</b></div><div>Taxable<br/><b>{CURRENCY}{fmt(t.taxable)}</b></div><div>Tax<br/><b>{CURRENCY}{fmt(t.tax)}</b></div><div>Total<br/><b className="text-xl">{CURRENCY}{fmt(t.total)}</b></div></div>
+          {error&&<div className="text-sm text-red-600 font-bold">{error}</div>}
+          <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">{editingId ? "Update Quotation" : "Submit Quotation"}</button>
+        </div>
+      </Modal>}
+
+      {viewItem && <Modal title="Quotation Details" onClose={()=>setViewItem(null)} wide>
+        <div className="space-y-3"><div className="flex justify-between"><div><div className="font-black">{viewItem.quotationNumber}</div><div className="text-sm text-gray-500">{viewItem.customer}</div></div><div className="font-black text-green-700">{CURRENCY}{fmt(viewItem.total)}</div></div>
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="text-left border-b"><th className="py-2">Product</th><th>Qty</th><th>Rate</th><th>Discount</th><th>Taxable</th><th>Total</th></tr></thead><tbody>{(viewItem.items||[]).map((it,i)=><tr key={i} className="border-b"><td className="py-2 font-bold">{it.product}<div className="font-normal text-gray-400">{it.description}</div></td><td>{fmt(it.quantity)} {it.unit}</td><td>{CURRENCY}{fmt(it.rate)}</td><td>{CURRENCY}{fmt(it.discountAmount)}</td><td>{CURRENCY}{fmt(it.taxableAmount)}</td><td className="font-bold">{CURRENCY}{fmt(it.total)}</td></tr>)}</tbody></table></div>
+        {viewItem.signature?.dataUrl&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3"><div className="text-xs font-black text-emerald-700">Customer Signed</div><img src={viewItem.signature.dataUrl} alt="Customer signature" className="h-20 max-w-full object-contain mt-1"/><div className="text-xs text-slate-500">{viewItem.signature.signedBy || viewItem.customer} | {viewItem.signature.signedAt ? new Date(viewItem.signature.signedAt).toLocaleString("en-IN") : ""}</div></div>}
+        <div className="flex flex-wrap gap-2"><button onClick={()=>printQuotation(viewItem)} className="flex-1 min-w-28 bg-green-600 text-white py-2 rounded-lg font-bold">{viewItem.signature?.dataUrl ? "Print / Save Signed PDF" : "Print"}</button><button onClick={()=>openShare(viewItem)} className="flex-1 min-w-28 bg-emerald-50 text-emerald-700 py-2 rounded-lg font-bold">Share</button><button onClick={()=>{setViewItem(null);openEdit(viewItem);}} className="flex-1 min-w-28 bg-blue-50 text-blue-700 py-2 rounded-lg font-bold">Edit</button></div></div>
+      </Modal>}
+
+      {shareItem && <Modal title="Share Quotation" onClose={()=>{setShareItem(null);setShareMessage("");}}>
+        <div className="space-y-4">
+          <div className="bg-slate-50 border rounded-lg p-3"><div className="font-black">{shareItem.quotationNumber}</div><div className="text-sm text-slate-500">{shareItem.customer}</div>{shareItem.signature?.dataUrl&&<div className="text-xs font-bold text-emerald-700 mt-1">Customer signed</div>}</div>
+          <div><label className="text-xs font-bold text-slate-600">Customer link</label><div className="flex gap-2 mt-1"><input readOnly value={shareUrl()} onFocus={e=>e.target.select()} className="min-w-0 flex-1 h-11 px-3 border rounded-lg bg-white text-sm"/><button onClick={copyShareLink} className="h-11 px-4 rounded-lg bg-slate-900 text-white font-bold">Copy</button></div>{shareMessage&&<div className="text-xs text-emerald-700 font-bold mt-1">{shareMessage}</div>}</div>
+          <div className="grid sm:grid-cols-2 gap-2"><button onClick={shareWhatsApp} className="h-12 rounded-lg bg-emerald-600 text-white font-black">Share on WhatsApp</button><button onClick={shareEmail} className="h-12 rounded-lg bg-blue-600 text-white font-black">Share by Email</button></div>
+          <div className="text-xs text-slate-500">The customer can open this link without logging in, review the quotation, sign it, and print or save the signed quotation.</div>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+function DriverSubmitReport({ user }) {
+  const emptyExpense = { category: "Diesel", amount: "", liters: "", note: "" };
+  const emptyForm = { date: today(), driverName: user.name || "", driverMobile: user.mobile || "", vehicleName: user.vehicleName || "", vehicleNumber: user.vehicleNumber || "", category: "Interlock", itemId: "", itemName: "", itemDetails: "", quantity: "", unit: "piece", loadAmount: "", supplierId: "", supplierName: "", supplierMobile: "", supplierAddress: "", saveToSupplierMaster: true, loadingFrom: "", unloadedLocation: "", cashGivenToSupplier: "", supplierPendingCash: "", expenses: [], vehicleKm: { startKm: "", endKm: "", totalKm: "", note: "" }, driverChargeType: "batha", driverCharge: "", remarks: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [masters, setMasters] = useState({ interlock: [], hollowbricks: [], materials: [] });
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierMode, setSupplierMode] = useState("existing");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    Promise.all([api("GET", "/masterdata/interlock"), api("GET", "/masterdata/hollowbricks"), api("GET", "/masterdata/materials"), api("GET", "/suppliers")]).then(([i, h, m, s]) => {
+      setMasters({ interlock: Array.isArray(i) ? i : [], hollowbricks: Array.isArray(h) ? h : [], materials: Array.isArray(m) ? m : [] });
+      setSuppliers(Array.isArray(s) ? s : []);
+    });
+  }, []);
+
+  const categoryItems = form.category === "Interlock" ? masters.interlock : form.category === "Hollow Bricks" ? masters.hollowbricks : form.category === "Raw Material" ? masters.materials : [];
+  const selectItem = (id) => {
+    if (id === "other") return setForm(f => ({ ...f, itemId: "other", itemName: "", itemDetails: "" }));
+    const item = categoryItems.find(x => x._id === id);
+    if (!item) return;
+    setForm(f => ({ ...f, itemId: id, itemName: item.name || item.category || "", itemDetails: [item.color, item.size, item.thickness].filter(Boolean).join(" / "), unit: item.unit || (f.category === "Raw Material" ? "load" : "piece") }));
+  };
+  const selectSupplier = (id) => {
+    const s = suppliers.find(x => x._id === id);
+    if (!s) return setForm(f => ({ ...f, supplierId: id }));
+    setForm(f => ({ ...f, supplierId: id, supplierName: s.name || "", supplierMobile: s.mobile || s.phone || "", supplierAddress: s.address || s.location || "" }));
+  };
+  const setExpense = (index, patch) => setForm(f => ({ ...f, expenses: (f.expenses || []).map((e, i) => i === index ? { ...e, ...patch } : e) }));
+  const addExpense = () => setForm(f => ({ ...f, expenses: [...(f.expenses || []), { ...emptyExpense }] }));
+  const removeExpense = (index) => setForm(f => ({ ...f, expenses: (f.expenses || []).filter((_, i) => i !== index) }));
+  const save = async () => {
+    setMessage("");
+    const expenses = (form.expenses || []).map(e => ({ ...e, amount: +(e.amount || 0), liters: +(e.liters || 0) })).filter(e => e.amount > 0 || e.liters > 0 || e.note);
+    const vehicleKm = {
+      ...form.vehicleKm,
+      startKm: +(form.vehicleKm?.startKm || 0),
+      endKm: +(form.vehicleKm?.endKm || 0),
+      totalKm: +(form.vehicleKm?.totalKm || 0) || Math.max(0, +(form.vehicleKm?.endKm || 0) - +(form.vehicleKm?.startKm || 0)),
+    };
+    const hasTrip = form.itemName || form.loadingFrom || form.unloadedLocation || +(form.quantity || 0) > 0 || +(form.loadAmount || 0) > 0 || +(form.driverCharge || 0) > 0 || +(form.cashGivenToSupplier || 0) > 0 || +(form.supplierPendingCash || 0) > 0;
+    const hasExpense = expenses.length > 0;
+    const hasKm = vehicleKm.startKm > 0 || vehicleKm.endKm > 0 || vehicleKm.totalKm > 0 || vehicleKm.note;
+    if (!hasTrip && !hasExpense && !hasKm) return setMessage("Add trip details, driver expense, or vehicle KM before submitting");
+    const saved = await api("POST", "/driverreports", { ...form, expenses, vehicleKm, quantity: +(form.quantity || 0), loadAmount: +(form.loadAmount || 0), driverCharge: +(form.driverCharge || 0), cashGivenToSupplier: +(form.cashGivenToSupplier || 0), supplierPendingCash: +(form.supplierPendingCash || 0), addedBy: user.name });
+    if (saved?._id) {
+      setMessage("Report submitted successfully");
+      setForm({ ...emptyForm, date: today() });
+    } else setMessage(saved.message || "Failed to submit report");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Driver Submit Report</h2><div className="text-xs text-gray-400">Submit vehicle trip and delivery details</div></div>
+      <SectionBox title="Driver Details" icon="DR" color="blue">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+          <Input label="Driver Name" value={form.driverName} readOnly />
+          <Input label="Mobile" value={form.driverMobile || ""} onChange={e => setForm({ ...form, driverMobile: e.target.value })} />
+          <Input label="Vehicle Name" value={form.vehicleName || ""} onChange={e => setForm({ ...form, vehicleName: e.target.value })} />
+          <Input label="Vehicle Number" value={form.vehicleNumber || ""} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} />
+        </div>
+      </SectionBox>
+      <SectionBox title="Load Details" icon="LD" color="amber">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Select label="Category" value={form.category} options={["Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setForm({ ...form, category: e.target.value, itemId: "", itemName: "", itemDetails: "", unit: e.target.value === "Raw Material" ? "load" : "piece" })} />
+          {form.category !== "Other" ? <Select label="Item Name" value={form.itemId} options={[{ value: "", label: "Select item" }, { value: "other", label: "Other - type manually" }, ...categoryItems.map(x => ({ value: x._id, label: `${x.name || x.category}${x.color ? ` - ${x.color}` : ""}${x.size ? ` - ${x.size}` : ""}` }))]} onChange={e => selectItem(e.target.value)} /> : <Input label="Item Name" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />}
+          {form.itemId === "other" && <Input label="Type Item Name" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />}
+          <Input label="Item Details" value={form.itemDetails || ""} onChange={e => setForm({ ...form, itemDetails: e.target.value })} placeholder="Color, size, remarks" />
+          <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
+          <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} />
+          <Input label={`Load / Material Amount (${CURRENCY})`} type="number" value={form.loadAmount} onChange={e => {
+            const loadAmount = +(e.target.value || 0);
+            const cashGiven = +(form.cashGivenToSupplier || 0);
+            setForm({ ...form, loadAmount: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : form.supplierPendingCash });
+          }} />
+        </div>
+      </SectionBox>
+      {form.category === "Raw Material" && <SectionBox title="Supplier Details" icon="SP" color="teal">
+        <div className="flex gap-2"><button onClick={() => setSupplierMode("existing")} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${supplierMode === "existing" ? "bg-teal-600 text-white" : "bg-white"}`}>Existing Supplier</button><button onClick={() => setSupplierMode("new")} className={`flex-1 py-2 rounded-lg text-xs font-bold border ${supplierMode === "new" ? "bg-teal-600 text-white" : "bg-white"}`}>New Supplier</button></div>
+        {supplierMode === "existing" && <Select label="Select Supplier" value={form.supplierId} options={[{ value: "", label: "Select supplier" }, ...suppliers.map(s => ({ value: s._id, label: `${s.name} - ${s.mobile || s.phone || ""}` }))]} onChange={e => selectSupplier(e.target.value)} />}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Supplier Name" value={form.supplierName} onChange={e => setForm({ ...form, supplierName: e.target.value })} />
+          <Input label="Supplier Mobile" value={form.supplierMobile} onChange={e => setForm({ ...form, supplierMobile: e.target.value })} />
+          <Textarea label="Supplier Address" value={form.supplierAddress} onChange={e => setForm({ ...form, supplierAddress: e.target.value })} />
+          <label className="flex items-center gap-2 text-xs font-bold text-slate-600 pt-7"><input type="checkbox" checked={form.saveToSupplierMaster} onChange={e => setForm({ ...form, saveToSupplierMaster: e.target.checked })} /> Save supplier to master</label>
+          <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={form.cashGivenToSupplier} onChange={e => {
+            const cashGiven = +(e.target.value || 0);
+            const loadAmount = +(form.loadAmount || 0);
+            setForm({ ...form, cashGivenToSupplier: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : form.supplierPendingCash });
+          }} />
+          <Input label={`Pending Cash (${CURRENCY})`} type="number" value={form.supplierPendingCash} onChange={e => setForm({ ...form, supplierPendingCash: e.target.value })} />
+        </div>
+      </SectionBox>}
+      <SectionBox title="Driver Expenses" icon="EX" color="red">
+        <div className="space-y-2">
+          {(form.expenses || []).length === 0 && <div className="text-xs text-gray-400">No driver expenses added</div>}
+          {(form.expenses || []).map((expense, i) => (
+            <div key={i} className="grid sm:grid-cols-5 gap-2 border rounded-xl p-2 bg-red-50/40">
+              <Select label="Expense" value={expense.category} options={["Vehicle Service", "Diesel", "Petrol", "Other"]} onChange={e => setExpense(i, { category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? expense.liters : "" })} />
+              {["Diesel", "Petrol"].includes(expense.category) && <Input label="Liters Filled" type="number" value={expense.liters || ""} onChange={e => setExpense(i, { liters: e.target.value })} />}
+              <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount} onChange={e => setExpense(i, { amount: e.target.value })} />
+              <Input label="Note" value={expense.note || ""} onChange={e => setExpense(i, { note: e.target.value })} />
+              <div className="flex items-end"><button onClick={() => removeExpense(i)} className="w-full bg-red-100 text-red-700 py-2.5 rounded-lg text-xs font-bold">Remove</button></div>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={addExpense} className="bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold">+ Add Expense</button>
+            <div className="text-sm font-black text-red-700">Total: {CURRENCY}{fmt((form.expenses || []).reduce((a, e) => a + (+(e.amount) || 0), 0))}</div>
+          </div>
+        </div>
+      </SectionBox>
+      <SectionBox title="Vehicle KM Run" icon="KM" color="blue">
+        <div className="grid sm:grid-cols-4 gap-3">
+          <Input label="Starting KM" type="number" value={form.vehicleKm?.startKm || ""} onChange={e => setForm({ ...form, vehicleKm: { ...(form.vehicleKm || {}), startKm: e.target.value } })} />
+          <Input label="Ending KM" type="number" value={form.vehicleKm?.endKm || ""} onChange={e => setForm({ ...form, vehicleKm: { ...(form.vehicleKm || {}), endKm: e.target.value } })} />
+          <Input label="Total KM" type="number" value={+(form.vehicleKm?.totalKm || 0) || Math.max(0, +(form.vehicleKm?.endKm || 0) - +(form.vehicleKm?.startKm || 0)) || ""} onChange={e => setForm({ ...form, vehicleKm: { ...(form.vehicleKm || {}), totalKm: e.target.value } })} />
+          <Input label="KM Note" value={form.vehicleKm?.note || ""} onChange={e => setForm({ ...form, vehicleKm: { ...(form.vehicleKm || {}), note: e.target.value } })} />
+        </div>
+      </SectionBox>
+      <SectionBox title="Trip & Wage" icon="TR" color="green">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Loading From" value={form.loadingFrom} onChange={e => setForm({ ...form, loadingFrom: e.target.value })} />
+          <Input label="Unloaded Location" value={form.unloadedLocation} onChange={e => setForm({ ...form, unloadedLocation: e.target.value })} />
+          <Select label="Driver Charge Type" value={form.driverChargeType} options={[{ value: "batha", label: "Batha - add every report" }, { value: "coolie", label: "Coolie - fixed once per day" }]} onChange={e => setForm({ ...form, driverChargeType: e.target.value })} />
+          <Input label={`Driver Charge (${CURRENCY})`} type="number" value={form.driverCharge} onChange={e => setForm({ ...form, driverCharge: e.target.value })} />
+        </div>
+        <Textarea label="Remarks" value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} />
+      </SectionBox>
+      {message && <div className={`text-sm font-bold rounded-xl p-3 ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>{message}</div>}
+      <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">Submit Report</button>
+    </div>
+  );
+}
+
+function DriverReports({ user }) {
+  const [data, setData] = useState({ reports: [], summary: {} });
+  const [drivers, setDrivers] = useState([]);
+  const [loadError, setLoadError] = useState("");
+  const [filters, setFilters] = useState({ driver: "", mobile: "", datePreset: "today", customDate: today(), fromDate: "", toDate: "", category: "" });
+  const [editReport, setEditReport] = useState(null);
+  const [payDriver, setPayDriver] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
+
+  const query = () => {
+    const params = new URLSearchParams({ role: user.role, name: user.name });
+    if (filters.driver) params.set("driver", filters.driver);
+    if (filters.mobile) params.set("mobile", filters.mobile);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.datePreset === "today") params.set("date", today());
+    if (filters.datePreset === "custom") params.set("date", filters.customDate);
+    if (filters.datePreset === "range") { if (filters.fromDate) params.set("fromDate", filters.fromDate); if (filters.toDate) params.set("toDate", filters.toDate); }
+    return params.toString();
+  };
+  const normalizeDriverData = (d) => ({
+    reports: Array.isArray(d?.reports) ? d.reports : [],
+    summary: d?.summary || {},
+  });
+  useEffect(() => {
+    if (!isAdminLike(user.role)) return;
+    api("GET", "/users").then(u => {
+      const list = Array.isArray(u) ? u.filter(x => x.role === "driver" && x.active !== false) : [];
+      setDrivers(list);
+    }).catch(() => setDrivers([]));
+  }, [user.role]);
+  const load = async () => {
+    setLoadError("");
+    try {
+      const d = await api("GET", `/driverreports?${query()}`);
+      setData(normalizeDriverData(d));
+      if (d?.message) setLoadError(d.message);
+    } catch {
+      setData({ reports: [], summary: {} });
+      setLoadError("Unable to load driver reports.");
+    }
+  };
+  useEffect(() => { load(); }, [user.role, user.name, filters.driver, filters.mobile, filters.datePreset, filters.customDate, filters.fromDate, filters.toDate, filters.category]);
+
+  const saveEdit = async () => {
+    const audit = requestAuditReason("edit", "driver report", user);
+    if (!audit) return;
+    const updated = await api("PUT", `/driverreports/${editReport._id}`, { ...editReport, ...audit });
+    if (updated?._id) { setEditReport(null); load(); }
+  };
+  const deleteDriverReport = async (report) => {
+    if (!report?._id) return;
+    const audit = requestAuditReason("delete", "driver report", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/driverreports/${report._id}`, audit);
+    if (deleted?.ok) load();
+    else if (deleted?.message) window.alert(deleted.message);
+  };
+  const savePayment = async () => {
+    const updated = await api("POST", "/driverreports/payment", {
+      ...payForm,
+      driverName: payDriver?.driverName || filters.driver,
+      driverMobile: payDriver?.driverMobile || filters.mobile,
+      addedBy: user.name,
+      amount: +(payForm.amount || 0)
+    });
+    if (updated?.reports) {
+      setPayDriver(null);
+      setPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      setData(updated);
+    } else if (updated?.message) {
+      window.alert(updated.message);
+    }
+  };
+  const canOfficeEdit = isAdminLike(user.role);
+  const reports = Array.isArray(data.reports) ? data.reports : [];
+  const summary = data.summary || {};
+  const driverKeys = [...new Set(reports.map(r => r.driverMobile || r.driverName).filter(Boolean))];
+  const canPayDriverTotal = canOfficeEdit && driverKeys.length === 1;
+  const driverPayableAmount = (report) => {
+    if (report?.driverWageEarned !== undefined && report?.driverWageEarned !== null) {
+      return +(report.driverWageEarned) || 0;
+    }
+    const expenses = (Array.isArray(report?.expenses) ? report.expenses : [])
+      .reduce((sum, expense) => sum + (+(expense.amount) || 0), 0);
+    return (+(report?.driverCharge) || 0) + (+(report?.cashGivenToSupplier) || 0) + expenses;
+  };
+  const driverPaidAmount = (report) => +(report?.driverWagePaid || 0);
+  const driverPendingAmount = (report) => Math.max(0, driverPayableAmount(report) - driverPaidAmount(report));
+  const driverCreditAmount = (report) => Math.max(0, driverPaidAmount(report) - driverPayableAmount(report));
+  const escapePrint = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  const driverExpenseText = (report) => {
+    const items = Array.isArray(report.expenses) ? report.expenses : [];
+    if (!items.length) return "-";
+    return items.map(e => `${e.category || "Other"}${+(e.liters || 0) > 0 ? ` (${fmt(e.liters)} L)` : ""}: ${CURRENCY}${fmt(e.amount || 0)}${e.note ? ` - ${e.note}` : ""}`).join("; ");
+  };
+  const driverPaymentText = (report) => {
+    const payments = Array.isArray(report.payments) ? report.payments : [];
+    if (!payments.length) return "-";
+    return payments.map(p => `${p.date || "-"}: ${CURRENCY}${fmt(p.amount || 0)} (${p.mode || "Cash"}) - Given by ${p.addedBy || "-"}`).join("; ");
+  };
+  const printDriverLedger = () => {
+    const title = filters.driver || filters.mobile || (canOfficeEdit ? "All Drivers" : user.name);
+    const rows = reports.map((r, i) => {
+      const km = r.vehicleKm || {};
+      return `<tr>
+        <td>${i + 1}</td><td>${escapePrint(r.date || "")}</td><td>${escapePrint(r.driverName || "")}</td><td>${escapePrint([r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / "))}</td>
+        <td>${escapePrint([r.category, r.itemName].filter(Boolean).join(" / ") || "-")}</td><td>${escapePrint([r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-")}</td>
+        <td class="right">${fmt(r.quantity || 0)} ${escapePrint(r.unit || "")}<br>${+(r.loadAmount || 0) > 0 ? CURRENCY + fmt(r.loadAmount) : ""}</td><td>${escapePrint(driverExpenseText(r))}</td><td class="right">${fmt(km.totalKm || 0)}</td>
+        <td class="right">${CURRENCY}${fmt(driverPayableAmount(r))}</td><td class="right">${CURRENCY}${fmt(driverPaidAmount(r))}</td><td>${escapePrint(driverPaymentText(r))}</td><td class="right">${CURRENCY}${fmt(driverPendingAmount(r))}${driverCreditAmount(r) > 0 ? `<br>Credit ${CURRENCY}${fmt(driverCreditAmount(r))}` : ""}</td>
+      </tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><title>Driver Ledger</title><style>
+      body{font-family:Arial,sans-serif;color:#111;margin:16px}.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}.company{font-weight:900;font-size:18px}.muted{font-size:12px;color:#555}.title{text-align:right;font-size:24px;font-weight:900}.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:15px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px;vertical-align:top}th{background:#f3f4f6}.right{text-align:right}.printbtn{position:fixed;right:16px;top:12px;background:#111;color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700}@media print{.printbtn{display:none}body{margin:8mm}.summary{grid-template-columns:repeat(3,1fr)}} 
+    </style></head><body><button class="printbtn" onclick="window.print()">Print</button>
+      <div class="top"><div><div class="company">${escapePrint(COMPANY.companyName)}</div><div class="muted">${escapePrint(COMPANY.address)} | ${escapePrint(COMPANY.phone1 || "")}</div></div><div class="title">DRIVER LEDGER<div class="muted">${escapePrint(title)}</div></div></div>
+      <div class="summary"><div class="box">Trips<b>${fmt(summary.totalTrips || 0)}</b></div><div class="box">Total Due<b>${CURRENCY}${fmt(summary.totalEarned || 0)}</b></div><div class="box">Total Paid<b>${CURRENCY}${fmt(summary.totalPaid || 0)}</b></div><div class="box">Total Pending<b>${CURRENCY}${fmt(summary.totalPending || 0)}</b></div><div class="box">Driver Expenses<b>${CURRENCY}${fmt(summary.totalDriverExpenses || 0)}</b></div><div class="box">KM Run<b>${fmt(summary.totalKm || 0)}</b></div></div>
+      <table><thead><tr><th>#</th><th>Date</th><th>Driver</th><th>Vehicle</th><th>Item</th><th>Route</th><th>Qty</th><th>Expenses</th><th>KM</th><th>Total Due</th><th>Paid</th><th>Payment Receipt</th><th>Pending</th></tr></thead><tbody>${rows || `<tr><td colspan="13">No driver ledger entries found</td></tr>`}</tbody></table>
+    <script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">Driver Ledger</h2><div className="text-xs text-gray-400">{canOfficeEdit ? "All driver ledgers" : "Your submitted reports"}</div></div>
+        <button onClick={printDriverLedger} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>
+      </div>
+      <div className="bg-white rounded-xl border p-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-2">
+        {canOfficeEdit && (
+          <Select
+            label="Driver Name"
+            value={filters.driver}
+            options={[{ value: "", label: "All Drivers" }, ...drivers.map(d => ({ value: d.name, label: `${d.name}${d.vehicleNumber ? ` - ${d.vehicleNumber}` : ""}` }))]}
+            onChange={e => {
+              const selected = drivers.find(d => d.name === e.target.value);
+              setFilters({ ...filters, driver: e.target.value, mobile: selected?.mobile || "" });
+            }}
+          />
+        )}
+        {canOfficeEdit && <Input label="Mobile" value={filters.mobile} onChange={e => setFilters({ ...filters, mobile: e.target.value })} />}
+        <Select label="Date Filter" value={filters.datePreset} options={[{ value: "", label: "All" }, { value: "today", label: "Today" }, { value: "custom", label: "Date Wise" }, { value: "range", label: "Date Range" }]} onChange={e => setFilters({ ...filters, datePreset: e.target.value })} />
+        {filters.datePreset === "custom" && <Input label="Date" type="date" value={filters.customDate} onChange={e => setFilters({ ...filters, customDate: e.target.value })} />}
+        {filters.datePreset === "range" && <Input label="From" type="date" value={filters.fromDate} onChange={e => setFilters({ ...filters, fromDate: e.target.value })} />}
+        {filters.datePreset === "range" && <Input label="To" type="date" value={filters.toDate} onChange={e => setFilters({ ...filters, toDate: e.target.value })} />}
+        <Select label="Category" value={filters.category} options={["", "Interlock", "Hollow Bricks", "Raw Material", "Other"]} onChange={e => setFilters({ ...filters, category: e.target.value })} />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <StatCard label="Trips" value={summary.totalTrips || 0} icon="TR" color="blue" />
+        <StatCard label="Days" value={summary.totalWorkingDays || 0} icon="D" color="purple" />
+        <StatCard label="Total Due" value={`${CURRENCY}${fmt(summary.totalEarned)}`} icon="E" color="green" sub="Charge + reimbursements" />
+        <StatCard label="Paid" value={`${CURRENCY}${fmt(summary.totalPaid)}`} icon="P" color="teal" />
+        <StatCard label="Pending" value={`${CURRENCY}${fmt(summary.totalPending)}`} icon="!" color="red" />
+        <StatCard label="Credit" value={`${CURRENCY}${fmt(summary.totalCredit || 0)}`} icon="CR" color="green" />
+        <StatCard label="Driver Expenses" value={`${CURRENCY}${fmt(summary.totalDriverExpenses)}`} icon="EX" color="amber" sub="Included in pending" />
+        <StatCard label="Fuel Liters" value={fmt(summary.totalLiters || 0)} icon="L" color="blue" />
+        <StatCard label="KM Run" value={fmt(summary.totalKm || 0)} icon="KM" color="purple" />
+      </div>
+      {canPayDriverTotal && (
+        <button
+          onClick={() => {
+            const driver = reports[0] || {};
+            setPayDriver(driver);
+            setPayForm({ amount: +(summary.totalPending || 0) > 0 ? String(summary.totalPending || "") : "", date: today(), mode: "Cash", note: +(summary.totalPending || 0) > 0 ? "" : "Driver advance / extra payment" });
+          }}
+          className="w-full bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl text-sm font-black"
+        >
+          Make Payment to Driver
+        </button>
+      )}
+      {canOfficeEdit && +(summary.totalPending || 0) > 0 && !canPayDriverTotal && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-3 text-xs font-bold">
+          Select one driver by name or mobile to make a total payment.
+        </div>
+      )}
+      {loadError && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-xs font-bold">{loadError}</div>}
+      <SectionBox title="Driver Ledger View" icon="DL" color="blue">
+        {reports.length === 0 ? <div className="text-xs text-gray-400">No driver reports found</div> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-gray-400 border-b"><th className="py-2">Date</th><th>Driver</th><th>Vehicle</th><th>Item / Route</th><th>Expenses</th><th className="text-right">KM</th><th className="text-right">Total Due</th><th className="text-right">Paid</th><th className="text-right">Pending</th></tr></thead>
+              <tbody>{reports.map(r => {
+                const km = r.vehicleKm || {};
+                return <tr key={`ledger-${r._id}`} className="border-b border-gray-100">
+                  <td className="py-2 font-semibold">{r.date || "-"}</td>
+                  <td className="font-bold">{r.driverName || "-"}</td>
+                  <td>{[r.vehicleName, r.vehicleNumber].filter(Boolean).join(" / ") || "-"}</td>
+                  <td><div className="font-semibold">{[r.category, r.itemName].filter(Boolean).join(" / ") || "-"}</div><div className="text-gray-400">{[r.loadingFrom, r.unloadedLocation].filter(Boolean).join(" to ") || "-"}</div></td>
+                  <td>{driverExpenseText(r)}</td>
+                  <td className="text-right font-bold">{fmt(km.totalKm || 0)}</td>
+                  <td className="text-right text-green-700 font-black">{CURRENCY}{fmt(driverPayableAmount(r))}</td>
+                  <td className="text-right text-blue-700 font-black">{CURRENCY}{fmt(driverPaidAmount(r))}{(r.payments || []).length > 0 && <div className="text-[10px] text-gray-400 font-semibold">By {[...new Set((r.payments || []).map(p => p.addedBy).filter(Boolean))].join(", ") || "-"}</div>}</td>
+                  <td className="text-right text-red-600 font-black">{CURRENCY}{fmt(driverPendingAmount(r))}{driverCreditAmount(r) > 0 && <div className="text-green-700">Credit {CURRENCY}{fmt(driverCreditAmount(r))}</div>}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        )}
+      </SectionBox>
+      <div className="space-y-3">
+        {reports.length === 0 && <EmptyState icon="DR" text="No driver reports found" />}
+        {reports.map(r => {
+          const payments = Array.isArray(r.payments) ? r.payments : [];
+          const expenses = Array.isArray(r.expenses) ? r.expenses : [];
+          const expenseTotal = expenses.reduce((a, e) => a + (+(e.amount) || 0), 0);
+          const litersTotal = expenses.reduce((a, e) => a + (+(e.liters) || 0), 0);
+          const km = r.vehicleKm || {};
+          return <div key={r._id || `${r.driverName}-${r.date}-${r.itemName}`} className="bg-white border rounded-xl shadow-sm p-4 space-y-3">
+          <div className="flex justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-black">{r.driverName} - {r.vehicleNumber || "-"}</div>
+              <div className="text-xs text-gray-400">{r.date} | {r.category} | {r.itemName}</div>
+              <div className="text-xs text-gray-500">{r.loadingFrom || "-"} to {r.unloadedLocation || "-"}</div>
+            </div>
+            <Badge color={driverPendingAmount(r) > 0 ? "red" : "green"}>{driverPendingAmount(r) > 0 ? "Pending" : driverCreditAmount(r) > 0 ? "Credit" : "Paid"}</Badge>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Material / Item</div><div className="font-bold text-gray-900">{r.itemName || "-"}</div>{r.itemDetails && <div className="text-gray-500 mt-0.5">{r.itemDetails}</div>}</div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Quantity</div><div className="font-bold text-gray-900">{fmt(r.quantity || 0)} {r.unit || "piece"}</div>{+(r.loadAmount || 0) > 0 && <div className="text-green-700 font-black mt-0.5">Load Amount: {CURRENCY}{fmt(r.loadAmount)}</div>}</div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Vehicle</div><div className="font-bold text-gray-900">{r.vehicleName || "-"} {r.vehicleNumber ? `(${r.vehicleNumber})` : ""}</div></div>
+            <div className="bg-gray-50 rounded-lg p-2"><div className="text-gray-400">Charge Type</div><div className="font-bold text-gray-900 capitalize">{r.driverChargeType || "-"}</div><div className="text-gray-500">{CURRENCY}{fmt(r.driverCharge || 0)}</div></div>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 rounded-lg p-2"><div className="text-blue-500">Loading From</div><div className="font-bold text-blue-900">{r.loadingFrom || "-"}</div></div>
+            <div className="bg-blue-50 rounded-lg p-2"><div className="text-blue-500">Unloaded Location</div><div className="font-bold text-blue-900">{r.unloadedLocation || "-"}</div></div>
+          </div>
+          {((+(km.startKm || 0) > 0) || (+(km.endKm || 0) > 0) || (+(km.totalKm || 0) > 0) || km.note) && (
+            <div className="grid sm:grid-cols-4 gap-2 text-xs">
+              <div className="bg-indigo-50 rounded-lg p-2 text-center"><div className="text-indigo-500">Starting KM</div><div className="font-black text-indigo-700">{fmt(km.startKm || 0)}</div></div>
+              <div className="bg-indigo-50 rounded-lg p-2 text-center"><div className="text-indigo-500">Ending KM</div><div className="font-black text-indigo-700">{fmt(km.endKm || 0)}</div></div>
+              <div className="bg-indigo-50 rounded-lg p-2 text-center"><div className="text-indigo-500">Total KM Run</div><div className="font-black text-indigo-700">{fmt(km.totalKm || 0)}</div></div>
+              <div className="bg-indigo-50 rounded-lg p-2"><div className="text-indigo-500">KM Note</div><div className="font-bold text-indigo-900">{km.note || "-"}</div></div>
+            </div>
+          )}
+          {r.category === "Raw Material" && (
+            <div className="grid sm:grid-cols-4 gap-2 text-xs">
+              <div className="bg-teal-50 rounded-lg p-2"><div className="text-teal-500">Supplier</div><div className="font-bold text-teal-900">{r.supplierName || "-"}</div>{r.supplierMobile && <div className="text-teal-700">{r.supplierMobile}</div>}</div>
+              <div className="bg-blue-50 rounded-lg p-2 text-center"><div className="text-blue-600">Material Amount</div><div className="font-black text-blue-700">{CURRENCY}{fmt(r.loadAmount || ((+(r.cashGivenToSupplier)||0)+ (+(r.supplierPendingCash)||0)))}</div></div>
+              <div className="bg-green-50 rounded-lg p-2 text-center"><div className="text-green-600">Cash Given by Driver</div><div className="font-black text-green-700">{CURRENCY}{fmt(r.cashGivenToSupplier || 0)}</div><div className="text-green-700">Added to driver pending</div></div>
+              <div className="bg-red-50 rounded-lg p-2 text-center"><div className="text-red-500">Supplier Pending Cash</div><div className="font-black text-red-600">{CURRENCY}{fmt(r.supplierPendingCash || 0)}</div></div>
+            </div>
+          )}
+          {expenses.length > 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-lg p-2 text-xs">
+              <div className="flex justify-between font-bold text-amber-700 mb-1"><span>Driver Expenses (included in pending){litersTotal > 0 ? ` | ${fmt(litersTotal)} liters` : ""}</span><span>{CURRENCY}{fmt(expenseTotal)}</span></div>
+              {expenses.map((e, i) => (
+                <div key={i} className="flex justify-between border-t border-amber-100 py-1 first:border-t-0">
+                  <span>{e.category || "Other"}{+(e.liters || 0) > 0 ? ` | ${fmt(e.liters)} liters` : ""}{e.note ? ` | ${e.note}` : ""}</span>
+                  <span className="font-black">{CURRENCY}{fmt(e.amount || 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {payments.length > 0 && (
+            <div className="bg-green-50 border border-green-100 rounded-lg p-2 text-xs">
+              <div className="font-bold text-green-700 mb-1">Driver Payment History</div>
+              {payments.map((p, i) => (
+                <div key={i} className="flex justify-between border-t border-green-100 py-1 first:border-t-0">
+                  <span>{p.date || "-"} | {p.mode || "Cash"} | Given by: <b>{p.addedBy || "-"}</b>{p.note ? ` | ${p.note}` : ""}</span>
+                  <span className="font-black">{CURRENCY}{fmt(p.amount || 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.remarks && <div className="text-xs bg-amber-50 rounded-lg p-2 text-amber-800"><b>Remarks:</b> {r.remarks}</div>}
+          <div className="grid grid-cols-4 gap-2 text-xs"><div className="bg-green-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPayableAmount(r))}</b><br />Total Due</div><div className="bg-teal-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPaidAmount(r))}</b><br />Paid</div><div className="bg-red-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverPendingAmount(r))}</b><br />Pending</div><div className="bg-emerald-50 rounded-lg p-2 text-center"><b>{CURRENCY}{fmt(driverCreditAmount(r))}</b><br />Credit</div></div>
+          {(canOfficeEdit || user.role === "driver") && <div className="flex gap-2"><button onClick={() => setEditReport({ ...r })} className="flex-1 bg-blue-50 text-blue-700 py-2 rounded-lg text-xs font-bold">Edit Report</button><button onClick={() => deleteDriverReport(r)} className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg text-xs font-bold">Delete</button></div>}
+        </div>;
+        })}
+      </div>
+      {editReport && <Modal title="Edit Driver Report" onClose={() => setEditReport(null)}>
+        <div className="space-y-3">
+          <Input label="Driver" value={editReport.driverName} readOnly />
+          <SectionBox title="Load Details" icon="LD" color="amber">
+            <div className="grid sm:grid-cols-2 gap-2">
+              <Input label="Item Name" value={editReport.itemName || ""} onChange={e => setEditReport({ ...editReport, itemName: e.target.value })} />
+              <Input label="Quantity" type="number" value={editReport.quantity || ""} onChange={e => setEditReport({ ...editReport, quantity: e.target.value })} />
+              <Input label="Unit" value={editReport.unit || ""} onChange={e => setEditReport({ ...editReport, unit: e.target.value })} />
+              <Input label={`Load / Material Amount (${CURRENCY})`} type="number" value={editReport.loadAmount || ""} onChange={e => {
+                const loadAmount = +(e.target.value || 0);
+                const cashGiven = +(editReport.cashGivenToSupplier || 0);
+                setEditReport({ ...editReport, loadAmount: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : editReport.supplierPendingCash });
+              }} />
+              <Input label={`Cash Given to Supplier (${CURRENCY})`} type="number" value={editReport.cashGivenToSupplier || ""} onChange={e => {
+                const cashGiven = +(e.target.value || 0);
+                const loadAmount = +(editReport.loadAmount || 0);
+                setEditReport({ ...editReport, cashGivenToSupplier: e.target.value, supplierPendingCash: loadAmount ? String(Math.max(0, loadAmount - cashGiven)) : editReport.supplierPendingCash });
+              }} />
+              <Input label={`Supplier Pending (${CURRENCY})`} type="number" value={editReport.supplierPendingCash || ""} onChange={e => setEditReport({ ...editReport, supplierPendingCash: e.target.value })} />
+            </div>
+          </SectionBox>
+          <Select label="Charge Type" value={editReport.driverChargeType} options={[{ value: "batha", label: "Batha" }, { value: "coolie", label: "Coolie" }]} onChange={e => setEditReport({ ...editReport, driverChargeType: e.target.value })} />
+          <Input label={`Driver Charge (${CURRENCY})`} type="number" value={editReport.driverCharge || ""} onChange={e => setEditReport({ ...editReport, driverCharge: e.target.value })} />
+          <SectionBox title="Vehicle KM Run" icon="KM" color="blue">
+            <div className="grid sm:grid-cols-2 gap-2">
+              <Input label="Starting KM" type="number" value={editReport.vehicleKm?.startKm || ""} onChange={e => setEditReport(r => ({ ...r, vehicleKm: { ...(r.vehicleKm || {}), startKm: e.target.value } }))} />
+              <Input label="Ending KM" type="number" value={editReport.vehicleKm?.endKm || ""} onChange={e => setEditReport(r => ({ ...r, vehicleKm: { ...(r.vehicleKm || {}), endKm: e.target.value } }))} />
+              <Input label="Total KM" type="number" value={editReport.vehicleKm?.totalKm || ""} onChange={e => setEditReport(r => ({ ...r, vehicleKm: { ...(r.vehicleKm || {}), totalKm: e.target.value } }))} />
+              <Input label="KM Note" value={editReport.vehicleKm?.note || ""} onChange={e => setEditReport(r => ({ ...r, vehicleKm: { ...(r.vehicleKm || {}), note: e.target.value } }))} />
+            </div>
+          </SectionBox>
+          <SectionBox title="Driver Expenses" icon="EX" color="red">
+            <div className="space-y-2">
+              {((editReport.expenses || [])).map((expense, i) => (
+                <div key={i} className="grid sm:grid-cols-5 gap-2 border rounded-xl p-2 bg-red-50/40">
+                  <Select label="Expense" value={expense.category || "Other"} options={["Vehicle Service", "Diesel", "Petrol", "Other"]} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, category: e.target.value, liters: ["Diesel", "Petrol"].includes(e.target.value) ? x.liters : "" } : x) }))} />
+                  {["Diesel", "Petrol"].includes(expense.category) && <Input label="Liters Filled" type="number" value={expense.liters || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, liters: e.target.value } : x) }))} />}
+                  <Input label={`Amount (${CURRENCY})`} type="number" value={expense.amount || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, amount: e.target.value } : x) }))} />
+                  <Input label="Note" value={expense.note || ""} onChange={e => setEditReport(r => ({ ...r, expenses: (r.expenses || []).map((x, idx) => idx === i ? { ...x, note: e.target.value } : x) }))} />
+                  <div className="flex items-end"><button onClick={() => setEditReport(r => ({ ...r, expenses: (r.expenses || []).filter((_, idx) => idx !== i) }))} className="w-full bg-red-100 text-red-700 py-2.5 rounded-lg text-xs font-bold">Remove</button></div>
+                </div>
+              ))}
+              <button onClick={() => setEditReport(r => ({ ...r, expenses: [...(r.expenses || []), { category: "Diesel", amount: "", liters: "", note: "" }] }))} className="bg-red-50 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold">+ Add Expense</button>
+            </div>
+          </SectionBox>
+          <Textarea label="Remarks" value={editReport.remarks || ""} onChange={e => setEditReport({ ...editReport, remarks: e.target.value })} />
+          <button onClick={saveEdit} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold">Save Report</button>
+        </div>
+      </Modal>}
+      {payDriver && <Modal title="Driver Total Payment" onClose={() => setPayDriver(null)}>
+        <div className="space-y-3"><div className="bg-red-50 rounded-xl p-3 text-sm"><div className="font-bold">{payDriver.driverName || "-"}</div>Pending: <b>{CURRENCY}{fmt(summary.totalPending)}</b>{+(summary.totalCredit || 0) > 0 && <div className="text-green-700 font-bold">Credit: {CURRENCY}{fmt(summary.totalCredit || 0)}</div>}</div><Input label="Payment Date" type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} /><Input label={`Amount (${CURRENCY})`} type="number" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} /><Select label="Mode" value={payForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setPayForm({ ...payForm, mode: e.target.value })} /><Input label="Note" value={payForm.note} onChange={e => setPayForm({ ...payForm, note: e.target.value })} /><button onClick={savePayment} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold">Make Payment</button></div>
+      </Modal>}
+    </div>
+  );
+}
+
+function DailyCashFlow({ user, allUsers }) {
+  const [view, setView] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [dateMode, setDateMode] = useState("all");
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [personFilter, setPersonFilter] = useState(user.role === "admin" ? "role:all" : "");
+  const [data, setData] = useState({ history: [], total: {} });
+  const [loading, setLoading] = useState(true);
+
+  const getRange = () => {
+    if (view === "daily") return { from: selectedDate, to: selectedDate };
+    if (dateMode === "all") return { from: "", to: "" };
+    if (dateMode === "today") return { from: today(), to: today() };
+    if (dateMode === "monthly") {
+      const d = new Date();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      return { from: `${d.getFullYear()}-${month}-01`, to: `${d.getFullYear()}-${month}-${last}` };
+    }
+    if (dateMode === "custom") return { from: fromDate, to: fromDate };
+    return { from: fromDate, to: toDate };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const range = getRange();
+    const params = new URLSearchParams({ role: user.role, name: user.name, fromDate: range.from, toDate: range.to });
+    if (user.role === "admin") {
+      const [kind, role, ...nameParts] = personFilter.split(":");
+      if (kind === "role" && role !== "all") params.set("personRole", role);
+      if (kind === "person") {
+        params.set("personRole", role);
+        params.set("person", nameParts.join(":"));
+      }
+    }
+    setLoading(true);
+    api("GET", `/cashflow?${params.toString()}`).then(result => {
+      if (!active) return;
+      setData(result?.history ? result : { history: [], total: {} });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, user.name, view, selectedDate, dateMode, fromDate, toDate, personFilter]);
+
+  const isSupervisor = user.role === "supervisor" || (user.role === "admin" && personFilter.includes(":supervisor"));
+  const isMixedCashFlow = user.role === "admin" && personFilter === "role:all";
+  const total = data.total || {};
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const dateLabel = value => {
+    if (!value) return "—";
+    const [y,m,d] = value.split("-");
+    return `${d}-${m}-${y}`;
+  };
+  const personOptions = [
+    { value:"role:all", label:"All Persons" },
+    { value:"role:supervisor", label:"All Supervisors" },
+    { value:"role:user", label:"Admin & Users" },
+    ...(allUsers || []).filter(u=>u.role==="admin"||u.role==="supervisor"||u.role==="user").map(u=>({
+      value:`person:${u.role}:${u.name}`, label:`${u.name} (${u.role})`
+    }))
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Daily Cash Flow</h2>
+          <div className="text-xs text-gray-400">Read-only totals from reports, sales, purchases and payments</div>
+        </div>
+        {user.role!=="user"&&<div className="flex bg-white border rounded-xl p-1">
+          <button onClick={()=>setView("daily")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="daily"?"bg-amber-500 text-white":"text-gray-500"}`}>Daily View</button>
+          <button onClick={()=>setView("total")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view==="total"?"bg-amber-500 text-white":"text-gray-500"}`}>Total View</button>
+        </div>}
+      </div>
+
+      {user.role==="user"?<div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm font-bold text-blue-800">Today · {user.name}</div>:<div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {user.role==="admin"&&<Select label="Select Person" value={personFilter} options={personOptions} onChange={e=>setPersonFilter(e.target.value)} />}
+        {view==="daily" ? (
+          <Input label="Select Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />
+        ) : (
+          <>
+            <Select label="Date Filter" value={dateMode} options={[
+              {value:"all",label:"All Time"},{value:"today",label:"Today"},{value:"monthly",label:"Monthly"},
+              {value:"custom",label:"Custom Date"},{value:"range",label:"Date Range"}
+            ]} onChange={e=>setDateMode(e.target.value)} />
+            {(dateMode==="custom"||dateMode==="range")&&<Input label={dateMode==="custom"?"Date":"From Date"} type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+            {dateMode==="range"&&<Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+          </>
+        )}
+      </div>}
+
+      {loading ? <Loader /> : (
+        <>
+          {view==="daily"&&<div className="text-sm font-black text-gray-700">Date: {dateLabel(selectedDate)}</div>}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {isMixedCashFlow ? (
+              <>
+                <StatCard label="Cash Received" value={money(total.received)} icon="₹" color="green" />
+                <StatCard label="Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+                <StatCard label="Purchase Payments" value={money(total.purchasePayments)} icon="P" color="teal" />
+                <StatCard label="Admin Cash Received" value={money(total.adminCashReceived)} icon="AC" color="green" />
+                <StatCard label="Admin Cash Given" value={money(total.adminCashGiven)} icon="AC" color="red" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            ) : isSupervisor ? (
+              <>
+                <StatCard label="Cash Received" value={money(total.received)} icon="₹" color="green" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+                <StatCard label="Vehicle Charges" value={money(total.vehicleCharges)} icon="V" color="blue" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Material Payments" value={money(total.materialPayments)} icon="M" color="teal" />
+                <StatCard label="Equipment Payments" value={money(total.equipmentPayments)} icon="E" color="gray" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            ) : (
+              <>
+                <StatCard label="Total Sales Amount" value={money(total.salesAmount)} icon="S" color="blue" />
+                <StatCard label="Customer Payments Received" value={money(total.customerPayments)} icon="₹" color="green" />
+                <StatCard label="Purchase Payments" value={money(total.purchasePayments)} icon="P" color="amber" />
+                <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="teal" />
+                <StatCard label="Cash Received From Admin" value={money(total.adminCashReceived)} icon="AC" color="green" />
+                <StatCard label="Cash Given To Admin" value={money(total.adminCashGiven)} icon="AC" color="red" />
+                <StatCard label="Other Expenses" value={money(total.otherExpenses)} icon="O" color="purple" />
+                <StatCard label="Total Expenses" value={money(total.totalExpenses)} icon="−" color="red" />
+                <StatCard label="Net Cash Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance)>=0?"green":"red"} />
+              </>
+            )}
+          </div>
+
+          {data.history.length===0 ? <EmptyState icon="₹" text="No cash flow records for this filter" /> : (
+            <div className="space-y-3">
+              {data.history.map((row,i)=>(
+                <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
+                  <div className="flex justify-between gap-2">
+                    <div><div className="font-black">{dateLabel(row.date)}{user.role==="admin"?` · ${row.person}`:""}</div><div className="text-xs text-gray-400">{row.personRole}</div></div>
+                    <div className={`font-black ${row.netBalance>=0?"text-green-700":"text-red-600"}`}>{money(row.netBalance)}</div>
+                  </div>
+                  {isSupervisor ? (
+                    <>
+                      <SectionBox title="Cash Received" icon="₹" color="green">
+                        {(row.receivedDetails||[]).length===0?<div className="text-xs text-gray-400">No cash received</div>:(row.receivedDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.site||"—"}</span><span>{d.source}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                      </SectionBox>
+                      <SectionBox title="Cash Spent" icon="−" color="red">
+                        {(row.spentDetails||[]).length===0?<div className="text-xs text-gray-400">No cash spent</div>:(row.spentDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details||"—"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                      </SectionBox>
+                    </>
+                  ) : (
+                    <>
+                      <SectionBox title="Sales" icon="₹" color="green">
+                        {(row.salesDetails||[]).length===0?<div className="text-xs text-gray-400">No sales</div>:(row.salesDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.customer||"—"}</span><span>{d.item||"—"}</span><span className="text-right font-bold">{money(d.amountReceived)}</span></div>)}
+                      </SectionBox>
+                      {(row.receivedDetails||[]).length>0&&(
+                        <SectionBox title="Other Cash Received" icon="IN" color="teal">
+                          {(row.receivedDetails||[]).map((d,j)=><div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-teal-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.site||"—"}</span><span>{d.source||"Cash Received"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                        </SectionBox>
+                      )}
+                      <SectionBox title="Purchases & Expenses" icon="−" color="red">
+                        {(row.purchaseDetails||[]).map((d,j)=><div key={`p${j}`} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.supplier||"—"}</span><span>{d.material||"—"}</span><span className="text-right font-bold">{money(d.amountPaid)}</span></div>)}
+                        {(row.spentDetails||[]).map((d,j)=><div key={`e${j}`} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details||"—"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>)}
+                        {!(row.purchaseDetails||[]).length&&!(row.spentDetails||[]).length&&<div className="text-xs text-gray-400">No purchases or expenses</div>}
+                      </SectionBox>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SupervisorCashFlow({ user, allUsers }) {
+  const supervisors = (allUsers || []).filter(u => u.role === "supervisor");
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [dateMode, setDateMode] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7));
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [data, setData] = useState({ history: [], total: {} });
+  const [loading, setLoading] = useState(true);
+
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const dateLabel = value => {
+    if (!value) return "-";
+    const [y, m, d] = String(value).split("-");
+    return d && m && y ? `${d}-${m}-${y}` : value;
+  };
+  const monthRange = (month) => {
+    const [year, mon] = String(month || today().slice(0, 7)).split("-");
+    const last = new Date(+year, +mon, 0).getDate();
+    return { from: `${year}-${mon}-01`, to: `${year}-${mon}-${String(last).padStart(2, "0")}` };
+  };
+  const getRange = () => {
+    if (dateMode === "daily") return { from: selectedDate, to: selectedDate };
+    if (dateMode === "month") return monthRange(selectedMonth);
+    if (dateMode === "range") return { from: fromDate, to: toDate };
+    return { from: "", to: "" };
+  };
+
+  useEffect(() => {
+    let active = true;
+    const range = getRange();
+    const supervisorName = user.role === "supervisor" ? user.name : selectedSupervisor;
+    const params = new URLSearchParams({
+      role: isAdminLike(user.role) ? "admin" : user.role,
+      name: user.name,
+      personRole: "supervisor",
+      fromDate: range.from,
+      toDate: range.to,
+    });
+    if (supervisorName) params.set("person", supervisorName);
+    setLoading(true);
+    api("GET", `/cashflow?${params.toString()}`).then(result => {
+      if (!active) return;
+      setData(result?.history ? result : { history: [], total: {} });
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.role, user.name, selectedSupervisor, dateMode, selectedDate, selectedMonth, fromDate, toDate]);
+
+  const total = data.total || {};
+  const rows = Array.isArray(data.history) ? data.history : [];
+  const workerRows = row => (row.spentDetails || []).filter(d => d.type === "Worker Payment");
+  const expenseRows = row => (row.spentDetails || []).filter(d => d.type !== "Worker Payment");
+  const selectedLabel = user.role === "supervisor" ? user.name : (selectedSupervisor || "All Supervisors");
+  const printReport = () => {
+    const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+    const detailRows = rows.map(row => `
+      <tr class="day"><td colspan="5">${esc(dateLabel(row.date))} - ${esc(row.person)}</td></tr>
+      ${(row.receivedDetails || []).map(d => `<tr><td>Income</td><td>${esc(d.site || "-")}</td><td>${esc(d.source || "-")}</td><td class="right">${money(d.amount)}</td><td></td></tr>`).join("")}
+      ${(row.spentDetails || []).map(d => `<tr><td>Expense</td><td>${esc(d.type || "-")}</td><td>${esc(d.details || "-")}</td><td></td><td class="right">${money(d.amount)}</td></tr>`).join("")}
+      <tr class="total"><td colspan="3">Daily Net</td><td class="right">${money(row.received)}</td><td class="right">${money(row.totalExpenses)} | Net ${money(row.netBalance)}</td></tr>
+    `).join("");
+    const html = `<!doctype html><html><head><title>Supervisor Cashflow</title><style>
+      body{font-family:Arial,sans-serif;margin:16px;color:#111}.top{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px}.brand{font-size:18px;font-weight:900}.title{text-align:right;font-size:24px;font-weight:900}.muted{font-size:12px;color:#555}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:16px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #222;padding:6px;vertical-align:top}th,.day{background:#f3f4f6;font-weight:900}.right{text-align:right}.total{font-weight:900}.printbtn{position:fixed;right:16px;top:12px;background:#111;color:white;border:0;border-radius:8px;padding:8px 14px;font-weight:700}@media print{.printbtn{display:none}body{margin:8mm}.summary{grid-template-columns:repeat(2,1fr)}}
+    </style></head><body><button class="printbtn" onclick="window.print()">Print</button><div class="top"><div><div class="brand">${esc(COMPANY.companyName)}</div><div class="muted">${esc(COMPANY.address)}</div></div><div class="title">SUPERVISOR CASHFLOW<div class="muted">${esc(selectedLabel)}</div></div></div>
+    <div class="summary"><div class="box">Cash Received<b>${money(total.received)}</b></div><div class="box">Worker Payments<b>${money(total.workerPayments)}</b></div><div class="box">Total Expenses<b>${money(total.totalExpenses)}</b></div><div class="box">Net Balance<b>${money(total.netBalance)}</b></div></div>
+    <table><thead><tr><th>Type</th><th>Site / Category</th><th>Details</th><th>Income</th><th>Expense</th></tr></thead><tbody>${detailRows || `<tr><td colspan="5">No records found</td></tr>`}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),250)</script></body></html>`;
+    const w = window.open("", "_blank");
+    w.document.write(html);
+    w.document.close();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-black text-gray-900">Supervisor Cashflow</h2>
+          <div className="text-xs text-gray-400">Site cash received, worker payments and daily report expenses</div>
+        </div>
+        <button onClick={printReport} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Report</button>
+      </div>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {isAdminLike(user.role) && <Select label="Supervisor" value={selectedSupervisor} options={[{ value:"", label:"All Supervisors" }, ...supervisors.map(s => ({ value:s.name, label:`${s.name}${s.username ? ` (@${s.username})` : ""}` }))]} onChange={e => setSelectedSupervisor(e.target.value)} />}
+        <Select label="Date Filter" value={dateMode} options={[{ value:"daily", label:"Date Wise" }, { value:"month", label:"Month Wise" }, { value:"range", label:"Date Range" }, { value:"all", label:"All Time" }]} onChange={e => setDateMode(e.target.value)} />
+        {dateMode === "daily" && <Input label="Date" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />}
+        {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} />}
+        {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />}
+        {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e => setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Total Income" value={money(total.received)} icon="IN" color="green" />
+            <StatCard label="Worker Payments" value={money(total.workerPayments)} icon="W" color="amber" />
+            <StatCard label="Other Expenses" value={money((total.vehicleCharges || 0) + (total.materialPayments || 0) + (total.equipmentPayments || 0) + (total.otherExpenses || 0))} icon="EX" color="purple" />
+            <StatCard label="Net Balance" value={money(total.netBalance)} icon="=" color={+(total.netBalance) >= 0 ? "green" : "red"} />
+            <StatCard label="Material Payments" value={money(total.materialPayments)} icon="M" color="teal" />
+            <StatCard label="Equipment Payments" value={money(total.equipmentPayments)} icon="EQ" color="gray" />
+            <StatCard label="Vehicle Charges" value={money(total.vehicleCharges)} icon="V" color="blue" />
+            <StatCard label="Total Expense" value={money(total.totalExpenses)} icon="OUT" color="red" />
+          </div>
+          {rows.length === 0 ? <EmptyState icon="IN" text="No supervisor cashflow records found" /> : (
+            <div className="space-y-3">
+              {rows.map((row, i) => (
+                <div key={`${row.date}-${row.person}-${i}`} className="bg-white rounded-2xl border shadow-sm p-4 space-y-3">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <div><div className="font-black">{dateLabel(row.date)} - {row.person}</div><div className="text-xs text-gray-400">Daily report cashflow details</div></div>
+                    <div className={`font-black ${row.netBalance >= 0 ? "text-green-700" : "text-red-600"}`}>{money(row.netBalance)}</div>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-green-50 rounded-lg p-2 text-center"><b className="text-green-700">{money(row.received)}</b><br />Income</div>
+                    <div className="bg-amber-50 rounded-lg p-2 text-center"><b className="text-amber-700">{money(row.workerPayments)}</b><br />Worker Paid</div>
+                    <div className="bg-red-50 rounded-lg p-2 text-center"><b className="text-red-600">{money(row.totalExpenses)}</b><br />Expense</div>
+                    <div className={`${row.netBalance >= 0 ? "bg-green-50" : "bg-red-50"} rounded-lg p-2 text-center`}><b>{money(row.netBalance)}</b><br />Net</div>
+                  </div>
+                  <SectionBox title="Cash Received From Sites" icon="IN" color="green">
+                    {(row.receivedDetails || []).length === 0 ? <div className="text-xs text-gray-400">No site cash received</div> : (row.receivedDetails || []).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-green-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.site || "-"}</span><span>{d.source || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                  <SectionBox title="Cash Given To Workers" icon="W" color="amber">
+                    {workerRows(row).length === 0 ? <div className="text-xs text-gray-400">No worker payments</div> : workerRows(row).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-amber-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                  <SectionBox title="Other Daily Report Expenses" icon="EX" color="red">
+                    {expenseRows(row).length === 0 ? <div className="text-xs text-gray-400">No other expenses</div> : expenseRows(row).map((d, j) => (
+                      <div key={j} className="grid grid-cols-4 gap-2 text-xs border-b border-red-100 py-1"><span>{dateLabel(d.date)}</span><span>{d.type}</span><span>{d.details || "-"}</span><span className="text-right font-bold">{money(d.amount)}</span></div>
+                    ))}
+                  </SectionBox>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminCashFlow({ user, allUsers }) {
+  const admins = (allUsers || []).filter(u => u.role === "admin");
+  const officeUsers = (allUsers || []).filter(u => u.role === "user");
+  const officeAccounts = [...admins, ...officeUsers];
+  const [dateMode, setDateMode] = useState("daily");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0, 7));
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [filters, setFilters] = useState({ adminName: "", officeName: "" });
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const monthRange = (month) => {
+    const [year, mon] = String(month || today().slice(0, 7)).split("-");
+    const last = new Date(+year, +mon, 0).getDate();
+    return { from: `${year}-${mon}-01`, to: `${year}-${mon}-${String(last).padStart(2, "0")}` };
+  };
+  const range = () => {
+    if (dateMode === "daily") return { from: selectedDate, to: selectedDate };
+    if (dateMode === "month") return monthRange(selectedMonth);
+    if (dateMode === "range") return { from: fromDate, to: toDate };
+    return { from: "", to: "" };
+  };
+  const load = () => {
+    const r = range();
+    const legacyParams = new URLSearchParams({ role: user.role, name: user.name });
+    const transactionParams = new URLSearchParams({ partyType:"admin" });
+    if (r.from) { legacyParams.set("fromDate", r.from); transactionParams.set("fromDate", r.from); }
+    if (r.to) { legacyParams.set("toDate", r.to); transactionParams.set("toDate", r.to); }
+    if (filters.adminName) { legacyParams.set("adminName", filters.adminName); transactionParams.set("partyName", filters.adminName); }
+    if (filters.officeName) { legacyParams.set("officeName", filters.officeName); transactionParams.set("addedBy", filters.officeName); }
+    if (user.role === "user") transactionParams.set("addedBy", user.name);
+    setLoading(true);
+    Promise.all([
+      api("GET", `/admin-cash-transfers?${legacyParams.toString()}`),
+      api("GET", `/cash-transactions?${transactionParams.toString()}`),
+    ]).then(([legacy, transactions]) => {
+      const current = (transactions?.records || []).map(record => ({
+        ...record,
+        direction:record.direction === "give" ? "office_to_admin" : "admin_to_office",
+        adminName:record.partyName,
+        officeName:record.addedBy,
+      }));
+      setRows([...(Array.isArray(legacy) ? legacy : []), ...current].sort((a,b)=>(b.date || "").localeCompare(a.date || "") || new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+      setLoading(false);
+    });
+  };
+  useEffect(load, [user.role, user.name, dateMode, selectedDate, selectedMonth, fromDate, toDate, filters.adminName, filters.officeName]);
+
+  const givenToAdmin = rows.filter(r => r.direction === "office_to_admin").reduce((a,r)=>a+(+(r.amount)||0),0);
+  const receivedFromAdmin = rows.filter(r => r.direction === "admin_to_office").reduce((a,r)=>a+(+(r.amount)||0),0);
+  const officeImpact = receivedFromAdmin - givenToAdmin;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-black text-gray-900">Admin Cash Flow</h2>
+        <div className="text-xs text-gray-400">Cash movement between office account and admin</div>
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <Select label="Date Filter" value={dateMode} options={[{ value:"daily", label:"Date Wise" }, { value:"month", label:"Month Wise" }, { value:"range", label:"Date Range" }, { value:"all", label:"All Time" }]} onChange={e=>setDateMode(e.target.value)} />
+        {dateMode === "daily" && <Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
+        {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
+        {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+        {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+        <Select label="Admin" value={filters.adminName} options={[{value:"",label:"All Admins"}, ...admins.map(admin=>({value:admin.name,label:admin.name}))]} onChange={e=>setFilters({...filters,adminName:e.target.value})} />
+        {user.role !== "user" && <Select label="Office User" value={filters.officeName} options={[{value:"",label:"All Office Users"}, ...officeAccounts.map(o=>({value:o.name,label:o.name}))]} onChange={e=>setFilters({...filters,officeName:e.target.value})} />}
+      </div>
+
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Office Given To Admin" value={money(givenToAdmin)} icon="OUT" color="red" />
+            <StatCard label="Office Received" value={money(receivedFromAdmin)} icon="IN" color="green" />
+            <StatCard label="Office Balance Impact" value={money(officeImpact)} icon="=" color={officeImpact >= 0 ? "green" : "red"} />
+            <StatCard label="Entries" value={rows.length} icon="N" color="blue" />
+          </div>
+          {rows.length === 0 ? <EmptyState icon="AC" text="No admin cash flow records" /> : (
+            <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Admin</th><th className="p-2 text-left">Office User</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-right">Amount</th></tr></thead>
+                <tbody>{rows.map(r=>(
+                  <tr key={r._id} className="border-t">
+                    <td className="p-2">{r.date}</td>
+                    <td className={`p-2 font-bold ${r.direction==="office_to_admin" ? "text-red-600" : "text-green-700"}`}>{r.direction==="office_to_admin" ? "Office gave to Admin" : "Office received from Admin"}</td>
+                    <td className="p-2">{r.adminName||"-"}</td>
+                    <td className="p-2">{r.officeName||"-"}</td>
+                    <td className="p-2">{r.paymentMode||"-"}</td>
+                    <td className="p-2">{r.note||"-"}</td>
+                    <td className="p-2 text-right font-black">{money(r.amount)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CashTransactionsHub({ setPage }) {
+  const tiles = [
+    { id:"cashtransactionsite", title:"Site Cash", sub:"Receive site payments and update site balances", icon:"ST", color:"bg-violet-600 border-violet-700 hover:bg-violet-700" },
+    { id:"cashtransactiondriver", title:"Driver Cash", sub:"Cash received from or given to drivers", icon:"DR", color:"bg-orange-500 border-orange-600 hover:bg-orange-600" },
+    { id:"cashtransactionsupervisor", title:"Supervisor Cash", sub:"Cash received from or given to supervisors", icon:"SV", color:"bg-emerald-600 border-emerald-700 hover:bg-emerald-700" },
+    { id:"cashtransactionadmin", title:"Admin Cash", sub:"Cash received from or given to admins", icon:"AD", color:"bg-blue-600 border-blue-700 hover:bg-blue-700" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Cash Transactions</h2><div className="text-xs text-gray-400">Receive and give cash through one accountable ledger</div></div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[140px] rounded-lg border p-4 text-left text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}>
+          <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-4 -bottom-5 w-32 h-32 object-contain opacity-[0.12] pointer-events-none" />
+          <div className="relative z-[1] w-12 h-12 rounded-lg bg-white/20 border border-white/20 flex items-center justify-center font-black">{tile.icon}</div>
+          <div className="relative z-[1] mt-3 font-black">{tile.title}</div>
+          <div className="relative z-[1] mt-1 text-xs text-white/85">{tile.sub}</div>
+        </button>)}
+      </div>
+    </div>
+  );
+}
+
+function CashTransactionLedger({ user, allUsers, siteWorks, partyType }) {
+  const isSite = partyType === "site";
+  const partyTitle = partyType === "driver" ? "Driver" : partyType === "supervisor" ? "Supervisor" : isSite ? "Site" : "Admin";
+  const partyPlural = isSite ? "Sites" : `${partyTitle}s`;
+  const parties = isSite
+    ? (siteWorks || []).map(site=>({ ...site, name:site.customerName, mobile:site.siteLocation || site.phone || "" }))
+    : (allUsers || []).filter(person => person.role === partyType);
+  const [partyFilter, setPartyFilter] = useState("");
+  const [dateMode, setDateMode] = useState("all");
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [selectedMonth, setSelectedMonth] = useState(today().slice(0,7));
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [records, setRecords] = useState([]);
+  const [summary, setSummary] = useState({ receivedFromParty:0, givenToParty:0, officeBalanceImpact:0, partyBalance:0 });
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const currentTime = () => new Date().toTimeString().slice(0,5);
+  const [form, setForm] = useState({ date:today(), time:currentTime(), direction:"receive", partyId:"", partyName:"", amount:"", paymentMode:"Cash", note:"" });
+
+  const monthRange = month => {
+    const [year, mon] = String(month || today().slice(0,7)).split("-");
+    return { from:`${year}-${mon}-01`, to:`${year}-${mon}-${String(new Date(+year,+mon,0).getDate()).padStart(2,"0")}` };
+  };
+  const selectedRange = () => {
+    if (dateMode === "date") return { from:selectedDate, to:selectedDate };
+    if (dateMode === "month") return monthRange(selectedMonth);
+    if (dateMode === "range") return { from:fromDate, to:toDate };
+    return { from:"", to:"" };
+  };
+  const load = () => {
+    const range = selectedRange();
+    const params = new URLSearchParams({ partyType });
+    if (partyFilter) params.set("partyName", partyFilter);
+    if (range.from) params.set("fromDate", range.from);
+    if (range.to) params.set("toDate", range.to);
+    setLoading(true);
+    api("GET", `/cash-transactions?${params.toString()}`).then(data => {
+      setRecords(Array.isArray(data?.records) ? data.records : []);
+      setSummary(data?.summary || { receivedFromParty:0, givenToParty:0, officeBalanceImpact:0, partyBalance:0 });
+      setLoading(false);
+    });
+  };
+  useEffect(load, [partyType, partyFilter, dateMode, selectedDate, selectedMonth, fromDate, toDate, reloadKey]);
+
+  const resetForm = () => {
+    setEditingId("");
+    setForm({ date:today(), time:currentTime(), direction:"receive", partyId:"", partyName:partyFilter || "", amount:"", paymentMode:"Cash", note:"" });
+  };
+  const save = async () => {
+    setMessage("");
+    const selectedParty = parties.find(person => isSite ? String(person._id) === String(form.partyId) : person.name === form.partyName);
+    const payload = { ...form, partyType, partyId:selectedParty?._id || form.partyId || "", partyName:selectedParty?.name || form.partyName, amount:+(form.amount || 0), addedBy:user.name, addedByRole:user.role };
+    if (!payload.partyName || payload.amount <= 0) return setMessage(`Select ${partyTitle.toLowerCase()} and enter amount`);
+    const audit = editingId ? requestAuditReason("edit", "cash transaction", user) : null;
+    if (editingId && !audit) return;
+    const saved = await api(editingId ? "PUT" : "POST", editingId ? `/cash-transactions/${editingId}` : "/cash-transactions", { ...payload, ...(audit || {}) });
+    if (saved?._id) {
+      setMessage(editingId ? "Cash transaction updated successfully" : "Cash transaction saved successfully");
+      resetForm();
+      setReloadKey(key=>key+1);
+    } else setMessage(saved?.message || "Failed to save cash transaction");
+  };
+  const editRecord = record => {
+    setEditingId(record._id);
+    setForm({ date:record.date || today(), time:record.time || "", direction:isSite?"receive":record.direction || "receive", partyId:record.partyId || "", partyName:record.partyName || "", amount:String(record.amount || ""), paymentMode:record.paymentMode || "Cash", note:record.note || "" });
+    window.scrollTo({ top:0, behavior:"smooth" });
+  };
+  const deleteRecord = async record => {
+    const audit = requestAuditReason("delete", "cash transaction", user);
+    if (!audit) return;
+    const deleted = await api("DELETE", `/cash-transactions/${record._id}`, audit);
+    if (deleted?.ok) setReloadKey(key=>key+1);
+    else if (deleted?.message) window.alert(deleted.message);
+  };
+  const money = value => `${CURRENCY}${fmt(value)}`;
+  const printLedger = () => {
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const body = records.map(record=>`<tr><td>${esc(record.date)} ${esc(record.time || "")}</td><td>${esc(record.direction === "receive" ? "Received from" : "Given to")}</td><td>${esc(record.fromName)}</td><td>${esc(record.toName)}</td><td>${esc(record.paymentMode || "-")}</td><td>${esc(record.addedBy || "-")}</td><td class="right">${money(record.amount)}</td></tr>`).join("");
+    const summaryHtml = isSite ? `<div class="summary"><div class="box">Received From Sites<b>${money(summary.receivedFromParty)}</b></div><div class="box">Office Cash Increase<b>${money(summary.officeBalanceImpact)}</b></div></div>` : `<div class="summary"><div class="box">Received From ${partyTitle}<b>${money(summary.receivedFromParty)}</b></div><div class="box">Given To ${partyTitle}<b>${money(summary.givenToParty)}</b></div><div class="box">${partyTitle} Balance<b>${money(summary.partyBalance)}</b></div></div>`;
+    const html = `<!doctype html><html><head><title>${partyTitle} Cash Ledger</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:22px;margin:0}p{font-size:12px;color:#555}table{width:100%;border-collapse:collapse;font-size:12px;margin-top:14px}th,td{border:1px solid #222;padding:7px}th{background:#f3f4f6;text-align:left}.right{text-align:right}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.box{border:1px solid #222;padding:9px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}@media print{body{margin:8mm}}</style></head><body><h1>${esc(partyTitle)} Cash Transaction Ledger</h1><p>${esc(partyFilter || `All ${partyPlural}`)}</p>${summaryHtml}<table><thead><tr><th>Date / Time</th><th>Transaction</th><th>From</th><th>To</th><th>Mode</th><th>Entered By</th><th>Amount</th></tr></thead><tbody>${body || '<tr><td colspan="7">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup = window.open("", "_blank");
+    popup.document.write(html);
+    popup.document.close();
+  };
+
+  const partyOptions = [{ value:"", label:`Select ${partyTitle}` }, ...parties.map(person=>({ value:isSite?String(person._id):person.name, label:`${person.name}${person.mobile || person.phone ? ` - ${person.mobile || person.phone}` : ""}` }))];
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">{partyTitle} Cash Transactions</h2><div className="text-xs text-gray-400">{isSite?"Receive site payments and automatically update site reports":"Office receive, give and account balance ledger"}</div></div>
+        <button onClick={printLedger} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold">Print Ledger</button>
+      </div>
+      <SectionBox title={`${editingId ? "Edit" : "New"} ${partyTitle} Cash Transaction`} icon={partyTitle.slice(0,2).toUpperCase()} color={partyType === "driver" ? "amber" : partyType === "supervisor" ? "green" : isSite ? "purple" : "blue"}>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Time" type="time" value={form.time||""} onChange={e=>setForm({...form,time:e.target.value})} />
+          <Select label={partyTitle} value={isSite?form.partyId:form.partyName} options={partyOptions} onChange={e=>{const selected=parties.find(person=>String(isSite?person._id:person.name)===e.target.value);setForm({...form,partyId:isSite?e.target.value:"",partyName:selected?.name||e.target.value});}} />
+          {isSite?<div><div className="text-xs font-semibold text-gray-600 mb-1">Transaction</div><div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-sm font-bold text-green-700">Receive Cash From Site</div></div>:<Select label="Transaction" value={form.direction} options={[{value:"receive",label:`Receive From ${partyTitle}`},{value:"give",label:`Give To ${partyTitle}`}]} onChange={e=>setForm({...form,direction:e.target.value})} />}
+          <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button onClick={save} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold">{editingId ? "Update Transaction" : "Submit Transaction"}</button>
+          {editingId && <button onClick={resetForm} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold">Cancel Edit</button>}
+          {message && <span className={`text-xs font-bold ${message.includes("success") ? "text-green-700" : "text-red-600"}`}>{message}</span>}
+        </div>
+      </SectionBox>
+      <div className="bg-white rounded-xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <Select label={`${partyTitle} Filter`} value={partyFilter} options={[{value:"",label:`All ${partyPlural}`}, ...parties.map(person=>({value:person.name,label:person.name}))]} onChange={e=>setPartyFilter(e.target.value)} />
+        <Select label="Date Filter" value={dateMode} options={[{value:"all",label:"All Time"},{value:"date",label:"Date Wise"},{value:"month",label:"Month Wise"},{value:"range",label:"Date Range"}]} onChange={e=>setDateMode(e.target.value)} />
+        {dateMode === "date" && <Input label="Date" type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} />}
+        {dateMode === "month" && <Input label="Month" type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} />}
+        {dateMode === "range" && <Input label="From Date" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+        {dateMode === "range" && <Input label="To Date" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : <>
+        {isSite?<div className="grid grid-cols-2 gap-3">
+          <StatCard label="Received From Sites" value={money(summary.receivedFromParty)} icon="IN" color="green" />
+          <StatCard label="Office Cash Increase" value={money(summary.officeBalanceImpact)} icon="OF" color="blue" />
+        </div>:<div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label={`Received From ${partyTitle}`} value={money(summary.receivedFromParty)} icon="IN" color="green" />
+          <StatCard label={`Given To ${partyTitle}`} value={money(summary.givenToParty)} icon="OUT" color="red" />
+          <StatCard label="Office Balance Impact" value={money(summary.officeBalanceImpact)} icon="OF" color={summary.officeBalanceImpact >= 0 ? "green" : "red"} />
+          <StatCard label={`${partyTitle} Balance`} value={money(summary.partyBalance)} icon="=" color={summary.partyBalance >= 0 ? "blue" : "amber"} />
+        </div>}
+        {records.length === 0 ? <EmptyState icon="CT" text="No cash transactions found" /> : <div className="bg-white rounded-xl border shadow-sm overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Transaction</th><th className="p-2 text-left">From</th><th className="p-2 text-left">To</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Note</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Action</th></tr></thead>
+            <tbody>{records.map(record=><tr key={record._id} className="border-t">
+              <td className="p-2">{record.date || "-"}<div className="text-gray-400">{record.time || ""}</div></td><td className={`p-2 font-bold ${record.direction === "receive" ? "text-green-700" : "text-red-600"}`}>{record.direction === "receive" ? `Received from ${partyTitle}` : `Given to ${partyTitle}`}</td><td className="p-2 font-bold">{record.fromName || "-"}</td><td className="p-2 font-bold">{record.toName || "-"}</td><td className="p-2">{record.paymentMode || "-"}</td><td className="p-2">{record.note || "-"}</td><td className="p-2">{record.addedBy || "-"}<div className="text-gray-400">{record.addedByRole || ""}</div></td><td className="p-2 text-right font-black">{money(record.amount)}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editRecord(record)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-bold mr-1">Edit</button><button onClick={()=>deleteRecord(record)} className="bg-red-50 text-red-600 px-2 py-1 rounded-lg font-bold">Delete</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </>}
+    </div>
+  );
+}
+
+function LoadingOperations({ user }) {
+  const newKey=()=>globalThis.crypto?.randomUUID?.()||`dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const emptyForm=()=>({date:today(),time:new Date().toTimeString().slice(0,5),operation:"load",saleId:"",siteId:"",workerId:"",quantity:"",rate:"",totalAmount:"",remarks:"",submissionKey:newKey()});
+  const [data,setData]=useState({sales:[],summary:[],operations:[]});
+  const [sites,setSites]=useState([]);
+  const [workers,setWorkers]=useState([]);
+  const [form,setForm]=useState(emptyForm);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [message,setMessage]=useState("");
+  const [editingId,setEditingId]=useState("");
+  const [productFamily,setProductFamily]=useState("interlock");
+  const [filter,setFilter]=useState({operation:"",siteId:"",workerName:"",date:""});
+
+  const load=()=>{
+    setLoading(true);
+    Promise.all([api("GET","/loading-operations/availability"),api("GET","/sitework"),api("GET","/workers")]).then(([availability,siteRows,workerRows])=>{
+      setData(availability?.sales?availability:{sales:[],summary:[],operations:[]});
+      setSites(Array.isArray(siteRows)?siteRows:[]);
+      setWorkers((Array.isArray(workerRows)?workerRows:[]).filter(worker=>String(worker.status||"Active").toLowerCase()!=="inactive"));
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  };
+  useEffect(load,[]);
+
+  const selectedSale=data.sales.find(sale=>sale.saleId===form.saleId);
+  const selectedSiteBalance=selectedSale?.siteBalances?.find(site=>site.siteId===form.siteId);
+  const editingEntry=(data.operations||[]).find(entry=>String(entry._id)===String(editingId));
+  const currentAvailable=form.operation==="load"?+(selectedSale?.availableToLoad||0):+(selectedSiteBalance?.availableToUnload||0);
+  const editingAllowance=editingEntry&&editingEntry.saleId===form.saleId&&editingEntry.operation===form.operation&&(form.operation==="load"||editingEntry.siteId===form.siteId)?+(editingEntry.quantity||0):0;
+  const availableQty=currentAvailable+editingAllowance;
+  const saleFamily=sale=>sale.productType==="hollowbrick"||/hollow\s*brick|hollowbricks|ishtika/i.test(`${sale.product||""} ${sale.category||""}`)?"hollowbrick":"interlock";
+  const familySales=data.sales.filter(sale=>saleFamily(sale)===productFamily);
+  const saleOptions=familySales.filter(sale=>sale.saleId===form.saleId||(form.operation==="load"?sale.availableToLoad>0:sale.availableToUnload>0)).map(sale=>({value:sale.saleId,label:`${sale.invoiceNumber||"Sale"} - ${sale.product} / ${sale.color||sale.category||sale.productType} - ${fmt(form.operation==="load"?sale.availableToLoad:sale.availableToUnload)} available`}));
+  const siteOptions=sites.map(site=>({value:String(site._id),label:`${site.customerName}${site.siteLocation?` - ${site.siteLocation}`:""}`}));
+  const workerOptions=workers.map(worker=>({value:String(worker._id),label:`${worker.name} - ${workerTypeOf(worker)}`}));
+  const productDetails=row=>[row.productType==="hollowbrick"?"Hollow Brick":row.productType==="interlock"?"Interlock":"Other",row.category,row.color,row.size,row.thickness].filter(Boolean).join(" / ");
+  const updateOperation=operation=>setForm(current=>({...current,operation,saleId:"",siteId:"",quantity:""}));
+  const updateProductFamily=family=>{setProductFamily(family);setForm(current=>({...current,saleId:"",siteId:"",quantity:""}));setMessage("");};
+  const updateRate=(field,value)=>setForm(current=>{
+    const next={...current,[field]:value};
+    if(field==="quantity"||field==="rate")next.totalAmount=String((+(field==="quantity"?value:next.quantity)||0)*(+(field==="rate"?value:next.rate)||0));
+    return next;
+  });
+  const save=async()=>{
+    setMessage("");
+    if(!form.saleId||!form.siteId||!form.workerId||+(form.quantity||0)<=0)return setMessage("Select sale, site, worker and quantity");
+    if(+(form.quantity||0)>availableQty)return setMessage(`Only ${fmt(availableQty)} ${selectedSale?.unit||"piece"} available to ${form.operation}`);
+    setSaving(true);
+    const audit=editingId?requestAuditReason("edit","loading/unloading entry",user):null;
+    if(editingId&&!audit){setSaving(false);return;}
+    const result=await api(editingId?"PUT":"POST",editingId?`/loading-operations/${editingId}`:"/loading-operations",{...form,quantity:+form.quantity,rate:+form.rate,totalAmount:+form.totalAmount,addedBy:user.name,...(audit||{})});
+    if(result?._id){setMessage(result.duplicateIgnored?"This entry was already submitted. No duplicate was created.":`${form.operation==="load"?"Loading":"Unloading"} entry saved successfully`);setEditingId("");setForm(emptyForm());await load();}
+    else setMessage(result?.message||"Unable to save entry");
+    setSaving(false);
+  };
+  const editEntry=entry=>{
+    setEditingId(String(entry._id));
+    setMessage("");
+    setProductFamily(saleFamily(entry));
+    setForm({date:entry.date||today(),time:entry.time||"",operation:entry.operation,saleId:entry.saleId,siteId:entry.siteId,workerId:entry.workerId,quantity:String(entry.quantity||""),rate:String(entry.rate||""),totalAmount:String(entry.totalAmount||""),remarks:entry.remarks||"",submissionKey:entry.submissionKey||newKey()});
+    window.scrollTo({top:0,behavior:"smooth"});
+  };
+  const deleteEntry=async entry=>{
+    const audit=requestAuditReason("delete","loading/unloading entry",user);
+    if(!audit)return;
+    const result=await api("DELETE",`/loading-operations/${entry._id}`,audit);
+    if(result?.ok){setMessage("Entry deleted and balances recalculated");load();}
+    else if(result?.message)window.alert(result.message);
+  };
+  const cancelEdit=()=>{setEditingId("");setMessage("");setForm(emptyForm());};
+  const filteredOperations=(data.operations||[]).filter(entry=>(!filter.operation||entry.operation===filter.operation)&&(!filter.siteId||entry.siteId===filter.siteId)&&(!filter.workerName||entry.workerName===filter.workerName)&&(!filter.date||entry.date===filter.date));
+
+  if(loading)return <Loader/>;
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Loading & Unloading</h2><div className="text-xs text-gray-400">Sale-linked dispatch, site delivery and worker charge ledger</div></div>
+    <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-800">Stock is reduced when the sale is submitted. Loading and unloading only track dispatch progress, so stock is not reduced again.</div>
+    <SectionBox title={`${editingId?"Edit":"New"} Loading / Unloading Entry`} icon="LU" color="purple">
+      <div className="grid grid-cols-2 gap-2"><button type="button" onClick={()=>updateOperation("load")} className={`py-3 rounded-lg border-2 text-sm font-black ${form.operation==="load"?"bg-blue-600 border-blue-700 text-white":"bg-white border-blue-200 text-blue-700"}`}>{form.operation==="load"?"Selected: LOAD":"Load"}</button><button type="button" onClick={()=>updateOperation("unload")} className={`py-3 rounded-lg border-2 text-sm font-black ${form.operation==="unload"?"bg-green-600 border-green-700 text-white":"bg-white border-green-200 text-green-700"}`}>{form.operation==="unload"?"Selected: UNLOAD":"Unload"}</button></div>
+      <div>
+        <div className="text-xs font-bold text-slate-600 mb-1.5">Product Family</div>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={()=>updateProductFamily("interlock")} className={`min-h-12 rounded-lg border-2 px-3 text-sm font-black ${productFamily==="interlock"?"bg-orange-500 border-orange-600 text-white":"bg-orange-50 border-orange-200 text-orange-800"}`}>Interlock <span className="ml-1 text-xs opacity-80">({data.sales.filter(sale=>saleFamily(sale)==="interlock").length})</span></button>
+          <button type="button" onClick={()=>updateProductFamily("hollowbrick")} className={`min-h-12 rounded-lg border-2 px-3 text-sm font-black ${productFamily==="hollowbrick"?"bg-teal-600 border-teal-700 text-white":"bg-teal-50 border-teal-200 text-teal-800"}`}>Hollowbricks / Ishtika <span className="ml-1 text-xs opacity-80">({data.sales.filter(sale=>saleFamily(sale)==="hollowbrick").length})</span></button>
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label="Time" type="time" value={form.time} onChange={e=>setForm({...form,time:e.target.value})}/>
+        <Select label={`${productFamily==="interlock"?"Interlock":"Hollowbricks / Ishtika"} Sold Item / Invoice`} value={form.saleId} options={[{value:"",label:saleOptions.length?"Select sale item":`No ${productFamily==="interlock"?"interlock":"hollowbrick / Ishtika"} sale available`},...saleOptions]} onChange={e=>setForm({...form,saleId:e.target.value,siteId:"",quantity:""})}/>
+        <Select label="Site" value={form.siteId} options={[{value:"",label:"Select site"},...siteOptions]} onChange={e=>setForm({...form,siteId:e.target.value,quantity:""})}/>
+        <Select label="Worker (Site or Production)" value={form.workerId} options={[{value:"",label:"Select worker"},...workerOptions]} onChange={e=>setForm({...form,workerId:e.target.value})}/>
+        <Input label={`Quantity (${selectedSale?.unit||"piece"})`} type="number" value={form.quantity} onChange={e=>updateRate("quantity",e.target.value)}/>
+        <Input label={`Charge per ${selectedSale?.unit||"piece"} (${CURRENCY})`} type="number" value={form.rate} onChange={e=>updateRate("rate",e.target.value)}/>
+        <Input label={`Total Worker Charge (${CURRENCY})`} type="number" value={form.totalAmount} onChange={e=>setForm({...form,totalAmount:e.target.value,rate:""})}/>
+        <Input label="Remarks" value={form.remarks} onChange={e=>setForm({...form,remarks:e.target.value})}/>
+      </div>
+      {saleOptions.length===0&&<div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">No sold {productFamily==="interlock"?"interlock":"hollowbrick / Ishtika"} item is waiting for {form.operation==="load"?"loading":"unloading"}. Submit its sale first, then it will appear here automatically.</div>}
+      {selectedSale&&<div className="rounded-lg bg-slate-50 border p-3 text-xs"><div className="font-black text-slate-900">{selectedSale.product}</div><div className="text-slate-500">{productDetails(selectedSale)} · Sold {fmt(selectedSale.sold)} {selectedSale.unit}</div><div className="mt-2 grid grid-cols-3 gap-2 text-center"><div className="bg-white rounded p-2"><b className="text-blue-700">{fmt(selectedSale.availableToLoad)}</b><div>To Load</div></div><div className="bg-white rounded p-2"><b className="text-green-700">{fmt(selectedSale.availableToUnload)}</b><div>Loaded, not unloaded</div></div><div className="bg-white rounded p-2"><b className="text-violet-700">{fmt(availableQty)}</b><div>Available for this entry</div></div></div>{form.operation==="unload"&&form.siteId&&!selectedSiteBalance&&<div className="mt-2 font-bold text-red-600">Nothing has been loaded for this sale at the selected site.</div>}</div>}
+      <div className="flex flex-wrap gap-2 items-center"><button type="button" disabled={saving} onClick={save} className="bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white px-5 py-2.5 rounded-lg text-sm font-black">{saving?"Saving...":editingId?"Update Entry":"Submit Entry"}</button>{editingId&&<button type="button" onClick={cancelEdit} className="bg-gray-100 px-4 py-2.5 rounded-lg text-sm font-bold">Cancel</button>}{message&&<span className={`text-xs font-bold ${message.includes("success")||message.includes("already")||message.includes("deleted")?"text-green-700":"text-red-600"}`}>{message}</span>}</div>
+    </SectionBox>
+    <SectionBox title="Available Sale Stock by Product" icon="ST" color="blue">
+      {(data.summary||[]).filter(row=>saleFamily(row)===productFamily).length===0?<EmptyState icon="ST" text={`No sold ${productFamily==="interlock"?"interlock":"hollowbrick / Ishtika"} items available`}/>:<div className="grid md:grid-cols-2 gap-3">{data.summary.filter(row=>saleFamily(row)===productFamily).map((row,index)=><div key={`${row.product}-${row.color}-${index}`} className="border rounded-lg p-3"><div className="font-black">{row.product}</div><div className="text-xs text-gray-500">{productDetails(row)}</div><div className="grid grid-cols-5 gap-1 mt-2 text-center text-[10px]"><div className="bg-slate-50 p-1.5 rounded"><b>{fmt(row.sold)}</b><div>Sold</div></div><div className="bg-blue-50 p-1.5 rounded"><b>{fmt(row.loaded)}</b><div>Loaded</div></div><div className="bg-green-50 p-1.5 rounded"><b>{fmt(row.unloaded)}</b><div>Unloaded</div></div><div className="bg-amber-50 p-1.5 rounded"><b>{fmt(row.availableToLoad)}</b><div>To Load</div></div><div className="bg-violet-50 p-1.5 rounded"><b>{fmt(row.availableToUnload)}</b><div>To Unload</div></div></div></div>)}</div>}
+    </SectionBox>
+    <div className="bg-white rounded-lg border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3"><Select label="Action" value={filter.operation} options={[{value:"",label:"Load & Unload"},{value:"load",label:"Loaded"},{value:"unload",label:"Unloaded"}]} onChange={e=>setFilter({...filter,operation:e.target.value})}/><Select label="Site" value={filter.siteId} options={[{value:"",label:"All Sites"},...siteOptions]} onChange={e=>setFilter({...filter,siteId:e.target.value})}/><Select label="Worker" value={filter.workerName} options={[{value:"",label:"All Workers"},...workers.map(worker=>({value:worker.name,label:worker.name}))]} onChange={e=>setFilter({...filter,workerName:e.target.value})}/><Input label="Date" type="date" value={filter.date} onChange={e=>setFilter({...filter,date:e.target.value})}/></div>
+    {filteredOperations.length===0?<EmptyState icon="LU" text="No loading or unloading entries"/>:<div className="bg-white rounded-lg border shadow-sm overflow-x-auto"><table className="w-full min-w-[980px] text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Action</th><th className="p-2 text-left">Invoice / Customer</th><th className="p-2 text-left">Product</th><th className="p-2 text-left">Site</th><th className="p-2 text-left">Worker</th><th className="p-2 text-right">Quantity</th><th className="p-2 text-right">Charge</th><th className="p-2 text-left">Entered By</th><th className="p-2 text-right">Action</th></tr></thead><tbody>{filteredOperations.map(entry=><tr key={entry._id} className="border-t"><td className="p-2">{entry.date}<div className="text-gray-400">{entry.time}</div></td><td className={`p-2 font-black ${entry.operation==="load"?"text-blue-700":"text-green-700"}`}>{entry.operation==="load"?"LOAD":"UNLOAD"}</td><td className="p-2 font-bold">{entry.invoiceNumber||"-"}<div className="font-normal text-gray-500">{entry.customerName||""}</div></td><td className="p-2 font-bold">{entry.product}<div className="font-normal text-gray-500">{productDetails(entry)}</div></td><td className="p-2">{entry.siteName}</td><td className="p-2">{entry.workerName}<div className="text-gray-400">{entry.workerType==="production-worker"?"Production Worker":"Site Worker"}</div></td><td className="p-2 text-right font-black">{fmt(entry.quantity)} {entry.unit}</td><td className="p-2 text-right font-black text-amber-700">{CURRENCY}{fmt(entry.totalAmount)}</td><td className="p-2">{entry.addedBy||"-"}</td><td className="p-2 text-right whitespace-nowrap"><button onClick={()=>editEntry(entry)} className="bg-blue-50 text-blue-700 px-2 py-1 rounded font-bold mr-1">Edit</button><button onClick={()=>deleteEntry(entry)} className="bg-red-50 text-red-600 px-2 py-1 rounded font-bold">Delete</button></td></tr>)}</tbody></table></div>}
+  </div>;
+}
+
+function CashFlowHub({ user, setPage }) {
+  const tiles = [
+    { id:"cashflow", title:"Daily Cash Flow", sub:"User, office and supervisor balance summary", icon:"💵", color:"green", show:true },
+    { id:"companyexpense", title:"Company Expense", sub:"Salary payments and all company expense history", icon:"CE", color:"red", show:isAdminLike(user.role) },
+    { id:"companypurchase", title:"Company Purchase", sub:"Record materials and purchases made for the company", icon:"CP", color:"amber", show:isAdminLike(user.role) },
+    { id:"supervisorcashflow", title:"Supervisor Cashflow", sub:"Site cash, worker payment and supervisor handover", icon:"SC", color:"amber", show:isAdminLike(user.role) },
+    { id:"admincashflow", title:"Admin Cashflow", sub:"Cash given to admin or received from admin", icon:"AC", color:"blue", show:isAdminLike(user.role) },
+    { id:"officedaily", title:"Office Daily Report", sub:"Sales, purchase, production and cash received report", icon:"DR", color:"purple", show:isAdminLike(user.role) },
+  ].filter(t => t.show);
+  const colorClass = {
+    green:"border-emerald-700 bg-emerald-600 hover:bg-emerald-700",
+    amber:"border-amber-600 bg-amber-500 hover:bg-amber-600",
+    blue:"border-blue-700 bg-blue-600 hover:bg-blue-700",
+    purple:"border-violet-700 bg-violet-600 hover:bg-violet-700",
+    red:"border-red-700 bg-red-600 hover:bg-red-700",
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-black text-gray-900">Cash Flow Records</h2>
+        <div className="text-xs text-gray-400">Open each cash flow and report section from here</div>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile => (
+          <button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden text-left min-h-[132px] rounded-lg border shadow-sm hover:shadow-md p-4 text-white transition-all ${colorClass[tile.color]}`}>
+            <img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-3 -bottom-4 w-28 h-28 object-contain opacity-[0.12] pointer-events-none" />
+            <div className="relative z-[1] flex items-start gap-3">
+              <div className="w-11 h-11 rounded-lg bg-white/20 border border-white/20 flex items-center justify-center text-xs font-black text-white">{tile.icon}</div>
+              <div>
+                <div className="font-black text-white">{tile.title}</div>
+                <div className="text-xs text-white/80 mt-1">{tile.sub}</div>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminControlHub({ setPage, pendingApprovalCount = 0 }) {
+  const tiles = [
+    { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, tone:"amber" },
+    { id:"completedworks", title:"Completed Works", sub:"Review site completion requests awaiting Admin approval", icon:CalendarCheck, tone:"teal", badge:pendingApprovalCount },
+    { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:Smartphone, tone:"blue" },
+    { id:"users", title:"Users", sub:"Create and manage application users", icon:UsersRound, tone:"teal" },
+    { id:"salarymanagement", title:"Salary Management", sub:"Set monthly salary, incentive and absent days", icon:WalletCards, tone:"violet" },
+    { id:"reportaudit", title:"Report Audit", sub:"View edited or deleted reports with submitted reasons", icon:FileSearch, tone:"red" },
+  ];
+  const tones = { amber:"border-amber-200 text-amber-700 bg-amber-50", blue:"border-blue-200 text-blue-700 bg-blue-50", teal:"border-teal-200 text-teal-700 bg-teal-50", violet:"border-violet-200 text-violet-700 bg-violet-50", red:"border-red-200 text-red-700 bg-red-50" };
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Admin Panel</h2><div className="text-xs text-gray-400">Administration and system setup</div></div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[112px] rounded-lg border border-slate-200 bg-white p-4 text-left flex items-start gap-3 shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tones[tile.tone]}`}><UiIcon icon={tile.icon}/></span><span className="flex-1"><span className="flex items-center gap-1 font-black text-slate-900">{tile.title}{tile.badge>0&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800"><Bell size={12}/>{tile.badge}</span>}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></span></button>)}
+      </div>
+    </div>
+  );
+}
+
+function ReportsHub({ setPage }) {
+  const tiles = [
+    { id:"sitereport", title:"Site Reports", sub:"Complete site progress, payments and work details", icon:Building2, accent:"text-blue-700 bg-blue-50 border-blue-200" },
+    { id:"workerreport2", title:"Worker Reports", sub:"Worker earnings, payments, pending and work history", icon:HardHat, accent:"text-emerald-700 bg-emerald-50 border-emerald-200" },
+    { id:"driverreports", title:"Driver Reports", sub:"Trips, expenses, wages and driver ledger", icon:Truck, accent:"text-orange-700 bg-orange-50 border-orange-200" },
+    { id:"dailyreport", title:"Supervisor Reports", sub:"Daily site, worker, expense and office reports", icon:ClipboardList, accent:"text-violet-700 bg-violet-50 border-violet-200" },
+  ];
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Reports</h2><div className="text-xs text-gray-400">Open detailed operational reports</div></div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className="group min-h-[132px] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-slate-300 hover:shadow-md transition-all"><span className={`w-11 h-11 rounded-lg border flex items-center justify-center mb-3 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span className="block font-black text-slate-900">{tile.title}</span><span className="block text-xs leading-relaxed text-slate-500 mt-1">{tile.sub}</span></button>)}
+      </div>
+    </div>
+  );
+}
+
+function SalaryManagement({ user }) {
+  const currentMonth = today().slice(0,7);
+  const empty = { role:"supervisor", employeeId:"", month:currentMonth, monthlySalary:"", incentive:"", absentDays:"", manualSalary:"" };
+  const [users, setUsers] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [form, setForm] = useState(empty);
+  const [message, setMessage] = useState("");
+  const load = ()=>Promise.all([api("GET","/users"),api("GET","/salary-records")]).then(([u,r])=>{setUsers(Array.isArray(u)?u:[]);setRecords(Array.isArray(r)?r:[]);});
+  useEffect(()=>{load();},[]);
+  const present = Math.max(0,30-(+(form.absentDays)||0));
+  const calculated = (((+(form.monthlySalary)||0)/30)*present)+ (+(form.incentive)||0);
+  const payable = +(form.manualSalary)||calculated;
+  const save = async()=>{
+    setMessage("");
+    if(!form.employeeId||!form.month||+(form.monthlySalary)<=0) return setMessage("Employee, month and monthly salary are required");
+    const saved=await api("POST","/salary-records",{...form,addedBy:user.name,updatedBy:user.name});
+    if(saved?._id){setMessage("Monthly salary saved successfully");setForm({...empty,role:form.role,month:form.month});load();} else setMessage(saved?.message||"Unable to save salary");
+  };
+  const people=users.filter(u=>u.role===form.role&&u.active!==false);
+  const salaryReceipts = records.flatMap(record => (record.payments || []).map((payment, index) => ({
+    ...payment,
+    key: payment._id || `${record._id}-${index}`,
+    employeeName: record.employeeName,
+    role: record.role,
+    month: record.month,
+  }))).sort((a,b)=>(b.date || "").localeCompare(a.date || ""));
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Salary Management</h2><div className="text-xs text-gray-400">Set monthly salary for supervisors and office users</div></div>
+    <SectionBox title="Monthly Salary Setup" icon="PAY" color="violet">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <Select label="Employee Type" value={form.role} options={[{value:"supervisor",label:"Supervisor"},{value:"user",label:"Office User"}]} onChange={e=>setForm({...form,role:e.target.value,employeeId:""})}/>
+        <Select label="Employee Name" value={form.employeeId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,employeeId:e.target.value})}/>
+        <Input label="Salary Month" type="month" value={form.month} onChange={e=>setForm({...form,month:e.target.value})}/>
+        <Input label={`Monthly Salary (${CURRENCY})`} type="number" value={form.monthlySalary} onChange={e=>setForm({...form,monthlySalary:e.target.value})}/>
+        <Input label={`Incentive - Optional (${CURRENCY})`} type="number" value={form.incentive} onChange={e=>setForm({...form,incentive:e.target.value})}/>
+        <Input label="Absent Days" type="number" value={form.absentDays} onChange={e=>setForm({...form,absentDays:e.target.value})}/>
+        <Input label={`Manual Final Salary - Optional (${CURRENCY})`} type="number" value={form.manualSalary} onChange={e=>setForm({...form,manualSalary:e.target.value})}/>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs"><div className="bg-blue-50 rounded-lg p-2"><b className="block text-blue-700 text-lg">{present}</b>Present Days</div><div className="bg-amber-50 rounded-lg p-2"><b className="block text-amber-700 text-lg">{CURRENCY}{fmt(calculated)}</b>Auto Calculated</div><div className="bg-green-50 rounded-lg p-2"><b className="block text-green-700 text-lg">{CURRENCY}{fmt(payable)}</b>Final Salary</div></div>
+      <button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Save Monthly Salary</button>
+    </SectionBox>
+    {message&&<div className="bg-green-50 text-green-700 rounded-lg p-3 text-sm font-bold">{message}</div>}
+    <div className="space-y-2">{records.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName} <Badge color="blue">{r.role}</Badge></div><div className="text-xs text-gray-500">{r.month} · Present {r.presentDays}/30 · Absent {r.absentDays} · Incentive {CURRENCY}{fmt(r.incentive)}</div></div><div className="text-right"><div className="font-black">{CURRENCY}{fmt(r.payableAmount)}</div><div className="text-xs text-teal-700">Received {CURRENCY}{fmt(r.paidAmount)}</div><div className="text-xs text-red-600">Pending {CURRENCY}{fmt(r.pendingAmount)}</div></div></div>)}</div>
+    {salaryReceipts.length > 0 && <SectionBox title="Salary Received / Payment History" icon="PAY" color="green"><div className="space-y-2">{salaryReceipts.map(p=><div key={p.key} className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-green-50 border border-green-100 rounded-lg p-3 text-xs"><div><div className="text-gray-400">Employee</div><div className="font-black">{p.employeeName}</div></div><div><div className="text-gray-400">Type</div><div className="font-bold capitalize">{p.role}</div></div><div><div className="text-gray-400">Salary Month</div><div className="font-bold">{p.month}</div></div><div><div className="text-gray-400">Received Date</div><div className="font-bold">{p.date || "-"}</div></div><div><div className="text-gray-400">Amount / Mode</div><div className="font-black text-green-700">{CURRENCY}{fmt(p.amount)} · {p.mode || "Cash"}</div></div><div><div className="text-gray-400">Given By</div><div className="font-black text-blue-700">{p.paidBy || "-"}</div></div></div>)}</div></SectionBox>}
+  </div>;
+}
+
+const salaryPersonTypes = [
+  {value:"production-worker",label:"Production Worker"},
+  {value:"site-worker",label:"Site Worker"},
+  {value:"driver",label:"Driver"},
+  {value:"supervisor",label:"Supervisor"},
+  {value:"user",label:"Office User"},
+];
+
+function availableAdvance(records, { personType, personId, personName, mobile }) {
+  const normalizedMobile = String(mobile || "").replace(/\D/g, "").slice(-10);
+  return (records || []).filter(row => {
+    if (row.personType !== personType) return false;
+    if (personId && row.personId && String(row.personId) === String(personId)) return true;
+    if (normalizedMobile && String(row.mobile || "").replace(/\D/g, "").slice(-10) === normalizedMobile) return true;
+    return personName && String(row.personName || "").toLowerCase() === String(personName).toLowerCase();
+  }).reduce((sum,row)=>sum+(+(row.balance)||0),0);
+}
+
+function AdvanceAdjustment({ available, pending, pay, setPay }) {
+  const adjusted = pay.useAdvance ? Math.min(available, Math.max(0,(+pending||0)-(+pay.amount||0))) : 0;
+  return <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 space-y-2">
+    <label className="flex items-center justify-between gap-3 cursor-pointer">
+      <span><b className="block text-violet-900">Adjust available advance</b><span className="text-xs text-violet-700">Available: {CURRENCY}{fmt(available)}</span></span>
+      <input type="checkbox" checked={!!pay.useAdvance} disabled={available<=0} onChange={e=>setPay({...pay,useAdvance:e.target.checked})} className="w-5 h-5" />
+    </label>
+    {pay.useAdvance&&available>0&&<div className="text-sm font-bold text-violet-800">Advance adjusted now: {CURRENCY}{fmt(adjusted)}</div>}
+  </div>;
+}
+
+function SalaryPaymentLedger({ kind="salary", personType="", refreshKey=0, title="Payment Ledger" }) {
+  const [records,setRecords]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filters,setFilters]=useState({recipient:"",givenBy:"",dateMode:"all",date:today(),month:today().slice(0,7),fromDate:today(),toDate:today()});
+  useEffect(()=>{
+    const params=new URLSearchParams({kind});
+    if(personType)params.set("personType",personType);
+    setLoading(true);
+    api("GET",`/salary-payment-ledger?${params.toString()}`).then(data=>{setRecords(data?.records||[]);setLoading(false);});
+  },[kind,personType,refreshKey]);
+  const recipients=[...new Set(records.map(row=>row.recipient).filter(Boolean))].sort();
+  const givers=[...new Set(records.map(row=>row.givenBy).filter(Boolean))].sort();
+  const visible=records.filter(row=>{
+    if(filters.recipient&&row.recipient!==filters.recipient)return false;
+    if(filters.givenBy&&row.givenBy!==filters.givenBy)return false;
+    if(filters.dateMode==="date"&&row.date!==filters.date)return false;
+    if(filters.dateMode==="month"&&!String(row.date||"").startsWith(filters.month))return false;
+    if(filters.dateMode==="range"&&((filters.fromDate&&row.date<filters.fromDate)||(filters.toDate&&row.date>filters.toDate)))return false;
+    return true;
+  });
+  const totals=visible.reduce((sum,row)=>({amount:sum.amount+(+row.amount||0),cash:sum.cash+(+row.cashAmount||0),advance:sum.advance+(+row.advanceAdjusted||0)}),{amount:0,cash:0,advance:0});
+  const dateTime=value=>value?new Date(value).toLocaleString("en-IN",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+  const personTypeLabel=value=>salaryPersonTypes.find(type=>type.value===value)?.label||value||"-";
+  const paymentPeriod=row=>!row.paymentScope?"-":row.paymentScope==="current-week"?`${row.weekStart} to ${row.weekEnd}`:row.paymentScope==="previous-weeks"?"Previous unpaid weeks":row.paymentScope==="selected-week"?`${row.weekStart} to ${row.weekEnd}`:"Oldest pending first";
+  const printLedger=()=>{
+    const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+    const rows=visible.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(dateTime(row.dateTime))}</td><td>${esc(row.recipient)}</td><td>${esc(personTypeLabel(row.personType))}</td><td>${esc(row.givenBy||"-")}</td><td>${esc(paymentPeriod(row))}</td><td>${esc(row.mode||"-")}</td><td>${esc(row.source||"-")}</td><td class="right">${CURRENCY}${fmt(row.amount)}</td></tr>`).join("");
+    const html=`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:21px;margin:0 0 4px}p{font-size:12px;color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px}th{background:#f3f4f6;text-align:left}.right{text-align:right}@media print{body{margin:8mm}}</style></head><body><h1>${esc(title)}</h1><p>${esc(filters.recipient||"All employees")} | Given by ${esc(filters.givenBy||"All users")}</p><div class="summary"><div class="box">Total Paid<b>${CURRENCY}${fmt(totals.amount)}</b></div><div class="box">Cash<b>${CURRENCY}${fmt(totals.cash)}</b></div><div class="box">Advance Adjusted<b>${CURRENCY}${fmt(totals.advance)}</b></div></div><table><thead><tr><th>Date</th><th>Entry Time</th><th>Received By</th><th>Designation</th><th>Given By</th><th>Payment Period</th><th>Mode</th><th>Source</th><th>Amount</th></tr></thead><tbody>${rows||'<tr><td colspan="9">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
+    const popup=window.open("","_blank");popup.document.write(html);popup.document.close();
+  };
+  return <SectionBox title={title} icon="LED" color="blue">
+    <div className="flex justify-end mb-3"><button onClick={printLedger} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold">Print Ledger</button></div>
+    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      <Select label="Employee Name" value={filters.recipient} options={[{value:"",label:"All Employees"},...recipients.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,recipient:e.target.value})}/>
+      <Select label="Given By User" value={filters.givenBy} options={[{value:"",label:"All Users"},...givers.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,givenBy:e.target.value})}/>
+      <Select label="Date Filter" value={filters.dateMode} options={[{value:"all",label:"All Time"},{value:"date",label:"Date Wise"},{value:"month",label:"Month Wise"},{value:"range",label:"Date Range"}]} onChange={e=>setFilters({...filters,dateMode:e.target.value})}/>
+      {filters.dateMode==="date"&&<Input label="Date" type="date" value={filters.date} onChange={e=>setFilters({...filters,date:e.target.value})}/>}
+      {filters.dateMode==="month"&&<Input label="Month" type="month" value={filters.month} onChange={e=>setFilters({...filters,month:e.target.value})}/>}
+      {filters.dateMode==="range"&&<><Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})}/><Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})}/></>}
+    </div>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3"><StatCard label="Entries" value={visible.length} icon="N" color="blue"/><StatCard label="Total Paid" value={`${CURRENCY}${fmt(totals.amount)}`} icon="IN" color="green"/><StatCard label="Cash" value={`${CURRENCY}${fmt(totals.cash)}`} icon="C" color="teal"/><StatCard label="Advance Adjusted" value={`${CURRENCY}${fmt(totals.advance)}`} icon="A" color="violet"/></div>
+    {loading?<Loader/>:visible.length===0?<EmptyState icon="LED" text="No payment ledger records"/>:<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Received By</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Given By</th><th className="p-2 text-left">Payment Period</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Source / Note</th><th className="p-2 text-right">Amount</th></tr></thead><tbody>{visible.map(row=><tr key={row.id} className="border-t"><td className="p-2"><b>{row.date||"-"}</b><div className="text-gray-400">{dateTime(row.dateTime)}</div></td><td className="p-2 font-bold">{row.recipient||"-"}</td><td className="p-2">{personTypeLabel(row.personType)}</td><td className="p-2 font-bold text-blue-700">{row.givenBy||"-"}</td><td className="p-2">{paymentPeriod(row)}</td><td className="p-2">{row.mode||"-"}</td><td className="p-2">{row.source||"-"}<div className="text-gray-400">{row.note||""}</div></td><td className="p-2 text-right font-black text-green-700">{CURRENCY}{fmt(row.amount)}</td></tr>)}</tbody></table></div>}
+  </SectionBox>;
+}
+
+function AdvanceSalary({ user }) {
+  const empty={personType:"production-worker",personId:"",amount:"",date:today(),mode:"Cash",note:""};
+  const [workers,setWorkers]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [ledgerKey,setLedgerKey]=useState(0);
+  const [form,setForm]=useState(empty);
+  const load=()=>Promise.all([api("GET","/workers"),api("GET","/users"),api("GET","/salary-advances")]).then(([w,u,a])=>{setWorkers(Array.isArray(w)?w:[]);setUsers(Array.isArray(u)?u:[]);setRecords(a?.records||[]);});
+  useEffect(()=>{load();},[]);
+  const people=form.personType==="production-worker"?workers.filter(w=>workerTypeOf(w)==="Production Worker"):form.personType==="site-worker"?workers.filter(w=>workerTypeOf(w)==="Site Worker"):users.filter(u=>u.role===form.personType&&u.active!==false);
+  const save=async()=>{const person=people.find(p=>p._id===form.personId);if(!person||+(form.amount)<=0)return window.alert("Select an employee and enter the advance amount");const saved=await api("POST","/salary-advances",{...form,personName:person.name,mobile:person.mobile||person.phone||"",amount:+form.amount,givenBy:user.name});if(saved?._id){setForm({...empty,personType:form.personType});setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);};
+  const totalAvailable=records.reduce((sum,row)=>sum+(+(row.balance)||0),0);
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">Advance Salary</h2><div className="text-xs text-gray-400">Give an advance now and adjust it later during salary payment</div></div>
+    <SectionBox title="Give Salary Advance" icon="ADV" color="violet"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"><Select label="Employee Type" value={form.personType} options={salaryPersonTypes} onChange={e=>setForm({...form,personType:e.target.value,personId:""})}/><Select label="Employee Name" value={form.personId} options={[{value:"",label:"Select employee"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setForm({...form,personId:e.target.value})}/><Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/><Input label={`Advance Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})}/><Select label="Payment Mode" value={form.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,mode:e.target.value})}/><Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></div><button onClick={save} className="w-full mt-3 bg-violet-600 text-white py-3 rounded-lg font-black">Give Advance Salary</button></SectionBox>
+    <StatCard label="Total Advance Available" value={`${CURRENCY}${fmt(totalAvailable)}`} icon="ADV" color="violet"/>
+    <SalaryPaymentLedger kind="advance" refreshKey={ledgerKey} title="Advance Salary Ledger"/>
+  </div>;
+}
+
+function LegacyOfficeSalaryLedger({ user, role }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [people,setPeople]=useState([]); const [records,setRecords]=useState([]); const [advances,setAdvances]=useState([]); const [selected,setSelected]=useState(""); const [payRecord,setPayRecord]=useState(null); const [pay,setPay]=useState(emptyPay);
+  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));setRecords(Array.isArray(r)?r:[]);setAdvances(a?.records||[]);});
+  useEffect(()=>{load();},[role]);
+  const visible=records.filter(r=>(+r.pendingAmount||0)>0&&(!selected||r.employeeId===selected)); const totals=visible.reduce((a,r)=>({pending:a.pending+(+r.pendingAmount||0)}),{pending:0});
+  const advance=payRecord?availableAdvance(advances,{personType:role,personId:payRecord.employeeId,personName:payRecord.employeeName}):0;
+  const makePayment=async()=>{const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payRecord?.pendingAmount||0)-(+pay.amount||0))):0;if(!payRecord||(+pay.amount||0)+adjusted<=0)return;const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,paidBy:user.name});if(saved?._id){setPayRecord(null);setPay(emptyPay);load();}else if(saved?.message)window.alert(saved.message);};
+  const openPayment=r=>{const available=availableAdvance(advances,{personType:role,personId:r.employeeId,personName:r.employeeName});setPayRecord(r);setPay({amount:String(Math.max(0,(+r.pendingAmount||0)-available)),date:today(),mode:"Cash",note:`${r.month} salary payment`,useAdvance:available>0});};
+  const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Only unpaid salary records are shown</div></div><div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(totals.pending)}`} icon="!" color="red"/><div className="space-y-2">{visible.map(r=>{const lastPayment=(r.payments||[]).slice(-1)[0];return <div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div>{lastPayment&&<div className="text-xs text-green-700 mt-1">Last received {CURRENCY}{fmt(lastPayment.amount)} on {lastPayment.date||"-"} · Given by <b>{lastPayment.paidBy||"-"}</b></div>}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>{setPayRecord(r);setPay({amount:String(r.pendingAmount),date:today(),mode:"Cash",note:`${r.month} salary payment`});}} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>})}{visible.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Payment Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
+}
+
+function LegacyPendingWorkerSalary({ user, workerType }) {
+  const [workers,setWorkers]=useState([]); const [payWorker,setPayWorker]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
+  const load=()=>api("GET","/workers").then(data=>setWorkers((Array.isArray(data)?data:[]).filter(w=>workerTypeOf(w)===workerType&&+(w.totalPending||0)>0)));
+  useEffect(()=>{load();},[workerType]);
+  const total=workers.reduce((sum,w)=>sum+(+(w.totalPending)||0),0);
+  const makePayment=async()=>{if(!payWorker||+(pay.amount)<=0)return;const source=workerType==="Site Worker"?"worker-ledger-site":"worker-ledger-production";const saved=await api("POST","/workerpayments",{workerName:payWorker.name,amount:+pay.amount,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source});if(saved?._id){setPayWorker(null);setPay({amount:"",date:today(),mode:"Cash",note:""});load();}else if(saved?.message)window.alert(saved.message);};
+  return <div className="space-y-4"><div><h2 className="text-xl font-black">{workerType} Pending</h2><div className="text-xs text-gray-400">Only workers with pending salary are shown</div></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/><div className="space-y-2">{workers.map(w=><div key={w._id} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div className="font-black">{w.name}</div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(w.totalPending)}</div><button onClick={()=>{setPayWorker(w);setPay({amount:String(w.totalPending),date:today(),mode:"Cash",note:`${workerType} salary payment`});}} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{workers.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payWorker&&<Modal title={`Pay - ${payWorker.name}`} onClose={()=>setPayWorker(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payWorker.totalPending)}</b></div><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
+}
+
+function LegacyPendingDriverSalary({ user }) {
+  const [rows,setRows]=useState([]); const [payDriver,setPayDriver]=useState(null); const [pay,setPay]=useState({amount:"",date:today(),mode:"Cash",note:""});
+  const load=()=>api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`).then(data=>{const grouped={};(data?.reports||[]).forEach(r=>{const key=r.driverMobile||r.driverName;if(!key)return;if(!grouped[key])grouped[key]={driverName:r.driverName,driverMobile:r.driverMobile,pending:0};grouped[key].pending+=+(r.driverWagePending)||0;});setRows(Object.values(grouped).filter(r=>r.pending>0));});
+  useEffect(()=>{load();},[user.role,user.name]); const total=rows.reduce((sum,r)=>sum+r.pending,0);
+  const makePayment=async()=>{if(!payDriver||+(pay.amount)<=0)return;const saved=await api("POST","/driverreports/payment",{...pay,amount:+pay.amount,driverName:payDriver.driverName,driverMobile:payDriver.driverMobile,addedBy:user.name});if(saved?.reports){setPayDriver(null);setPay({amount:"",date:today(),mode:"Cash",note:""});load();}else if(saved?.message)window.alert(saved.message);};
+  return <div className="space-y-4"><div><h2 className="text-xl font-black">Driver Salary Pending</h2><div className="text-xs text-gray-400">Only drivers with pending salary are shown</div></div><StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/><div className="space-y-2">{rows.map(r=><div key={r.driverMobile||r.driverName} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div><div className="font-black">{r.driverName}</div><div className="text-xs text-gray-400">{r.driverMobile||""}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pending)}</div><button onClick={()=>{setPayDriver(r);setPay({amount:String(r.pending),date:today(),mode:"Cash",note:"Driver salary payment"});}} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{rows.length===0&&<EmptyState icon="✓" text="No pending salary"/>}</div>{payDriver&&<Modal title={`Pay - ${payDriver.driverName}`} onClose={()=>setPayDriver(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payDriver.pending)}</b></div><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Amount (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Mark Payment Done</button></div></Modal>}</div>;
+}
+
+function OfficeSalaryLedger({ user, role }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [people,setPeople]=useState([]);
+  const [records,setRecords]=useState([]);
+  const [advances,setAdvances]=useState([]);
+  const [selected,setSelected]=useState("");
+  const [payRecord,setPayRecord]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
+  const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{
+    setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));
+    setRecords(Array.isArray(r)?r:[]);
+    setAdvances(a?.records||[]);
+  });
+  useEffect(()=>{load();},[role]);
+  const visible=records.filter(r=>(+r.pendingAmount||0)>0&&(!selected||r.employeeId===selected));
+  const totalPending=visible.reduce((sum,r)=>sum+(+r.pendingAmount||0),0);
+  const advance=payRecord?availableAdvance(advances,{personType:role,personId:payRecord.employeeId,personName:payRecord.employeeName}):0;
+  const openPayment=r=>{
+    const available=availableAdvance(advances,{personType:role,personId:r.employeeId,personName:r.employeeName});
+    setPayRecord(r);
+    setPay({amount:String(Math.max(0,(+r.pendingAmount||0)-available)),date:today(),mode:"Cash",note:`${r.month} salary payment`,useAdvance:available>0});
+  };
+  const makePayment=async()=>{
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payRecord?.pendingAmount||0)-(+pay.amount||0))):0;
+    if(!payRecord||(+pay.amount||0)+adjusted<=0)return;
+    const saved=await api("POST",`/salary-records/${payRecord._id}/payment`,{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,paidBy:user.name});
+    if(saved?._id){setPayRecord(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  const title=role==="supervisor"?"Supervisor Salary":"Office User Salary";
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">{title} Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
+    <div className="bg-white border rounded-lg p-3"><Select label={role==="supervisor"?"Supervisor Name":"User Name"} value={selected} options={[{value:"",label:"All"},...people.map(p=>({value:p._id,label:p.name}))]} onChange={e=>setSelected(e.target.value)}/></div>
+    <StatCard label="Total Pending" value={`${CURRENCY}${fmt(totalPending)}`} icon="!" color="red"/>
+    <div className="space-y-2">{visible.map(r=><div key={r._id} className="bg-white border rounded-lg p-3 flex items-center justify-between gap-3"><div><div className="font-black">{r.employeeName}</div><div className="text-xs text-gray-500">{r.month}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pendingAmount)}</div><button onClick={()=>openPayment(r)} className="mt-2 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{visible.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    <SalaryPaymentLedger kind="salary" personType={role} refreshKey={ledgerKey} title={`${title} Payment Ledger`}/>
+    {payRecord&&<Modal title={`Pay Salary - ${payRecord.employeeName}`} onClose={()=>setPayRecord(null)}><div className="space-y-3"><div className="bg-red-50 rounded-lg p-3 text-sm">Pending: <b>{CURRENCY}{fmt(payRecord.pendingAmount)}</b></div><AdvanceAdjustment available={advance} pending={payRecord.pendingAmount} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
+  </div>;
+}
+
+function PendingWorkerSalary({ user, workerType }) {
+  const personType=workerType==="Site Worker"?"site-worker":"production-worker";
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [weekly,setWeekly]=useState({workers:[],summary:{},weekStart:"",weekEnd:""});
+  const [advances,setAdvances]=useState([]);
+  const [paymentTarget,setPaymentTarget]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const load=()=>{
+    setLoading(true);
+    return Promise.all([api("GET",`/workers/weekly-salary?workerType=${personType}`),api("GET",`/salary-advances?personType=${personType}`)])
+      .then(([data,a])=>{setWeekly(data?.workers?data:{workers:[],summary:{},weekStart:"",weekEnd:""});setAdvances(a?.records||[]);})
+      .finally(()=>setLoading(false));
+  };
+  useEffect(()=>{load();},[workerType]);
+  const advance=paymentTarget?availableAdvance(advances,{personType,personId:paymentTarget.row.worker._id,personName:paymentTarget.row.worker.name,mobile:paymentTarget.row.worker.phone}):0;
+  const openPayment=(row,scope)=>{
+    const isCurrent=scope==="current-week";
+    const isPrevious=scope==="previous-weeks";
+    const targetPending=isCurrent?row.currentWeek.pending:isPrevious?row.previousWeeksPending:row.calculatedPending;
+    if(targetPending<=0)return;
+    const available=availableAdvance(advances,{personType,personId:row.worker._id,personName:row.worker.name,mobile:row.worker.phone});
+    const label=isCurrent?"Current Week":isPrevious?"Previous Weeks":"Total Pending";
+    setPaymentTarget({row,scope,targetPending,label,weekStart:isCurrent?row.currentWeek.weekStart:"",weekEnd:isCurrent?row.currentWeek.weekEnd:""});
+    setPay({amount:String(Math.max(0,targetPending-available)),date:today(),mode:"Cash",note:`${workerType} - ${label} payment`,useAdvance:available>0});
+  };
+  const makePayment=async()=>{
+    if(!paymentTarget||saving)return;
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,paymentTarget.targetPending-(+pay.amount||0))):0;
+    if((+pay.amount||0)+adjusted<=0)return;
+    const source=workerType==="Site Worker"?"worker-ledger-site":"worker-ledger-production";
+    setSaving(true);
+    const saved=await api("POST","/workerpayments",{workerName:paymentTarget.row.worker.name,workerId:paymentTarget.row.worker._id,personType,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source,paymentScope:paymentTarget.scope,weekStart:paymentTarget.weekStart,weekEnd:paymentTarget.weekEnd});
+    setSaving(false);
+    if(saved?._id){setPaymentTarget(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  const summary=weekly.summary||{};
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">{workerType} Weekly Salary</h2><div className="text-xs text-gray-500">Current week: Sunday {weekly.weekStart||"-"} to Saturday {weekly.weekEnd||"-"}</div></div>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <StatCard label="Current Week Earnings" value={`${CURRENCY}${fmt(summary.currentWeekEarnings||0)}`} icon="CW" color="green"/>
+      <StatCard label="Current Week Pending" value={`${CURRENCY}${fmt(summary.currentWeekPending||0)}`} icon="P" color="amber"/>
+      <StatCard label="Previous Weeks Pending" value={`${CURRENCY}${fmt(summary.previousWeeksPending||0)}`} icon="OLD" color="red"/>
+      <StatCard label="Total Pending" value={`${CURRENCY}${fmt(summary.totalPending||0)}`} icon="T" color="blue"/>
+    </div>
+    {loading?<Loader/>:<div className="space-y-3">{(weekly.workers||[]).map(row=><div key={row.worker._id} className="bg-white border rounded-lg p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><div className="font-black text-gray-900">{row.worker.name}</div><div className="text-xs text-gray-500">Total pending: <b className="text-red-600">{CURRENCY}{fmt(row.calculatedPending)}</b></div></div>
+        <div className="flex flex-wrap gap-2">
+          <button disabled={row.calculatedPending<=0} onClick={()=>openPayment(row,"all")} className="bg-slate-800 disabled:bg-gray-300 text-white px-3 py-2 rounded-lg text-xs font-bold">Make Payment</button>
+          <button disabled={row.currentWeek.pending<=0} onClick={()=>openPayment(row,"current-week")} className="bg-green-600 disabled:bg-gray-300 text-white px-3 py-2 rounded-lg text-xs font-bold">Clear Current Week</button>
+          <button disabled={row.previousWeeksPending<=0} onClick={()=>openPayment(row,"previous-weeks")} className="bg-amber-500 disabled:bg-gray-300 text-white px-3 py-2 rounded-lg text-xs font-bold">Clear Old Weeks</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3 text-xs">
+        <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3"><span className="block text-gray-500">Current Earned</span><b className="text-emerald-700">{CURRENCY}{fmt(row.currentWeek.earned)}</b></div>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3"><span className="block text-gray-500">Current Paid</span><b className="text-blue-700">{CURRENCY}{fmt(row.currentWeek.paid)}</b></div>
+        <div className="bg-amber-50 border border-amber-100 rounded-lg p-3"><span className="block text-gray-500">Current Pending</span><b className="text-amber-700">{CURRENCY}{fmt(row.currentWeek.pending)}</b></div>
+        <div className="bg-red-50 border border-red-100 rounded-lg p-3"><span className="block text-gray-500">Old Weeks Pending</span><b className="text-red-600">{CURRENCY}{fmt(row.previousWeeksPending)}</b></div>
+      </div>
+      {row.previousWeeksPending>0&&<details className="mt-3 border-t pt-3"><summary className="cursor-pointer text-xs font-bold text-blue-700">View previous unpaid weeks</summary><div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Week (Sun - Sat)</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th></tr></thead><tbody>{row.previousWeeks.filter(week=>week.pending>0).map(week=><tr key={week.weekStart} className="border-t"><td className="p-2">{week.weekStart} to {week.weekEnd}</td><td className="p-2 text-right">{CURRENCY}{fmt(week.earned)}</td><td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(week.paid)}</td><td className="p-2 text-right font-bold text-red-600">{CURRENCY}{fmt(week.pending)}</td></tr>)}</tbody></table></div></details>}
+    </div>)}{(weekly.workers||[]).length===0&&<EmptyState icon="OK" text="No weekly earnings or pending salary"/>}</div>}
+    <SalaryPaymentLedger kind="salary" personType={personType} refreshKey={ledgerKey} title={`${workerType} Payment Ledger`}/>
+    {paymentTarget&&<Modal title={`${paymentTarget.label} - ${paymentTarget.row.worker.name}`} onClose={()=>!saving&&setPaymentTarget(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg"><span className="text-xs text-gray-500">Selected pending</span><div className="font-black text-red-600">{CURRENCY}{fmt(paymentTarget.targetPending)}</div>{paymentTarget.weekStart&&<div className="text-xs text-gray-500 mt-1">Sunday {paymentTarget.weekStart} to Saturday {paymentTarget.weekEnd}</div>}</div><AdvanceAdjustment available={advance} pending={paymentTarget.targetPending} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button disabled={saving} onClick={makePayment} className="w-full bg-green-600 disabled:bg-gray-400 text-white py-3 rounded-lg font-black">{saving?"Recording Payment...":"Adjust & Mark Payment Done"}</button></div></Modal>}
+  </div>;
+}
+
+function PendingDriverSalary({ user }) {
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const [rows,setRows]=useState([]);
+  const [advances,setAdvances]=useState([]);
+  const [payDriver,setPayDriver]=useState(null);
+  const [pay,setPay]=useState(emptyPay);
+  const [ledgerKey,setLedgerKey]=useState(0);
+  const load=()=>Promise.all([api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`),api("GET","/salary-advances?personType=driver")]).then(([data,a])=>{const grouped={};(data?.reports||[]).forEach(r=>{const key=r.driverMobile||r.driverName;if(!key)return;if(!grouped[key])grouped[key]={driverName:r.driverName,driverMobile:r.driverMobile,pending:0};grouped[key].pending+=+(r.driverWagePending)||0;});setRows(Object.values(grouped).filter(r=>r.pending>0));setAdvances(a?.records||[]);});
+  useEffect(()=>{load();},[user.role,user.name]);
+  const total=rows.reduce((sum,r)=>sum+r.pending,0);
+  const advance=payDriver?availableAdvance(advances,{personType:"driver",personName:payDriver.driverName,mobile:payDriver.driverMobile}):0;
+  const openPayment=r=>{const available=availableAdvance(advances,{personType:"driver",personName:r.driverName,mobile:r.driverMobile});setPayDriver(r);setPay({amount:String(Math.max(0,r.pending-available)),date:today(),mode:"Cash",note:"Driver salary payment",useAdvance:available>0});};
+  const makePayment=async()=>{
+    const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,(+payDriver?.pending||0)-(+pay.amount||0))):0;
+    if(!payDriver||(+pay.amount||0)+adjusted<=0)return;
+    const saved=await api("POST","/driverreports/payment",{...pay,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,driverName:payDriver.driverName,driverMobile:payDriver.driverMobile,addedBy:user.name});
+    if(saved?.reports){setPayDriver(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
+  };
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black">Driver Salary Pending</h2><div className="text-xs text-gray-400">Cash and available advance can be combined in one payment</div></div>
+    <StatCard label="Total Pending" value={`${CURRENCY}${fmt(total)}`} icon="!" color="red"/>
+    <div className="space-y-2">{rows.map(r=><div key={r.driverMobile||r.driverName} className="bg-white border rounded-lg p-3 flex items-center justify-between"><div><div className="font-black">{r.driverName}</div><div className="text-xs text-gray-400">{r.driverMobile||""}</div></div><div className="text-right"><div className="font-black text-red-600">{CURRENCY}{fmt(r.pending)}</div><button onClick={()=>openPayment(r)} className="mt-1 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Make Payment</button></div></div>)}{rows.length===0&&<EmptyState icon="OK" text="No pending salary"/>}</div>
+    <SalaryPaymentLedger kind="salary" personType="driver" refreshKey={ledgerKey} title="Driver Salary Payment Ledger"/>
+    {payDriver&&<Modal title={`Pay - ${payDriver.driverName}`} onClose={()=>setPayDriver(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg">Pending: <b>{CURRENCY}{fmt(payDriver.pending)}</b></div><AdvanceAdjustment available={advance} pending={payDriver.pending} pay={pay} setPay={setPay}/><Input label="Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button onClick={makePayment} className="w-full bg-green-600 text-white py-3 rounded-lg font-black">Adjust & Mark Payment Done</button></div></Modal>}
+  </div>;
+}
+
+function LegacySalaryHub({ user, setPage }) {
+  const [summary, setSummary] = useState({ production:0, site:0, driver:0, supervisor:0, user:0 });
+  const [loading, setLoading] = useState(true);
+  useEffect(()=>{
+    Promise.all([
+      api("GET", "/workers"),
+      api("GET", `/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name || "")}`),
+      api("GET", "/salary-records"),
+    ]).then(([workers, drivers, salaries])=>{
+      const list = Array.isArray(workers) ? workers : [];
+      const salaryList = Array.isArray(salaries) ? salaries : [];
+      setSummary({
+        production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
+        site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),
+        driver:(drivers?.reports||[]).reduce((sum,r)=>sum+(+(r.driverWagePending)||0),0),
+        supervisor:salaryList.filter(r=>r.role==="supervisor").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
+        user:salaryList.filter(r=>r.role==="user").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),
+      });
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  },[user.role,user.name]);
+  const tiles = [
+    { id:"salaryproduction", title:"Production Workers", pending:summary.production, icon:"🏭", color:"border-blue-700 bg-blue-600 hover:bg-blue-700" },
+    { id:"salarydriver", title:"Drivers", pending:summary.driver, icon:"🚚", color:"border-orange-700 bg-orange-600 hover:bg-orange-700" },
+    { id:"salarysite", title:"Site Workers", pending:summary.site, icon:"👷", color:"border-teal-700 bg-teal-600 hover:bg-teal-700" },
+    { id:"salarysupervisor", title:"Supervisors", pending:summary.supervisor, icon:"🧑‍💼", color:"border-violet-700 bg-violet-600 hover:bg-violet-700" },
+    { id:"salaryuser", title:"Office Users", pending:summary.user, icon:"🧑‍💻", color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700" },
+  ];
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages and total ledger payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-3xl">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">Total Pending</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.pending)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">View Ledger & Pay</span></div></button>)}</div></div>;
+}
+
+function SalaryHub({ user, setPage }) {
+  const [summary,setSummary]=useState({production:0,site:0,driver:0,supervisor:0,user:0,advance:0});
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    Promise.all([api("GET","/workers"),api("GET",`/driverreports?role=${encodeURIComponent(user.role)}&name=${encodeURIComponent(user.name||"")}`),api("GET","/salary-records"),api("GET","/salary-advances")]).then(([workers,drivers,salaries,advances])=>{
+      const list=Array.isArray(workers)?workers:[]; const salaryList=Array.isArray(salaries)?salaries:[];
+      setSummary({production:list.filter(w=>workerTypeOf(w)==="Production Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),site:list.filter(w=>workerTypeOf(w)==="Site Worker").reduce((sum,w)=>sum+(+(w.totalPending)||0),0),driver:(drivers?.reports||[]).reduce((sum,r)=>sum+(+(r.driverWagePending)||0),0),supervisor:salaryList.filter(r=>r.role==="supervisor").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),user:salaryList.filter(r=>r.role==="user").reduce((sum,r)=>sum+(+(r.pendingAmount)||0),0),advance:+(advances?.summary?.available)||0});
+      setLoading(false);
+    }).catch(()=>setLoading(false));
+  },[user.role,user.name]);
+  const tiles=[
+    {id:"salaryadvance",title:"Advance Salary",amount:summary.advance,label:"Advance Available",action:"Give or view advance",icon:"ADV",color:"border-fuchsia-700 bg-fuchsia-600 hover:bg-fuchsia-700"},
+    {id:"salaryproduction",title:"Production Workers",amount:summary.production,label:"Total Pending",action:"View Ledger & Pay",icon:"PW",color:"border-blue-700 bg-blue-600 hover:bg-blue-700"},
+    {id:"salarydriver",title:"Drivers",amount:summary.driver,label:"Total Pending",action:"View Ledger & Pay",icon:"DR",color:"border-orange-700 bg-orange-600 hover:bg-orange-700"},
+    {id:"salarysite",title:"Site Workers",amount:summary.site,label:"Total Pending",action:"View Ledger & Pay",icon:"SW",color:"border-teal-700 bg-teal-600 hover:bg-teal-700"},
+    {id:"salarysupervisor",title:"Supervisors",amount:summary.supervisor,label:"Total Pending",action:"View Ledger & Pay",icon:"SP",color:"border-violet-700 bg-violet-600 hover:bg-violet-700"},
+    {id:"salaryuser",title:"Office Users",amount:summary.user,label:"Total Pending",action:"View Ledger & Pay",icon:"US",color:"border-cyan-700 bg-cyan-600 hover:bg-cyan-700"},
+  ];
+  return <div className="space-y-4"><div><h2 className="text-xl font-black text-gray-900">Salary</h2><div className="text-xs text-gray-400">Pending wages, advances and salary payments</div></div><div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{tiles.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`relative overflow-hidden min-h-[170px] rounded-lg border p-4 text-white shadow-sm hover:shadow-md transition-all ${tile.color}`}><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute -right-5 -bottom-5 w-36 h-36 object-contain opacity-[0.12] pointer-events-none"/><div className="relative z-[1] h-full flex flex-col items-center justify-center gap-2"><span className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-lg font-black">{tile.icon}</span><span className="font-black text-lg">{tile.title}</span><span className="text-xs text-white/80">{tile.label}</span><span className="text-2xl font-black">{loading?"...":`${CURRENCY}${fmt(tile.amount)}`}</span><span className="text-xs font-bold bg-white/15 px-3 py-1 rounded-full">{tile.action}</span></div></button>)}</div></div>;
+}
+
+function CompletedSiteApprovals({ user, setGlobalSiteWorks }) {
+  const [sites,setSites]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState("pending");
+  const [search,setSearch]=useState("");
+  const [waiverAmounts,setWaiverAmounts]=useState({});
+  const [waiverNotes,setWaiverNotes]=useState({});
+  const load=()=>api("GET","/sitework").then(rows=>{const list=Array.isArray(rows)?rows:[];setSites(list);setGlobalSiteWorks?.(list);}).catch(()=>setSites([])).finally(()=>setLoading(false));
+  useEffect(()=>{load();},[]);
+  const approvalOf=site=>site.completionApprovalStatus||(site.status==="completed"?"approved":"");
+  const submitted=sites.filter(site=>approvalOf(site));
+  const filtered=submitted.filter(site=>{
+    const approval=approvalOf(site);
+    const group=approval==="pending_user"||approval==="pending_admin"?"pending":approval;
+    const matchesFilter=filter==="all"||group===filter;
+    const haystack=[site.customerName,site.phone,site.siteLocation,site.completionSubmittedBy].join(" ").toLowerCase();
+    return matchesFilter&&(!search||haystack.includes(search.toLowerCase()));
+  });
+  const review=async(site,action)=>{
+    let reason="";
+    if(action==="reject"){
+      reason=window.prompt("Enter the reason for rejecting this completion:","")?.trim()||"";
+      if(!reason)return;
+    }else if(!window.confirm(`${user.role==="admin"?"Give final approval for":"Approve"} ${site.customerName}?`))return;
+    const waiveAmount=action==="approve"?Math.max(0,+(waiverAmounts[site._id]||0)):0;
+    const waiveNote=String(waiverNotes[site._id]||"").trim();
+    if(waiveAmount>+(site.pendingAmount||0))return window.alert("Waiver cannot exceed the current pending balance");
+    if(waiveAmount>0&&!waiveNote)return window.alert("Enter a reason for the waiver");
+    const updated=await api("POST",`/sitework/${site._id}/completion/review`,{role:user.role,name:user.name,action,reason,date:today(),waiveAmount,waiveNote});
+    if(!updated?._id)return window.alert(updated?.message||"Unable to review site completion");
+    setSites(list=>list.map(item=>item._id===updated._id?updated:item));
+    setGlobalSiteWorks?.(list=>list.map(item=>item._id===updated._id?updated:item));
+    setWaiverAmounts(values=>({...values,[site._id]:""}));
+    setWaiverNotes(values=>({...values,[site._id]:""}));
+    window.alert(action==="reject"?"Completion rejected. Supervisor must resubmit.":user.role==="admin"?"Final approval completed.":"User approved. Admin approval is now pending.");
+  };
+  if(loading)return <Loader/>;
+  const counts={pending:submitted.filter(s=>['pending_user','pending_admin'].includes(approvalOf(s))).length,rejected:submitted.filter(s=>approvalOf(s)==="rejected").length,approved:submitted.filter(s=>approvalOf(s)==="approved").length};
+  return <div className="space-y-4">
+    <div><h2 className="text-xl font-black text-gray-900">Completed Works</h2><div className="text-xs text-gray-400">User review followed by final Admin approval</div></div>
+    <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search site name, number or supervisor" className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"/>
+    <div className="grid grid-cols-3 gap-2">{[{id:"pending",label:"Pending",count:counts.pending,on:"bg-amber-600 text-white border-amber-700",off:"bg-amber-50 border-amber-200 text-amber-700"},{id:"approved",label:"Completed",count:counts.approved,on:"bg-green-600 text-white border-green-700",off:"bg-green-50 border-green-200 text-green-700"},{id:"rejected",label:"Rejected",count:counts.rejected,on:"bg-red-600 text-white border-red-700",off:"bg-red-50 border-red-200 text-red-700"}].map(tab=><button key={tab.id} onClick={()=>setFilter(tab.id)} className={`rounded-lg border p-3 text-center ${filter===tab.id?tab.on:tab.off}`}><div className="text-xl font-black">{tab.count}</div><div className="text-xs font-bold">{tab.label}</div></button>)}</div>
+    {filtered.length===0?<EmptyState icon="CW" text="No completed-work requests found"/>:<div className="grid md:grid-cols-2 gap-3">{filtered.map(site=>{const approval=approvalOf(site);const canUserApprove=user.role==="user"&&approval==="pending_user";const canAdminApprove=user.role==="admin"&&approval==="pending_admin";const canReject=(user.role==="user"&&approval==="pending_user")||(user.role==="admin"&&['pending_user','pending_admin'].includes(approval));return <div key={site._id} className="bg-white border rounded-lg shadow-sm p-4 space-y-3">
+      <div className="flex justify-between gap-3"><div><div className="font-black text-lg">{site.customerName||"Unnamed Site"}</div><div className="text-xs text-gray-500">Number: {site.phone||"-"}</div><div className="text-xs text-gray-500">{site.siteLocation||"-"}</div></div><Badge color={approval==="approved"?"green":approval==="rejected"?"red":"blue"}>{approval==="pending_user"?"User Approval Pending":approval==="pending_admin"?"Admin Approval Pending":approval==="approved"?"Completed":"Rejected"}</Badge></div>
+       <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs"><div className="bg-emerald-50 rounded-lg p-2"><div className="text-gray-500">Total Amount</div><div className="text-lg font-black text-emerald-700">{CURRENCY}{fmt(+(site.totalCost||site.totalAmount)||0)}</div></div><div className="bg-red-50 rounded-lg p-2"><div className="text-gray-500">Pending Balance</div><div className="text-lg font-black text-red-700">{CURRENCY}{fmt(+(site.pendingAmount)||0)}</div></div><div className="bg-blue-50 rounded-lg p-2"><div className="text-gray-500">Submitted for approval by</div><div className="font-black text-blue-700">{site.completionSubmittedBy||site.addedBy||"-"}</div><div className="text-gray-400">{site.completionSubmittedAt?new Date(site.completionSubmittedAt).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"short"}):"Submission time unavailable"}</div></div></div>
+       {(canUserApprove||canAdminApprove)&&<div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2"><div className="text-sm font-black text-amber-900">Adjust / waive pending balance</div><div className="grid sm:grid-cols-2 gap-2"><label className="text-xs font-bold text-slate-700">Waiver amount ({CURRENCY})<input type="number" min="0" max={+(site.pendingAmount)||0} step="0.01" value={waiverAmounts[site._id]??""} onChange={e=>setWaiverAmounts(values=>({...values,[site._id]:e.target.value}))} className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm" placeholder="0"/><button type="button" onClick={()=>setWaiverAmounts(values=>({...values,[site._id]:String(+(site.pendingAmount)||0)}))} className="mt-1 text-xs font-bold text-amber-800 underline">Waive full pending balance</button></label><label className="text-xs font-bold text-slate-700">Reason for waiver<input value={waiverNotes[site._id]||""} onChange={e=>setWaiverNotes(values=>({...values,[site._id]:e.target.value}))} className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm" placeholder="Required when waiving an amount"/></label></div><div className="text-xs text-slate-600">Remaining after waiver: <b>{CURRENCY}{fmt(Math.max(0,(+(site.pendingAmount)||0)-(+(waiverAmounts[site._id]||0)||0)))}</b></div></div>}
+      {site.userApprovedBy&&<div className="text-xs text-blue-700">User approved by <b>{site.userApprovedBy}</b>{site.userApprovedAt?` on ${new Date(site.userApprovedAt).toLocaleString("en-IN")}`:""}</div>}
+      {site.adminApprovedBy&&<div className="text-xs text-green-700">Final approval by <b>{site.adminApprovedBy}</b>{site.adminApprovedAt?` on ${new Date(site.adminApprovedAt).toLocaleString("en-IN")}`:""}</div>}
+      {approval==="rejected"&&<div className="text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2"><b>Rejected by {site.completionRejectedBy||site.completionRejectedRole||"reviewer"}:</b> {site.completionRejectionReason||"-"}</div>}
+      {(canUserApprove||canAdminApprove||canReject)&&<div className="flex gap-2">{(canUserApprove||canAdminApprove)&&<button onClick={()=>review(site,"approve")} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-black">{canAdminApprove?"Final Approve":"User Approve"}</button>}{canReject&&<button onClick={()=>review(site,"reject")} className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 py-2 rounded-lg text-sm font-black">Reject</button>}</div>}
+    </div>})}</div>}
+  </div>;
+}
+
+function OfficeHub({ setPage, pendingApprovalCount = 0 }) {
+  const groups = [
+    { title:"Company Setup", heading:"bg-violet-100 text-violet-800 border-violet-200", items:[
+      { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
+    ]},
+    { title:"Site Operations", heading:"bg-sky-100 text-sky-800 border-sky-200", items:[
+      { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-white/70 border-sky-200", surface:"bg-sky-50/80 border-sky-200 hover:border-sky-300" },
+      { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, badge:pendingApprovalCount, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
+      { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
+    ]},
+    { title:"Sales & Inventory", heading:"bg-cyan-100 text-cyan-800 border-cyan-200", items:[
+      { id:"sales", title:"Sales", sub:"Create sales entries and print invoices", icon:ReceiptIndianRupee, accent:"text-cyan-700 bg-white/70 border-cyan-200", surface:"bg-cyan-50/80 border-cyan-200 hover:border-cyan-300" },
+      { id:"quotations", title:"Quotations", sub:"Create, edit, view and print quotations", icon:FileText, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
+      { id:"stock", title:"Stock", sub:"View available interlock and hollow brick stock", icon:Package, accent:"text-blue-700 bg-white/70 border-blue-200", surface:"bg-blue-50/80 border-blue-200 hover:border-blue-300" },
+    ]},
+    { title:"Purchasing & Production", heading:"bg-amber-100 text-amber-800 border-amber-200", items:[
+      { id:"purchases", title:"Purchases", sub:"Record material and supplier purchases", icon:ShoppingCart, accent:"text-amber-700 bg-white/70 border-amber-200", surface:"bg-amber-50/80 border-amber-200 hover:border-amber-300" },
+      { id:"suppliers", title:"Suppliers", sub:"Manage suppliers and supplier ledgers", icon:Store, accent:"text-orange-700 bg-white/70 border-orange-200", surface:"bg-orange-50/80 border-orange-200 hover:border-orange-300" },
+      { id:"raw", title:"Raw Material", sub:"Track raw material stock and usage", icon:Blocks, accent:"text-red-700 bg-white/70 border-red-200", surface:"bg-red-50/80 border-red-200 hover:border-red-300" },
+      { id:"productionsite", title:"Production Site Entry", sub:"Submit production entries and update stock", icon:Factory, accent:"text-slate-700 bg-white/70 border-slate-200", surface:"bg-slate-100/80 border-slate-200 hover:border-slate-300" },
+    ]},
+    { title:"People & Finance", heading:"bg-emerald-100 text-emerald-800 border-emerald-200", items:[
+      { id:"workers", title:"Add Worker", sub:"Create and manage site and production workers", icon:UserRoundPlus, accent:"text-teal-700 bg-white/70 border-teal-200", surface:"bg-teal-50/80 border-teal-200 hover:border-teal-300" },
+      { id:"attendance", title:"Attendance", sub:"Record and review worker attendance", icon:CalendarCheck, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
+      { id:"salaryhub", title:"Salary", sub:"View and settle pending worker payments", icon:WalletCards, accent:"text-pink-700 bg-white/70 border-pink-200", surface:"bg-pink-50/80 border-pink-200 hover:border-pink-300" },
+      { id:"cashflowhub", title:"Cash Flow Records", sub:"Review daily cash and company records", icon:Landmark, accent:"text-green-700 bg-white/70 border-green-200", surface:"bg-green-50/80 border-green-200 hover:border-green-300" },
+      { id:"cashtransactions", title:"Cash Transactions", sub:"Receive and transfer cash between accounts", icon:ArrowLeftRight, accent:"text-indigo-700 bg-white/70 border-indigo-200", surface:"bg-indigo-50/80 border-indigo-200 hover:border-indigo-300" },
+    ]},
+  ];
+  return (
+    <div className="space-y-6">
+      <div><h2 className="text-xl font-black text-gray-900">Office</h2><div className="text-xs text-gray-400">Office operations and daily entries</div></div>
+      {groups.map(group=><section key={group.title} className="space-y-3"><h3 className={`inline-flex rounded-md border px-3 py-2 text-xs font-black uppercase ${group.heading}`}>{group.title}</h3><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">{group.items.map(tile=><button key={tile.id} onClick={()=>setPage(tile.id)} className={`group min-h-[104px] rounded-lg border p-4 text-left flex items-start gap-3 shadow-sm hover:shadow-md transition-all ${tile.surface}`}><span className={`w-11 h-11 rounded-lg border flex items-center justify-center shrink-0 ${tile.accent}`}><UiIcon icon={tile.icon}/></span><span className="flex-1"><span className="flex items-center gap-1 font-black text-slate-900">{tile.title}{tile.badge>0&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800"><Bell size={12}/>{tile.badge}</span>}</span><span className="block text-xs leading-relaxed text-slate-600 mt-1">{tile.sub}</span></span></button>)}</div></section>)}
+    </div>
+  );
+}
+
+function ReportAuditLog({ user }) {
+  const [audits, setAudits] = useState([]);
+  const [filters, setFilters] = useState({ recordType: "", action: "", fromDate: "", toDate: "" });
+  const [loading, setLoading] = useState(true);
+  const load = () => {
+    const params = new URLSearchParams({ role: user.role });
+    if (filters.recordType) params.set("recordType", filters.recordType);
+    if (filters.action) params.set("action", filters.action);
+    if (filters.fromDate) params.set("fromDate", filters.fromDate);
+    if (filters.toDate) params.set("toDate", filters.toDate);
+    setLoading(true);
+    api("GET", `/report-audits?${params.toString()}`).then(data => {
+      setAudits(Array.isArray(data) ? data : []);
+      setLoading(false);
+    });
+  };
+  useEffect(load, [filters.recordType, filters.action, filters.fromDate, filters.toDate]);
+  const dateTime = value => value ? new Date(value).toLocaleString() : "-";
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-black text-gray-900">Report Edit/Delete Audit</h2>
+        <div className="text-xs text-gray-400">Admin view of report changes with submitted reasons</div>
+      </div>
+      <div className="bg-white rounded-2xl border shadow-sm p-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <Select label="Report Type" value={filters.recordType} options={["", "Supervisor Daily Report", "Driver Report", "Sale", "Purchase", "Production Site", "Admin Cash Flow"]} onChange={e=>setFilters({...filters,recordType:e.target.value})} />
+        <Select label="Action" value={filters.action} options={["", "edit", "delete"]} onChange={e=>setFilters({...filters,action:e.target.value})} />
+        <Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})} />
+        <Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})} />
+      </div>
+      {loading ? <Loader /> : audits.length === 0 ? <EmptyState icon="AUD" text="No report edit/delete audit records" /> : (
+        <div className="space-y-3">
+          {audits.map(a => (
+            <div key={a._id} className="bg-white rounded-2xl border shadow-sm p-4 space-y-2">
+              <div className="flex flex-wrap justify-between gap-2">
+                <div>
+                  <div className="font-black text-gray-900">{a.title || a.recordType}</div>
+                  <div className="text-xs text-gray-400">{a.recordType} | Record Date: {a.recordDate || "-"}</div>
+                </div>
+                <Badge color={a.action === "delete" ? "red" : "blue"}>{String(a.action || "").toUpperCase()}</Badge>
+              </div>
+              <div className="grid sm:grid-cols-3 gap-2 text-xs">
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">By</div><div className="font-bold">{a.performedBy || "-"} ({a.performedRole || "-"})</div></div>
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">Time</div><div className="font-bold">{dateTime(a.createdAt)}</div></div>
+                <div className="bg-slate-50 rounded-lg p-2"><div className="text-gray-400">Reason Type</div><div className="font-bold">{a.reasonType || a.action || "-"}</div></div>
+              </div>
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-900">
+                <div className="text-xs font-black text-amber-700 uppercase mb-1">Reason</div>
+                {a.reason || "-"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyPurchase({ user }) {
+  const emptyForm = { date: today(), materialName: "", quantity: "", unit: "nos", amount: "", paymentMode: "Cash", note: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [message, setMessage] = useState("");
+
+  const save = async () => {
+    setMessage("");
+    if (!form.materialName || +(form.amount || 0) <= 0) return setMessage("Material name and amount required");
+    const saved = await api("POST", "/company-purchases", {
+      ...form,
+      quantity: +(form.quantity || 0),
+      amount: +(form.amount || 0),
+      purchasedBy: user.name,
+      purchasedByRole: user.role,
+      accountName: user.name,
+    });
+    if (saved?._id) {
+      setMessage("Company purchase saved successfully");
+      setForm(emptyForm);
+    } else setMessage(saved?.message || "Failed to save company purchase");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div><h2 className="text-xl font-black text-gray-900">Company Purchase</h2><div className="text-xs text-gray-400">Office/company purchases entered by current user</div></div>
+      <SectionBox title="Purchase Details" icon="CP" color="amber">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Input label="Date" type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} />
+          <Input label="Purchased By" value={user.name || ""} readOnly />
+          <Input label="Material Name" value={form.materialName} onChange={e=>setForm({...form,materialName:e.target.value})} placeholder="Material / item name" />
+          <Input label="Quantity" type="number" value={form.quantity} onChange={e=>setForm({...form,quantity:e.target.value})} />
+          <Input label="Unit" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} placeholder="nos / kg / bag" />
+          <Input label={`Amount (${CURRENCY})`} type="number" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} />
+          <Select label="Payment Mode" value={form.paymentMode} options={["Cash","UPI","Bank Transfer","Cheque"]} onChange={e=>setForm({...form,paymentMode:e.target.value})} />
+          <Input label="Note" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} />
+        </div>
+      </SectionBox>
+      {message && <div className={`text-sm font-bold rounded-xl p-3 ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>{message}</div>}
+      <button onClick={save} className="w-full bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-black">Submit Company Purchase</button>
+    </div>
+  );
+}
+
+function CompanyExpense({ user }) {
+  const [tab, setTab] = useState("salary");
+  const [dateMode, setDateMode] = useState("today");
+  const [date, setDate] = useState(today());
+  const [fromDate, setFromDate] = useState(today());
+  const [toDate, setToDate] = useState(today());
+  const [data, setData] = useState({ rows: [], totals: {} });
+  const [loading, setLoading] = useState(true);
+
+  const query = () => {
+    const params = new URLSearchParams({ tab });
+    if (dateMode === "today") params.set("date", today());
+    if (dateMode === "date") params.set("date", date);
+    if (dateMode === "range") { params.set("fromDate", fromDate); params.set("toDate", toDate); }
+    return params.toString();
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    api("GET", `/company-expenses?${query()}`).then(d => {
+      setData(d?.rows ? d : { rows: [], totals: {} });
+      setLoading(false);
+    });
+  }, [tab, dateMode, date, fromDate, toDate]);
+
+  const rows = data.rows || [];
+  const totals = data.totals || {};
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="text-xl font-black text-gray-900">Company Expense</h2><div className="text-xs text-gray-400">Salary payments and company expense history</div></div>
+        <div className="flex bg-white border rounded-xl p-1">
+          <button onClick={()=>setTab("salary")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab==="salary"?"bg-amber-500 text-white":"text-gray-500"}`}>Salary</button>
+          <button onClick={()=>setTab("other")} className={`px-3 py-1.5 rounded-lg text-xs font-bold ${tab==="other"?"bg-amber-500 text-white":"text-gray-500"}`}>Other</button>
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border p-4 grid sm:grid-cols-4 gap-3">
+        <Select label="Date Filter" value={dateMode} options={[{value:"today",label:"Today"},{value:"date",label:"Date Wise"},{value:"range",label:"Date Range"},{value:"all",label:"All"}]} onChange={e=>setDateMode(e.target.value)} />
+        {dateMode==="date" && <Input label="Date" type="date" value={date} onChange={e=>setDate(e.target.value)} />}
+        {dateMode==="range" && <Input label="From" type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} />}
+        {dateMode==="range" && <Input label="To" type="date" value={toDate} onChange={e=>setToDate(e.target.value)} />}
+      </div>
+      {loading ? <Loader /> : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            <StatCard label="Records" value={totals.count || 0} icon="N" color="blue" />
+            <StatCard label={tab==="salary" ? "Salary Paid" : "Expense Amount"} value={`${CURRENCY}${fmt(totals.paid || 0)}`} icon="₹" color="red" />
+            {tab==="salary" && <StatCard label="Salary Earned" value={`${CURRENCY}${fmt(totals.earned || 0)}`} icon="E" color="green" />}
+            {tab==="salary" && <StatCard label="Pending" value={`${CURRENCY}${fmt(totals.pending || 0)}`} icon="P" color="amber" />}
+          </div>
+          <div className="bg-white rounded-2xl border shadow-sm overflow-x-auto">
+            {rows.length === 0 ? <EmptyState icon="EXP" text="No company expense records" /> : (
+              <table className="w-full text-xs">
+                <thead>
+                  {tab==="salary" ? (
+                    <tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Role</th><th className="p-2 text-left">Source</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th><th className="p-2 text-left">Paid By</th></tr>
+                  ) : (
+                    <tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date</th><th className="p-2 text-left">Type</th><th className="p-2 text-left">Material/Expense</th><th className="p-2 text-left">Qty</th><th className="p-2 text-right">Amount</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Purchased By</th><th className="p-2 text-left">Source</th></tr>
+                  )}
+                </thead>
+                <tbody>
+                  {rows.map((r,i)=>tab==="salary" ? (
+                    <tr key={i} className="border-t"><td className="p-2">{r.date}</td><td className="p-2 font-bold">{r.personName}</td><td className="p-2">{r.role}</td><td className="p-2">{r.source}<div className="text-gray-400">{r.siteName || r.itemName || r.details || ""}</div></td><td className="p-2 text-right text-green-700 font-bold">{CURRENCY}{fmt(r.earned)}</td><td className="p-2 text-right text-blue-700 font-bold">{CURRENCY}{fmt(r.paid)}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(r.pending)}</td><td className="p-2">{r.paidBy || "-"}</td></tr>
+                  ) : (
+                    <tr key={i} className="border-t"><td className="p-2">{r.date}</td><td className="p-2 font-bold">{r.type}</td><td className="p-2">{r.name}<div className="text-gray-400">{r.details || ""}</div></td><td className="p-2">{r.quantity || "-"}</td><td className="p-2 text-right text-red-600 font-bold">{CURRENCY}{fmt(r.amount)}</td><td className="p-2">{r.mode || "-"}</td><td className="p-2">{r.purchasedBy || "-"}</td><td className="p-2">{r.source}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const NAV = {
+  admin: [
+    { id:"aiassistant", label:"AI Business Assistant", icon:Sparkles },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
+    { id:"admincontrol", label:"Admin Panel", icon:"🛡️" },
+    { id:"officehub", label:"Office", icon:"🏢" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
+    { id:"dashboard", label:"Dashboard", icon:"📊" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
+    { id:"productionsite", label:"Production Site", icon:"🏭" },
+    { id:"masterdata", label:"Master Data", icon:"⚙️" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
+    { id:"workers", label:"Workers", icon:"👷" },
+    { id:"attendance", label:"Attendance", icon:"📊" },
+    { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
+    { id:"sitereport", label:"Site Reports", icon:"🏗️" },
+    { id:"workerreport2", label:"Worker Reports", icon:"👷" },
+    { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
+    { id:"purchases", label:"Purchases", icon:"🛒" },
+    { id:"stock", label:"Stock", icon:"📦" },
+    { id:"raw", label:"Raw Material", icon:"🧱" },
+    { id:"sales", label:"Sales", icon:"💰" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
+    { id:"driverreports", label:"Driver Reports", icon:"DR" },
+    { id:"devices", label:"Devices", icon:"📱" },
+    { id:"users", label:"Users", icon:"👥" },
+    { id:"reports", label:"Reports", icon:"📈" },
+  ],
+  supervisor: [
+    { id:"aiassistant", label:"AI Business Assistant", icon:Sparkles },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
+    { id:"dailyreport", label:"Daily Report", icon:"📋" },
+    { id:"mysitereports", label:"My Site Reports", icon:"📊" },
+    { id:"workerreport2", label:"Worker Ledger", icon:"W" },
+    { id:"workerreport", label:"Site Report", icon:"📝" },
+    { id:"workers", label:"Workers", icon:"👷" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
+    { id:"purchases", label:"Purchases", icon:"🛒" },
+    { id:"workplan", label:"Work Planning", icon:"📅" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
+  ],
+  user: [
+    { id:"aiassistant", label:"AI Business Assistant", icon:Sparkles },
+    { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
+    { id:"officehub", label:"Office", icon:"🏢" },
+    { id:"companyexpense", label:"Company Expense", icon:"CE" },
+    { id:"companypurchase", label:"Company Purchase", icon:"CP" },
+    { id:"dashboard", label:"Dashboard", icon:"📊" },
+    { id:"sitework", label:"Create New Site Work", icon:"🏗️" },
+    { id:"productionsite", label:"Production Site", icon:"🏭" },
+    { id:"masterdata", label:"Master Data", icon:"⚙️" },
+    { id:"suppliers", label:"Suppliers", icon:"🏪" },
+    { id:"workers", label:"Workers", icon:"👷" },
+    { id:"attendance", label:"Attendance", icon:"📊" },
+    { id:"workerreport", label:"Site Report", icon:"📋" },
+    { id:"dailyreport", label:"Supervisor Report", icon:"📝" },
+    { id:"supervisorwork", label:"Sup. Work", icon:"📋" },
+    { id:"sitereport", label:"Site Reports", icon:"🏗️" },
+    { id:"workerreport2", label:"Worker Reports", icon:"👷" },
+    { id:"supervisorreports", label:"Sup. Overview", icon:"🔍" },
+    { id:"purchases", label:"Purchases", icon:"🛒" },
+    { id:"stock", label:"Stock", icon:"📦" },
+    { id:"raw", label:"Raw Material", icon:"🧱" },
+    { id:"sales", label:"Sales", icon:"💰" },
+    { id:"quotations", label:"Quotations", icon:"QT" },
+    { id:"driverreports", label:"Driver Reports", icon:"DR" },
+    { id:"reports", label:"Reports", icon:"📈" },
+  ],
+  driver: [
+    { id:"driversubmit", label:"Submit Report", icon:"DR" },
+    { id:"driverreports", label:"Driver Reports", icon:"DL" },
+  ],
+};
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const publicQuotationMatch = window.location.pathname.match(/^\/quotation\/([^/]+)\/?$/);
+  const publicQuotationToken = publicQuotationMatch ? decodeURIComponent(publicQuotationMatch[1]) : "";
+  const [currentUser, setCurrentUser] = useState(null);
+  const [language, setLanguage] = useState(()=>{
+    const saved = localStorage.getItem("pk_language") || "en";
+    return LANGUAGE_OPTIONS.some(option=>option.value===saved) ? saved : "en";
+  });
+  ACTIVE_LANGUAGE = language;
+  const [successToast, setSuccessToast] = useState("");
+  const [page, setPage] = useState("dashboard");
+  const pageHistory = useRef([]);
+  const pageRef = useRef("dashboard");
+  const appHistoryInitialized = useRef(false);
+  const appUrl = useRef("");
+  const mainScrollRef = useRef(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [stock, setStock] = useState([]);
+  const [raw, setRaw] = useState([]);
+  const [production, setProduction] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [siteWorks, setSiteWorks] = useState([]);
+  const [pendingDailyReportEdit, setPendingDailyReportEdit] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(()=>{
+    document.title = COMPANY.shortName;
+  },[]);
+
+  const changeLanguage = (nextLanguage) => {
+    const next = LANGUAGE_OPTIONS.some(option=>option.value===nextLanguage) ? nextLanguage : "en";
+    localStorage.setItem("pk_language", next);
+    document.documentElement.lang = next;
+    setLanguage(next);
+  };
+
+  useEffect(()=>{
+    document.documentElement.lang = language;
+  },[language]);
+
+  useEffect(()=>{
+    pageRef.current = page;
+  },[page]);
+
+  useEffect(()=>{
+    if (!currentUser || currentUser._pendingDevice) return;
+    const roleHome = currentUser.role === "driver" ? "driversubmit" : currentUser.role === "supervisor" ? "sitework" : currentUser.role === "user" ? "officehub" : "dashboard";
+    const url = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    appUrl.current = url;
+    if (!appHistoryInitialized.current) {
+      const rootState = { __appNavigation:true, appPage:roleHome, appStack:[] };
+      pageHistory.current = [];
+      window.history.replaceState({...rootState, appRoot:"base"}, "", url);
+      window.history.pushState({...rootState, appRoot:"sentinel"}, "", url);
+      appHistoryInitialized.current = true;
+    }
+
+    const onPopState = (event) => {
+      const state = event.state;
+      if (!appHistoryInitialized.current) return;
+      if (state?.__appNavigation && state.appRoot === "base") {
+        if (window.confirm("Do you want to exit the app?")) {
+          appHistoryInitialized.current = false;
+          pageHistory.current = [];
+          window.history.back();
+        } else {
+          window.history.pushState({...state, appRoot:"sentinel"}, "", appUrl.current || url);
+        }
+        return;
+      }
+      if (state?.__appNavigation) {
+        pageHistory.current = Array.isArray(state.appStack) ? state.appStack : [];
+        pageRef.current = state.appPage || roleHome;
+        setPage(pageRef.current);
+        setSidebarOpen(false);
+        return;
+      }
+      if (window.confirm("Do you want to exit the app?")) {
+        appHistoryInitialized.current = false;
+        pageHistory.current = [];
+      } else {
+        window.history.pushState({__appNavigation:true, appRoot:"sentinel", appPage:roleHome, appStack:[]}, "", appUrl.current || url);
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  },[currentUser]);
+
+  useEffect(() => {
+    const show = (event) => {
+      setSuccessToast(event.detail || "Saved successfully");
+      window.clearTimeout(show.timer);
+      show.timer = window.setTimeout(() => setSuccessToast(""), 2400);
+    };
+    window.addEventListener("app-success", show);
+    return () => {
+      window.removeEventListener("app-success", show);
+      window.clearTimeout(show.timer);
+    };
+  }, []);
+
+  useEffect(()=>{
+    if (!currentUser) return;
+    if (currentUser.role==="supervisor") {
+      api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[])).catch(()=>{});
+      return;
+    }
+    // Let the dashboard summary load while shared page data is fetched in parallel.
+    setLoading(false);
+    Promise.all([api("GET","/stock"),api("GET","/raw"),api("GET","/production"),api("GET","/sales"),api("GET","/users"),api("GET","/sitework")])
+      .then(([s,r,p,sa,u,sw])=>{
+        setStock(Array.isArray(s)?s:[]);
+        setRaw(Array.isArray(r)?r:[]);
+        setProduction(Array.isArray(p)?p:[]);
+        setSales(Array.isArray(sa)?sa:[]);
+        setAllUsers(Array.isArray(u)?u:[]);
+        setSiteWorks(Array.isArray(sw)?sw:[]);
+        setLoading(false);
+      }).catch(()=>setLoading(false));
+  },[currentUser]);
+
+  const logout = () => {
+    setCurrentUser(null);
+    pageHistory.current = [];
+    appHistoryInitialized.current = false;
+    pageRef.current = "dashboard";
+    setPage("dashboard");
+    setSidebarOpen(false);
+    setLoading(false);
+    setStock([]);
+    setRaw([]);
+    setProduction([]);
+    setSales([]);
+    setAllUsers([]);
+    setSiteWorks([]);
+    ["currentUser", "user", "authUser", "token", "authToken", "pk_current_user"].forEach(key => localStorage.removeItem(key));
+    localStorage.removeItem("pk3_ai_token");
+    if (window.location.pathname !== "/" || window.location.hash) {
+      window.history.replaceState(null, "", "/");
+    }
+  };
+
+  const navigateTo = (nextPage) => {
+    if (!nextPage) return;
+    const currentPage = pageRef.current;
+    if (currentPage === nextPage) return;
+    const nextStack = [...pageHistory.current, currentPage];
+    pageHistory.current = nextStack;
+    pageRef.current = nextPage;
+    if (appHistoryInitialized.current) {
+      window.history.pushState({__appNavigation:true, appPage:nextPage, appStack:nextStack}, "", appUrl.current || window.location.href);
+    }
+    setPage(nextPage);
+    setSidebarOpen(false);
+  };
+
+  useEffect(() => {
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [page]);
+
+  if (publicQuotationToken) return <PublicQuotationPage token={publicQuotationToken} />;
+
+  if (!currentUser) return <Login branding={COMPANY} language={language} onLanguageChange={changeLanguage} onLogin={(u)=>{
+    if (u.aiToken) localStorage.setItem("pk3_ai_token", u.aiToken);
+    if (u.devicePending) {
+      setCurrentUser({...u, _pendingDevice: true});
+    } else {
+      setCurrentUser(u);
+      pageHistory.current = [];
+      setPage(u.role==="driver"?"driversubmit":u.role==="supervisor"?"sitework":u.role==="user"?"officehub":"dashboard");
+    }
+  }} />;
+  
+  // Show device pending screen
+  if (currentUser?._pendingDevice) {
+    return <DevicePendingScreen 
+      username={currentUser.username} 
+      deviceInfo={currentUser.deviceInfo}
+      onRetry={()=>{
+        setCurrentUser({...currentUser, _pendingDevice: false});
+        pageHistory.current = [];
+        setPage(currentUser.role==="driver"?"driversubmit":currentUser.role==="supervisor"?"sitework":currentUser.role==="user"?"officehub":"dashboard");
+      }}
+    />;
+  }
+
+  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
+  const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
+  const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
+  const officeNestedPages = ["sitework", "completedworks", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
+  const nav = (NAV[effectiveRoleOf(currentUser.role)]||[]).filter(item =>
+    (currentUser.role !== "user" || !["devices", "users", "dashboard"].includes(item.id)) &&
+    (currentUser.role !== "supervisor" || !supervisorHiddenPages.includes(item.id)) &&
+    !nestedNavPages.includes(item.id) &&
+    (!isAdminLike(currentUser.role) || (!reportNestedPages.includes(item.id) && !officeNestedPages.includes(item.id)))
+  );
+  const approvalStage = currentUser.role === "user" ? "pending_user" : currentUser.role === "admin" ? "pending_admin" : "";
+  const pendingApprovalCount = approvalStage ? siteWorks.filter(site=>site.completionApprovalStatus===approvalStage).length : 0;
+  const roleColors = { admin:"bg-slate-700", supervisor:"bg-emerald-600", user:"bg-blue-600", driver:"bg-amber-600" };
+  const roleHome = currentUser.role==="driver" ? "driversubmit" : currentUser.role==="supervisor" ? "sitework" : currentUser.role==="user" ? "officehub" : "dashboard";
+  const pageMeta = {
+    cashflowhub:{label:"Cash Flow Records",icon:"CF"}, cashtransactions:{label:"Cash Transactions",icon:"CT"}, cashtransactionsite:{label:"Site Cash",icon:"ST"}, cashtransactiondriver:{label:"Driver Cash",icon:"DR"}, cashtransactionsupervisor:{label:"Supervisor Cash",icon:"SV"}, cashtransactionadmin:{label:"Admin Cash",icon:"AD"}, loadingoperations:{label:"Loading & Unloading",icon:"LU"}, completedworks:{label:"Completed Works",icon:"CW"}, admincontrol:{label:"Admin Panel",icon:"AP"}, officehub:{label:"Office",icon:"OF"},
+    salaryhub:{label:"Salary",icon:"SAL"}, salaryadvance:{label:"Advance Salary",icon:"ADV"}, salaryproduction:{label:"Production Worker Salary",icon:"PW"}, salarysite:{label:"Site Worker Salary",icon:"SW"},
+    salarydriver:{label:"Driver Salary",icon:"DR"}, salarysupervisor:{label:"Supervisor Salary",icon:"SP"}, salaryuser:{label:"Office User Salary",icon:"US"},
+    supervisorcashflow:{label:"Supervisor Cashflow",icon:"SC"}, admincashflow:{label:"Admin Cashflow",icon:"AC"}, reportaudit:{label:"Report Audit",icon:"AUD"},
+    companyexpense:{label:"Company Expense",icon:"CE"}, companypurchase:{label:"Company Purchase",icon:"CP"}, officedaily:{label:"Office Daily Report",icon:"OD"},
+  };
+  const navPage = nav.find(item=>item.id===page) || (NAV[effectiveRoleOf(currentUser.role)]||[]).find(item=>item.id===page) || Object.values(NAV).flat().find(item=>item.id===page);
+  const currentPageMeta = pageMeta[page] || navPage || {label:"Management",icon:""};
+  const goBack = () => {
+    const state = window.history.state;
+    if (appHistoryInitialized.current && state?.__appNavigation && state.appRoot !== "base") {
+      window.history.back();
+      setSidebarOpen(false);
+      return;
+    }
+    let previous = pageHistory.current.pop();
+    while (previous === page && pageHistory.current.length) previous = pageHistory.current.pop();
+    if (previous) {
+      pageRef.current = previous;
+      setPage(previous);
+    } else if (window.confirm("Do you want to exit the app?")) {
+      appHistoryInitialized.current = false;
+      window.history.back();
+    }
+    setSidebarOpen(false);
+  };
+
+  const renderPage = () => {
+    if (loading) return <Loader />;
+    if (currentUser.role === "supervisor" && supervisorHiddenPages.includes(page)) {
+      return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
+    }
+    switch (page) {
+      case "dashboard": return <Dashboard stock={stock} raw={raw} production={production} sales={sales} siteWorks={siteWorks} user={currentUser} />;
+      case "aiassistant": return currentUser.role !== "driver" ? <BusinessAssistant user={currentUser} language={language} /> : null;
+      case "sitework": return <SiteWork siteWorks={siteWorks} setSiteWorks={setSiteWorks} user={currentUser} />;
+      case "masterdata": return <MasterData />;
+      case "workers": return <Workers user={currentUser} />;
+      case "suppliers": return <Suppliers user={currentUser} />;
+      case "productionsite": return <ProductionSite user={currentUser} setStock={setStock} />;
+      case "attendance": return <AttendanceReports user={currentUser} />;
+      case "supervisorwork": return <SupervisorWorkView user={currentUser} />;
+      case "supervisorsitereport": return <SupervisorSiteReport user={currentUser} />;
+      case "mysitereports": return <SupervisorSiteReport user={currentUser} />;
+      case "workerreport": return <WorkerReport user={currentUser} />;
+      case "dailyreport": return <DailyReport user={currentUser} initialEditReport={pendingDailyReportEdit} onInitialEditOpened={()=>setPendingDailyReportEdit(null)} />;
+      case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
+      case "purchases": return <Purchases user={currentUser} />;
+      case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
+      case "sitereport": return <AdminSiteReport user={currentUser} onEditReport={report=>{setPendingDailyReportEdit(report);navigateTo("dailyreport");}} />;
+      case "workerreport2": return <AdminWorkerReport user={currentUser} />;
+      case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
+      case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
+      case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
+      case "sales": return <Sales sales={sales} setSales={setSales} stock={stock} setStock={setStock} user={currentUser} branding={COMPANY} />;
+      case "quotations": return <QuotationModule user={currentUser} />;
+      case "driversubmit": return <DriverSubmitReport user={currentUser} />;
+      case "driverreports": return <DriverReports user={currentUser} />;
+      case "cashflowhub": return <CashFlowHub user={currentUser} setPage={navigateTo} />;
+      case "cashtransactions": return isAdminLike(currentUser.role)?<CashTransactionsHub setPage={navigateTo} />:null;
+      case "cashtransactionsite": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="site" />:null;
+      case "cashtransactiondriver": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="driver" />:null;
+      case "cashtransactionsupervisor": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="supervisor" />:null;
+      case "cashtransactionadmin": return isAdminLike(currentUser.role)?<CashTransactionLedger user={currentUser} allUsers={allUsers} siteWorks={siteWorks} partyType="admin" />:null;
+      case "loadingoperations": return isAdminLike(currentUser.role)?<LoadingOperations user={currentUser}/>:null;
+      case "completedworks": return isAdminLike(currentUser.role)?<CompletedSiteApprovals user={currentUser} setGlobalSiteWorks={setSiteWorks}/>:null;
+      case "admincontrol": return currentUser.role==="admin"?<AdminControlHub setPage={navigateTo} pendingApprovalCount={pendingApprovalCount} />:null;
+      case "salarymanagement": return currentUser.role==="admin"?<SalaryManagement user={currentUser} />:null;
+      case "officehub": return isAdminLike(currentUser.role)?<OfficeHub setPage={navigateTo} pendingApprovalCount={pendingApprovalCount} />:null;
+      case "salaryhub": return isAdminLike(currentUser.role)?<SalaryHub user={currentUser} setPage={navigateTo} />:null;
+      case "salaryadvance": return isAdminLike(currentUser.role)?<AdvanceSalary user={currentUser} />:null;
+      case "salaryproduction": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Production Worker" />:null;
+      case "salarysite": return isAdminLike(currentUser.role)?<PendingWorkerSalary user={currentUser} workerType="Site Worker" />:null;
+      case "salarydriver": return isAdminLike(currentUser.role)?<PendingDriverSalary user={currentUser} />:null;
+      case "salarysupervisor": return isAdminLike(currentUser.role)?<OfficeSalaryLedger user={currentUser} role="supervisor" />:null;
+      case "salaryuser": return isAdminLike(currentUser.role)?<OfficeSalaryLedger user={currentUser} role="user" />:null;
+      case "supervisorcashflow": return isAdminLike(currentUser.role)?<SupervisorCashFlow user={currentUser} allUsers={allUsers} />:null;
+      case "admincashflow": return isAdminLike(currentUser.role)?<AdminCashFlow user={currentUser} allUsers={allUsers} />:null;
+      case "reportaudit": return currentUser.role==="admin"?<ReportAuditLog user={currentUser} />:null;
+      case "cashflow": return <DailyCashFlow user={currentUser} allUsers={allUsers} />;
+      case "companyexpense": return <CompanyExpense user={currentUser} />;
+      case "companypurchase": return (isAdminLike(currentUser.role)||currentUser.role==="supervisor")?<CompanyPurchase user={currentUser} />:null;
+      case "officedaily": return isAdminLike(currentUser.role)?<OfficeDailyReport user={currentUser} />:null;
+      case "users": return isAdminLike(currentUser.role)?<Users currentUser={currentUser} allUsers={allUsers} setAllUsers={setAllUsers} />:null;
+      case "devices": return <DeviceManagement user={currentUser} />;
+      case "reports": return <ReportsHub setPage={navigateTo} />;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="app-shell min-h-screen bg-slate-50 flex">
+      {successToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[80] bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-black border border-green-500">
+          {tr(successToast, language)}
+        </div>
+      )}
+      {sidebarOpen&&<div className="fixed inset-0 bg-black/30 z-20 lg:hidden" onClick={()=>setSidebarOpen(false)} />}
+      <aside className={`fixed top-0 left-0 h-full w-[280px] bg-[#08264b] z-30 flex flex-col transform transition-transform duration-300 ${sidebarOpen?"translate-x-0":"-translate-x-full"} lg:translate-x-0 lg:static lg:h-screen lg:flex`}>
+        <div className="px-5 py-5 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white border border-white/20 flex items-center justify-center overflow-hidden"><img src={COMPANY.logo} alt="Interlock tiles logo" className="w-full h-full object-contain p-0.5" /></div>
+            <div><div className="text-white font-black text-sm leading-tight">{COMPANY.shortName}</div><div className="text-slate-400 text-xs">{tr("Management System", language)}</div></div>
+          </div>
+        </div>
+        <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
+          {nav.map(item=>(
+            <button key={item.id} onClick={()=>navigateTo(item.id)}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-sm font-bold transition-all ${page===item.id?"bg-blue-500 text-white shadow-md":"text-blue-100/75 hover:bg-white/10 hover:text-white"}`}>
+              <span className="w-5 h-5 flex items-center justify-center shrink-0"><UiIcon icon={NAV_ICON_MAP[item.id] || item.icon} size={18}/></span><span className="flex-1 text-left">{tr(item.label, language)}</span>{pendingApprovalCount>0&&(item.id==="officehub"||item.id==="admincontrol")&&<span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-black text-slate-950"><Bell size={12}/>{pendingApprovalCount}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="px-3 py-4 border-t border-white/10">
+          <div className="px-2 pb-3 text-center">
+            <div className="text-[10px] font-bold text-slate-400">{POWERED_BY}</div>
+            <div className="text-[9px] text-slate-500 mt-0.5">{COPYRIGHT_TEXT}</div>
+          </div>
+          <div className="flex items-center gap-3 bg-white/10 border border-white/10 rounded-xl px-3 py-3">
+            <div className={`w-9 h-9 rounded-full ${roleColors[currentUser.role]} flex items-center justify-center text-white font-black text-xs shrink-0`}>{currentUser.avatar}</div>
+            <div className="flex-1 min-w-0"><div className="text-white text-xs font-bold truncate">{currentUser.name}</div><div className="text-stone-400 text-xs capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</div></div>
+            <button onClick={logout} className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-red-400" title={tr("Logout", language)} aria-label={tr("Logout", language)}><LogOut size={16}/></button>
+          </div>
+        </div>
+      </aside>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="bg-white/95 backdrop-blur border-b border-slate-200 px-4 lg:px-6 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+          <button onClick={()=>setSidebarOpen(!sidebarOpen)} className="lg:hidden h-9 w-9 inline-flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100" title="Open menu" aria-label="Open menu"><Menu size={20}/></button>
+          {page!==roleHome&&<button onClick={goBack} className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-black" title={tr("Back", language)} aria-label={tr("Back", language)}><ArrowLeft size={16}/><span className="hidden sm:inline">{tr("Back", language)}</span></button>}
+          <div className="flex-1 min-w-0"><div className="text-[10px] font-bold uppercase text-slate-400">Workspace</div><h1 className="font-black text-slate-950 text-sm truncate">{tr(currentPageMeta.label, language)}</h1></div>
+          <LanguageSelector value={language} onChange={changeLanguage} compact />
+          <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full ${roleColors[currentUser.role]} text-white text-xs font-bold`}>
+            {currentUser.avatar} <span className="capitalize">{tr(currentUser.role.charAt(0).toUpperCase()+currentUser.role.slice(1), language)}</span>
+          </div>
+        </header>
+        <main ref={mainScrollRef} className="relative isolate flex-1 p-4 lg:p-6 overflow-y-auto max-w-7xl w-full mx-auto"><img src={COMPANY.logo} alt="" aria-hidden="true" className="absolute z-[-1] top-24 right-4 sm:right-10 w-56 sm:w-80 h-56 sm:h-80 object-contain opacity-[0.025] pointer-events-none" /><div className="app-page relative z-[1]"><LocalizedContent language={language}>{renderPage()}</LocalizedContent></div></main>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,14 @@
+{
+  "appId": "com.pkinterlock.management",
+  "appName": "PK Interlock",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#111827"
+    }
+  }
+}
