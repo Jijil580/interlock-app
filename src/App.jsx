@@ -6479,7 +6479,7 @@ function AdminWorkerReport({ user, initialTab }) {
   const [selectedSite, setSelectedSite] = useState(null);
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [workerPayModal, setWorkerPayModal] = useState(null);
-  const [workerPayForm, setWorkerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "" });
+  const [workerPayForm, setWorkerPayForm] = useState({ amount: "", date: today(), mode: "Cash", note: "", siteName: "" });
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({ fromDate: "", toDate: "", customDate: "", datePreset: "", item: "", color: "", site: "" });
   const emptySiteWorkerEntry = { date: today(), workerName: "", siteName: "", siteId: "", workCategory: "Fitting", workArea: "", unit: "Sqft", rate: "", paymentGiven: "", paymentMode: "Cash", remarks: "" };
@@ -6550,6 +6550,7 @@ function AdminWorkerReport({ user, initialTab }) {
     if (!workerPayModal?.name) return;
     const amount = +(workerPayForm.amount || 0);
     if (amount <= 0) return;
+    if (tab === "site" && !workerPayForm.siteName) return window.alert("Select the site this salary payment is for");
     const source = tab === "site" ? "worker-ledger-site" : "worker-ledger-production";
     const saved = await api("POST", "/workerpayments", {
       workerName: workerPayModal.name,
@@ -6558,12 +6559,13 @@ function AdminWorkerReport({ user, initialTab }) {
       mode: workerPayForm.mode,
       note: workerPayForm.note || `${tab === "site" ? "Site" : "Production"} worker wage payment`,
       addedBy: user.name,
-      source
+      source,
+      siteName: tab === "site" ? workerPayForm.siteName : ""
     });
     if (saved?._id) {
       const name = workerPayModal.name;
       setWorkerPayModal(null);
-      setWorkerPayForm({ amount: "", date: today(), mode: "Cash", note: "" });
+      setWorkerPayForm({ amount: "", date: today(), mode: "Cash", note: "", siteName: "" });
       loadReport(name);
     } else if (saved?.message) {
       window.alert(saved.message);
@@ -7073,8 +7075,9 @@ function AdminWorkerReport({ user, initialTab }) {
             <div className="space-y-3">
               <div className="bg-red-50 rounded-xl p-3 text-sm">
                 <div className="font-bold">{workerPayModal.name || "-"}</div>
-                <div>Pending: <b>{CURRENCY}{fmt(workerPayModal.totalPending || 0)}</b></div>
+                <div>{tab === "site" && workerPayForm.siteName ? "Selected site pending:" : "Pending:"} <b>{CURRENCY}{fmt(tab === "site" ? (report?.sites || []).find(site => site.siteName === workerPayForm.siteName)?.pending || 0 : workerPayModal.totalPending || 0)}</b></div>
               </div>
+              {tab === "site" && <Select label="Salary Site" value={workerPayForm.siteName} options={[{value:"",label:"Select site"},...(report?.sites || []).filter(site => (+site.pending || 0) > 0).map(site => ({value:site.siteName,label:`${site.siteName} · ${CURRENCY}${fmt(site.pending)}`}))]} onChange={e => { const site=(report?.sites || []).find(item=>item.siteName===e.target.value); setWorkerPayForm({...workerPayForm,siteName:e.target.value,amount:site?String(site.pending):""}); }} />}
               <Input label="Payment Date" type="date" value={workerPayForm.date} onChange={e => setWorkerPayForm({ ...workerPayForm, date: e.target.value })} />
               <Input label={`Amount (${CURRENCY})`} type="number" value={workerPayForm.amount} onChange={e => setWorkerPayForm({ ...workerPayForm, amount: e.target.value })} />
               <Select label="Mode" value={workerPayForm.mode} options={["Cash", "UPI", "Bank Transfer"]} onChange={e => setWorkerPayForm({ ...workerPayForm, mode: e.target.value })} />
@@ -9293,7 +9296,7 @@ function SalaryPaymentLedger({ kind="salary", personType="", refreshKey=0, title
   const paymentPeriod=row=>!row.paymentScope?"-":row.paymentScope==="current-week"?`${row.weekStart} to ${row.weekEnd}`:row.paymentScope==="previous-weeks"?"Previous unpaid weeks":row.paymentScope==="selected-week"?`${row.weekStart} to ${row.weekEnd}`:"Oldest pending first";
   const printLedger=()=>{
     const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-    const rows=visible.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(dateTime(row.dateTime))}</td><td>${esc(row.recipient)}</td><td>${esc(personTypeLabel(row.personType))}</td><td>${esc(row.givenBy||"-")}</td><td>${esc(paymentPeriod(row))}</td><td>${esc(row.mode||"-")}</td><td>${esc(row.source||"-")}</td><td class="right">${CURRENCY}${fmt(row.amount)}</td></tr>`).join("");
+    const rows=visible.map(row=>`<tr><td>${esc(row.date)}</td><td>${esc(dateTime(row.dateTime))}</td><td>${esc(row.recipient)}</td><td>${esc(personTypeLabel(row.personType))}</td><td>${esc(row.givenBy||"-")}</td><td>${esc(paymentPeriod(row))}</td><td>${esc(row.mode||"-")}</td><td>${esc([row.source,row.siteName?`Site: ${row.siteName}`:""].filter(Boolean).join(" / "))}</td><td class="right">${CURRENCY}${fmt(row.amount)}</td></tr>`).join("");
     const html=`<!doctype html><html><head><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;margin:18px;color:#111}h1{font-size:21px;margin:0 0 4px}p{font-size:12px;color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.box{border:1px solid #222;padding:8px;font-size:12px}.box b{display:block;font-size:16px;margin-top:3px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #222;padding:6px}th{background:#f3f4f6;text-align:left}.right{text-align:right}@media print{body{margin:8mm}}</style></head><body><h1>${esc(title)}</h1><p>${esc(filters.recipient||"All employees")} | Given by ${esc(filters.givenBy||"All users")}</p><div class="summary"><div class="box">Total Paid<b>${CURRENCY}${fmt(totals.amount)}</b></div><div class="box">Cash<b>${CURRENCY}${fmt(totals.cash)}</b></div><div class="box">Advance Adjusted<b>${CURRENCY}${fmt(totals.advance)}</b></div></div><table><thead><tr><th>Date</th><th>Entry Time</th><th>Received By</th><th>Designation</th><th>Given By</th><th>Payment Period</th><th>Mode</th><th>Source</th><th>Amount</th></tr></thead><tbody>${rows||'<tr><td colspan="9">No records found</td></tr>'}</tbody></table><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`;
     const popup=window.open("","_blank");popup.document.write(html);popup.document.close();
   };
@@ -9308,7 +9311,7 @@ function SalaryPaymentLedger({ kind="salary", personType="", refreshKey=0, title
       {filters.dateMode==="range"&&<><Input label="From Date" type="date" value={filters.fromDate} onChange={e=>setFilters({...filters,fromDate:e.target.value})}/><Input label="To Date" type="date" value={filters.toDate} onChange={e=>setFilters({...filters,toDate:e.target.value})}/></>}
     </div>
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3"><StatCard label="Entries" value={visible.length} icon="N" color="blue"/><StatCard label="Total Paid" value={`${CURRENCY}${fmt(totals.amount)}`} icon="IN" color="green"/><StatCard label="Cash" value={`${CURRENCY}${fmt(totals.cash)}`} icon="C" color="teal"/><StatCard label="Advance Adjusted" value={`${CURRENCY}${fmt(totals.advance)}`} icon="A" color="violet"/></div>
-    {loading?<Loader/>:visible.length===0?<EmptyState icon="LED" text="No payment ledger records"/>:<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Received By</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Given By</th><th className="p-2 text-left">Payment Period</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Source / Note</th><th className="p-2 text-right">Amount</th></tr></thead><tbody>{visible.map(row=><tr key={row.id} className="border-t"><td className="p-2"><b>{row.date||"-"}</b><div className="text-gray-400">{dateTime(row.dateTime)}</div></td><td className="p-2 font-bold">{row.recipient||"-"}</td><td className="p-2">{personTypeLabel(row.personType)}</td><td className="p-2 font-bold text-blue-700">{row.givenBy||"-"}</td><td className="p-2">{paymentPeriod(row)}</td><td className="p-2">{row.mode||"-"}</td><td className="p-2">{row.source||"-"}<div className="text-gray-400">{row.note||""}</div></td><td className="p-2 text-right font-black text-green-700">{CURRENCY}{fmt(row.amount)}</td></tr>)}</tbody></table></div>}
+    {loading?<Loader/>:visible.length===0?<EmptyState icon="LED" text="No payment ledger records"/>:<div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Date / Time</th><th className="p-2 text-left">Received By</th><th className="p-2 text-left">Designation</th><th className="p-2 text-left">Given By</th><th className="p-2 text-left">Payment Period</th><th className="p-2 text-left">Mode</th><th className="p-2 text-left">Source / Note</th><th className="p-2 text-right">Amount</th></tr></thead><tbody>{visible.map(row=><tr key={row.id} className="border-t"><td className="p-2"><b>{row.date||"-"}</b><div className="text-gray-400">{dateTime(row.dateTime)}</div></td><td className="p-2 font-bold">{row.recipient||"-"}</td><td className="p-2">{personTypeLabel(row.personType)}</td><td className="p-2 font-bold text-blue-700">{row.givenBy||"-"}</td><td className="p-2">{paymentPeriod(row)}</td><td className="p-2">{row.mode||"-"}</td><td className="p-2">{row.source||"-"}<div className="text-gray-400">{row.note||""}</div>{row.siteName&&<div className="text-blue-700">Site: {row.siteName}</div>}</td><td className="p-2 text-right font-black text-green-700">{CURRENCY}{fmt(row.amount)}</td></tr>)}</tbody></table></div>}
   </SectionBox>;
 }
 
@@ -9333,7 +9336,7 @@ function AdvanceSalary({ user }) {
 }
 
 function LegacyOfficeSalaryLedger({ user, role }) {
-  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true};
+  const emptyPay={amount:"",date:today(),mode:"Cash",note:"",useAdvance:true,siteName:""};
   const [people,setPeople]=useState([]); const [records,setRecords]=useState([]); const [advances,setAdvances]=useState([]); const [selected,setSelected]=useState(""); const [payRecord,setPayRecord]=useState(null); const [pay,setPay]=useState(emptyPay);
   const load=()=>Promise.all([api("GET","/users"),api("GET",`/salary-records?role=${role}`),api("GET",`/salary-advances?personType=${role}`)]).then(([u,r,a])=>{setPeople((Array.isArray(u)?u:[]).filter(x=>x.role===role&&x.active!==false));setRecords(Array.isArray(r)?r:[]);setAdvances(a?.records||[]);});
   useEffect(()=>{load();},[role]);
@@ -9420,23 +9423,29 @@ function PendingWorkerSalary({ user, workerType }) {
   };
   useEffect(()=>{load();},[workerType]);
   const advance=paymentTarget?availableAdvance(advances,{personType,personId:paymentTarget.row.worker._id,personName:paymentTarget.row.worker.name,mobile:paymentTarget.row.worker.phone}):0;
-  const openPayment=(row,scope)=>{
+  const openPayment=async(row,scope)=>{
     const isCurrent=scope==="current-week";
     const isPrevious=scope==="previous-weeks";
     const targetPending=isCurrent?row.currentWeek.pending:isPrevious?row.previousWeeksPending:row.calculatedPending;
     if(targetPending<=0)return;
     const available=availableAdvance(advances,{personType,personId:row.worker._id,personName:row.worker.name,mobile:row.worker.phone});
     const label=isCurrent?"Current Week":isPrevious?"Previous Weeks":"Total Pending";
-    setPaymentTarget({row,scope,targetPending,label,weekStart:isCurrent?row.currentWeek.weekStart:"",weekEnd:isCurrent?row.currentWeek.weekEnd:""});
-    setPay({amount:String(Math.max(0,targetPending-available)),date:today(),mode:"Cash",note:`${workerType} - ${label} payment`,useAdvance:available>0});
+    const target={row,scope,targetPending,label,weekStart:isCurrent?row.currentWeek.weekStart:"",weekEnd:isCurrent?row.currentWeek.weekEnd:"",siteRows:[]};
+    if(workerType==="Site Worker"){
+      const siteReport=await api("GET",`/workers/reports/site?name=${encodeURIComponent(row.worker.name)}`);
+      target.siteRows=siteReport?.sites||[];
+    }
+    setPaymentTarget(target);
+    setPay({amount:workerType==="Site Worker"?"":String(Math.max(0,targetPending-available)),date:today(),mode:"Cash",note:`${workerType} - ${label} payment`,useAdvance:available>0,siteName:""});
   };
   const makePayment=async()=>{
     if(!paymentTarget||saving)return;
+    if(workerType==="Site Worker"&&!pay.siteName)return window.alert("Select the site this salary payment is for");
     const adjusted=pay.useAdvance?Math.min(advance,Math.max(0,paymentTarget.targetPending-(+pay.amount||0))):0;
     if((+pay.amount||0)+adjusted<=0)return;
     const source=workerType==="Site Worker"?"worker-ledger-site":"worker-ledger-production";
     setSaving(true);
-    const saved=await api("POST","/workerpayments",{workerName:paymentTarget.row.worker.name,workerId:paymentTarget.row.worker._id,personType,amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source,paymentScope:paymentTarget.scope,weekStart:paymentTarget.weekStart,weekEnd:paymentTarget.weekEnd});
+    const saved=await api("POST","/workerpayments",{workerName:paymentTarget.row.worker.name,workerId:paymentTarget.row.worker._id,personType,siteName:pay.siteName||"",amount:+pay.amount,advanceRequested:pay.useAdvance?advance:0,date:pay.date,mode:pay.mode,note:pay.note,addedBy:user.name,source,paymentScope:paymentTarget.scope,weekStart:paymentTarget.weekStart,weekEnd:paymentTarget.weekEnd});
     setSaving(false);
     if(saved?._id){setPaymentTarget(null);setPay(emptyPay);setLedgerKey(key=>key+1);load();}else if(saved?.message)window.alert(saved.message);
   };
@@ -9467,7 +9476,7 @@ function PendingWorkerSalary({ user, workerType }) {
       {row.previousWeeksPending>0&&<details className="mt-3 border-t pt-3"><summary className="cursor-pointer text-xs font-bold text-blue-700">View previous unpaid weeks</summary><div className="overflow-x-auto mt-2"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-gray-500"><th className="p-2 text-left">Week (Sun - Sat)</th><th className="p-2 text-right">Earned</th><th className="p-2 text-right">Paid</th><th className="p-2 text-right">Pending</th></tr></thead><tbody>{row.previousWeeks.filter(week=>week.pending>0).map(week=><tr key={week.weekStart} className="border-t"><td className="p-2">{week.weekStart} to {week.weekEnd}</td><td className="p-2 text-right">{CURRENCY}{fmt(week.earned)}</td><td className="p-2 text-right text-blue-700">{CURRENCY}{fmt(week.paid)}</td><td className="p-2 text-right font-bold text-red-600">{CURRENCY}{fmt(week.pending)}</td></tr>)}</tbody></table></div></details>}
     </div>)}{(weekly.workers||[]).length===0&&<EmptyState icon="OK" text="No weekly earnings or pending salary"/>}</div>}
     <SalaryPaymentLedger kind="salary" personType={personType} refreshKey={ledgerKey} title={`${workerType} Payment Ledger`}/>
-    {paymentTarget&&<Modal title={`${paymentTarget.label} - ${paymentTarget.row.worker.name}`} onClose={()=>!saving&&setPaymentTarget(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg"><span className="text-xs text-gray-500">Selected pending</span><div className="font-black text-red-600">{CURRENCY}{fmt(paymentTarget.targetPending)}</div>{paymentTarget.weekStart&&<div className="text-xs text-gray-500 mt-1">Sunday {paymentTarget.weekStart} to Saturday {paymentTarget.weekEnd}</div>}</div><AdvanceAdjustment available={advance} pending={paymentTarget.targetPending} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button disabled={saving} onClick={makePayment} className="w-full bg-green-600 disabled:bg-gray-400 text-white py-3 rounded-lg font-black">{saving?"Recording Payment...":"Adjust & Mark Payment Done"}</button></div></Modal>}
+    {paymentTarget&&<Modal title={`${paymentTarget.label} - ${paymentTarget.row.worker.name}`} onClose={()=>!saving&&setPaymentTarget(null)}><div className="space-y-3"><div className="bg-red-50 p-3 rounded-lg"><span className="text-xs text-gray-500">{workerType==="Site Worker"&&pay.siteName?"Selected site pending":"Selected pending"}</span><div className="font-black text-red-600">{CURRENCY}{fmt(workerType==="Site Worker"&&pay.siteName?paymentTarget.siteRows.find(site=>site.siteName===pay.siteName)?.pending||0:paymentTarget.targetPending)}</div>{paymentTarget.weekStart&&<div className="text-xs text-gray-500 mt-1">Sunday {paymentTarget.weekStart} to Saturday {paymentTarget.weekEnd}</div>}</div>{workerType==="Site Worker"&&<Select label="Salary Site" value={pay.siteName} options={[{value:"",label:"Select site"},...paymentTarget.siteRows.filter(site=>(+site.pending||0)>0).map(site=>({value:site.siteName,label:`${site.siteName} · ${CURRENCY}${fmt(site.pending)}`}))]} onChange={e=>{const site=paymentTarget.siteRows.find(item=>item.siteName===e.target.value);setPay({...pay,siteName:e.target.value,amount:site?String(Math.min(paymentTarget.targetPending,+site.pending||0)):""});}}/>}<AdvanceAdjustment available={advance} pending={paymentTarget.targetPending} pay={pay} setPay={setPay}/><Input label="Payment Date" type="date" value={pay.date} onChange={e=>setPay({...pay,date:e.target.value})}/><Input label={`Cash Payment (${CURRENCY})`} type="number" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><Select label="Payment Mode" value={pay.mode} options={["Cash","UPI","Bank Transfer"]} onChange={e=>setPay({...pay,mode:e.target.value})}/><Input label="Note" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button disabled={saving||(workerType==="Site Worker"&&!pay.siteName)} onClick={makePayment} className="w-full bg-green-600 disabled:bg-gray-400 text-white py-3 rounded-lg font-black">{saving?"Recording Payment...":"Adjust & Mark Payment Done"}</button></div></Modal>}
   </div>;
 }
 
