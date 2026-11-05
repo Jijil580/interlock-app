@@ -2199,8 +2199,8 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     type: section === "site" ? "Site Payment Received" : section === "office" ? "Cash Received from Office" : "Material Payment"
   });
   const reportSectionsOf = (report) => {
-    if (["site","workers","expenses","office"].includes(report.entrySection)) return [report.entrySection];
-    if (Array.isArray(report.entrySections) && report.entrySections.length) return report.entrySections;
+    if (["site","workers","expenses","office"].includes(report.entrySection)) return [...new Set([report.entrySection,...((report.workerEntries||[]).length?["workers"]:[])])];
+    if (Array.isArray(report.entrySections) && report.entrySections.length) return [...new Set([...report.entrySections,...((report.workerEntries||[]).length?["workers"]:[])])];
     const sections = [];
     const hasWorkers = (report.workerEntries||[]).length>0 || report.workersDetail || (report.workerPayments||[]).length>0;
     const hasExpenses = (report.payments||[]).some(isExpensePayment) || report.expenses;
@@ -2216,11 +2216,11 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   };
   const visibleReports = reports.filter(r=>{
     if (isAdminLike(user.role)) return true;
-    const allowedSite = mySites.some(s=>reportBelongsToSite(r,s));
-    return user.role === "supervisor" ? allowedSite : sameText(r.addedBy,user.name) || allowedSite;
+    const allowedSite = mySites.some(s=>reportBelongsToSite(r,s)||(r.workerEntries||[]).some(w=>reportBelongsToSite({siteId:w.siteId,siteName:w.siteName},s)));
+    return sameText(r.addedBy,user.name) || allowedSite;
   });
   const siteNameMap = new Map();
-  [...mySites.map(site=>site.customerName),...visibleReports.map(report=>report.siteName)].filter(Boolean).forEach(name=>{
+  [...mySites.map(site=>site.customerName),...visibleReports.flatMap(report=>[report.siteName,...(report.workerEntries||[]).map(w=>w.siteName)])].filter(Boolean).forEach(name=>{
     const key=normalizedText(name);
     if(key&&!siteNameMap.has(key)) siteNameMap.set(key,String(name).trim());
   });
@@ -2248,8 +2248,8 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   const sectionRows = {
     site: filteredSectionReports.site
       .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
-    workers: filteredSectionReports.workers.flatMap(r=>(r.workerEntries||[]).map((w,i)=>({...w,report:r,rowId:`${r._id}-w-${i}`})))
-      .filter(w=>filterText(w.workerName, reportFilters.workerName)&&filterText(w.workCategory, reportFilters.type))
+    workers: sectionReports.workers.flatMap(r=>(r.workerEntries||[]).map((w,i)=>({...w,siteName:w.siteName||r.siteName,report:r,rowId:`${r._id}-w-${i}`})))
+      .filter(w=>(!reportFilters.date||w.report.date===reportFilters.date)&&(!reportFilters.siteName||sameText(w.siteName,reportFilters.siteName))&&filterText(w.workerName, reportFilters.workerName)&&filterText(w.workCategory, reportFilters.type))
       .sort((a,b)=>(b.report.date||"").localeCompare(a.report.date||"")),
     expenses: filteredSectionReports.expenses.flatMap(r=>(r.payments||[]).filter(isExpensePayment).map((p,i)=>({...p,report:r,rowId:`${r._id}-p-${i}`})))
       .filter(p=>filterText(p.type, reportFilters.type))
@@ -2260,10 +2260,12 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const addWorkerEntry = () => {
     if (!workerEntry.workerName) return;
+    if (!workerEntry.siteId && !form.siteId) return window.alert("Please select the worker's site.");
     const normalize = (v) => String(v || "").trim().toLowerCase();
     const duplicateInFormIndex = (form.workerEntries || []).findIndex(w =>
       normalize(w.workerName) === normalize(workerEntry.workerName) &&
-      normalize(w.workCategory) === normalize(workerEntry.workCategory)
+      normalize(w.workCategory) === normalize(workerEntry.workCategory) &&
+      normalize(w.siteId||form.siteId) === normalize(workerEntry.siteId||form.siteId)
     );
     if (duplicateInFormIndex >= 0) {
       const editExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
@@ -2297,6 +2299,8 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
         ...(f.workerEntries||[]),
         {
           ...workerEntry,
+          siteId: workerEntry.siteId || form.siteId,
+          siteName: workerEntry.siteName || form.siteName,
           salary: totalAmount,
           amountEarned: totalAmount,
           paymentGiven: paid,
@@ -2366,6 +2370,10 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
       window.alert("Please select or type site name.");
       return;
     }
+    if (entrySection === "workers" && !form.workerEntries.length) {
+      window.alert("Add a worker entry before submitting the report.");
+      return;
+    }
 
     const reportPayload = sectionReportPayload(form, entrySection);
     const cleanPayments = (reportPayload.payments||[]).filter(p=>p.type!=="Worker Payment");
@@ -2431,9 +2439,10 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   );
 
   const workersForCurrentEntry = () => {
-    const site = mySites.find(s=>s._id===form.siteId);
+    const siteId = workerEntry.siteId || form.siteId;
+    const site = mySites.find(s=>s._id===siteId);
     const selectedNames = site?.selectedWorkers || [];
-    return workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(!form.siteId || selectedNames.includes(w.name)));
+    return workers.filter(w=>workerTypeOf(w)==="Site Worker"&&isActiveWorker(w)&&(!siteId || selectedNames.includes(w.name)));
   };
 
   const normalizeDailyReport = (report = {}) => ({
@@ -2728,7 +2737,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-black text-gray-900">{w.workerName||"Worker"}</div>
-                  <div className="text-gray-500">{w.report.date||"-"} · {w.report.siteName||"No site"} · {w.workCategory||"-"}</div>
+                  <div className="text-gray-500">{w.report.date||"-"} · {w.siteName||"No site"} · {w.workCategory||"-"}</div>
                   <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-1">
                     <span>Area: <b>{w.workArea||0} {w.unit||""}</b></span>
                     <span>Earned: <b>{CURRENCY}{fmt(w.salary||w.amountEarned||0)}</b></span>
@@ -2851,6 +2860,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
             {entrySection==="workers"&&<SectionBox title="Worker Details" icon="👷" color="teal">
               <div className="space-y-2">
+                <Select label="Site *" value={workerEntry.siteId||form.siteId||""} options={[{value:"",label:"Select site"},...mySites.map(site=>({value:site._id,label:site.customerName}))]} onChange={e=>{const site=mySites.find(item=>item._id===e.target.value);setWorkerEntry({...workerEntry,siteId:e.target.value,siteName:site?.customerName||"",workerName:""});}} />
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
                   <select value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
@@ -3489,7 +3499,7 @@ function Reports({ production, sales, stock, raw, siteWorks }) {
   // Worker Report
   if (selectedWorker) {
     const workerReports = dailyReports.filter(r=>(r.workerEntries||[]).some(w=>w.workerName===selectedWorker.name)).filter(filterByDate);
-    const allEntries = workerReports.flatMap(r=>(r.workerEntries||[]).filter(w=>w.workerName===selectedWorker.name).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    const allEntries = workerReports.flatMap(r=>(r.workerEntries||[]).filter(w=>w.workerName===selectedWorker.name).map(w=>({...w,date:r.date,siteName:w.siteName||r.siteName})));
     const totalDays = allEntries.filter(e=>e.attendance==="present").length;
     const totalPaid = allEntries.reduce((a,e)=>a+(+(e.paymentGiven||0)),0);
     const totalPending = allEntries.reduce((a,e)=>a+(+(e.pending||0)),0);
@@ -3930,6 +3940,7 @@ function Suppliers({ user }) {
 // ─── PURCHASES ────────────────────────────────────────────────────────────────
 function Purchases({ user }) {
   const [purchases, setPurchases] = useState([]);
+  const [rawMaterials, setRawMaterials] = useState([]);
   const [supplierMaster, setSupplierMaster] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -3946,9 +3957,10 @@ function Purchases({ user }) {
   const [form, setForm] = useState(emptyForm);
 
   useEffect(()=>{
-    Promise.all([api("GET","/purchases"), api("GET","/suppliers")]).then(([p,s])=>{
+    Promise.all([api("GET","/purchases"), api("GET","/suppliers"), api("GET","/raw"), api("GET","/masterdata/materials")]).then(([p,s,r,m])=>{
       setPurchases(Array.isArray(p)?p:[]);
       setSupplierMaster(Array.isArray(s)?s:[]);
+      setRawMaterials([...(Array.isArray(m)?m:[]),...(Array.isArray(r)?r:[])]);
       setLoading(false);
     });
   },[]);
@@ -4209,8 +4221,8 @@ function Purchases({ user }) {
             )}
           </SectionBox>
           <SectionBox title="Item" icon="📦" color="amber">
-            <Input label="Item / Material Name *" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />
             <Select label="Type" value={form.itemType} options={["Material","Equipment","Spare Part","Fuel","Other"]} onChange={e => setForm({ ...form, itemType: e.target.value })} />
+            {form.itemType==="Material"?<div><label className="block text-xs font-semibold text-gray-600 mb-1">Raw Material *</label><input list="purchase-raw-materials" value={form.itemName} onChange={e=>{const material=rawMaterials.find(item=>item.name===e.target.value);setForm({...form,itemName:e.target.value,...(material?.unit?{unit:material.unit}:{})});}} placeholder="Select or type material" className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm"/><datalist id="purchase-raw-materials">{[...new Set(rawMaterials.map(item=>item.name).filter(Boolean))].map(name=><option key={name} value={name}/>)}</datalist></div>:<Input label="Item / Material Name *" value={form.itemName} onChange={e => setForm({ ...form, itemName: e.target.value })} />}
             <div className="grid grid-cols-2 gap-2">
               <Input label="Qty" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value, totalAmount: String(+e.target.value * (+(form.unitPrice) || 0)) })} />
               <Select label="Unit" value={form.unit} options={["nos","kg","ton","litre","bag","m","sqft","sqm","load"]} onChange={e => setForm({ ...form, unit: e.target.value })} />
@@ -6212,7 +6224,7 @@ function AdminSiteReport({ user, onEditReport }) {
     const dailySiteReceived = supervisorSitePayments.reduce((a,p)=>a+(+(p.amount)||0),0);
     const siteWorkPayments = directSitePaymentRows(selectedSite, dailySiteReceived);
     const paymentHistory = [...siteWorkPayments, ...supervisorSitePayments].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-    const allWorkerDetails = siteReportDocs.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date,siteName:r.siteName})));
+    const allWorkerDetails = siteReportDocs.flatMap(r=>(r.workerEntries||[]).map(w=>({...w,date:r.date,siteName:w.siteName||r.siteName})));
     // Also get worker entry payments (salary paid via worker section)
     const allWorkerEntryPayments = siteReportDocs.flatMap(r=>(r.workerEntries||[]).filter(w=>+(w.paymentGiven||0)>0).map(w=>({type:"Worker Payment",workerName:w.workerName,paidTo:w.workerName,amount:+(w.paymentGiven||0),mode:"Cash",date:r.date,remarks:w.remarks||"",fromWorkerEntry:true})));
     const allWorkerPayments = allWorkerEntryPayments;
