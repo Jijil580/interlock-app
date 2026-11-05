@@ -2151,6 +2151,10 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   const [entrySection, setEntrySection] = useState("site");
   const [reportSection, setReportSection] = useState("site");
   const [reportFilters, setReportFilters] = useState({date:"",siteName:"",workerName:"",type:""});
+  const [reportLoadError, setReportLoadError] = useState("");
+  const [editingWorkerIndex, setEditingWorkerIndex] = useState(null);
+  const [savingReport, setSavingReport] = useState(false);
+  const [viewSection, setViewSection] = useState("");
 
   const emptyForm = {
     siteName:"", siteId:"", date:today(), siteStatus:"running",
@@ -2162,11 +2166,12 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     payments:[], // [{type, siteName, date, mode, amount, pending, remarks, materialName, supplierName, equipmentName, receivedFrom}]
   };
   const [form, setForm] = useState(emptyForm);
-  const [workerEntry, setWorkerEntry] = useState({
+  const emptyWorkerEntry = {
     workerName:"", attendance:"present", dutyArea:"", workDone:"",
     workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
     paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
-  });
+  };
+  const [workerEntry, setWorkerEntry] = useState(emptyWorkerEntry);
   const emptyPayForm = {type:"Site Payment Received",workerName:"",siteName:"",date:today(),mode:"Cash",amount:"",pending:"",remarks:"",materialName:"",supplierName:"",equipmentName:"",receivedFrom:"",expenseName:""};
   const [payForm, setPayForm] = useState(emptyPayForm);
 
@@ -2175,6 +2180,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
       setSiteWorks(Array.isArray(sw)?sw:[]);
       setWorkers(Array.isArray(w)?w:[]);
       setReports(Array.isArray(dr)?dr:[]);
+      setReportLoadError(Array.isArray(dr)?"":"Reports could not be loaded. Please retry.");
       setLoading(false);
     });
   },[]);
@@ -2258,11 +2264,25 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
       .sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
   };
 
+  const currentWorkerRow = () => {
+    const area = parseFloat(workerEntry.workArea) || 0;
+    const rate = parseFloat(workerEntry.rate) || 0;
+    const loadingCharge = parseFloat(workerEntry.loadingCharge) || 0;
+    const unloadingCharge = parseFloat(workerEntry.unloadingCharge) || 0;
+    const total = area * rate + loadingCharge + unloadingCharge;
+    const paid = parseFloat(workerEntry.paymentGiven) || 0;
+    return {...workerEntry,siteId:workerEntry.siteId||form.siteId,siteName:workerEntry.siteName||form.siteName,workArea:area,rate,loadingCharge,unloadingCharge,salary:total,amountEarned:total,paymentGiven:paid,pending:Math.max(0,total-paid)};
+  };
+  const editWorkerRow = (index) => {
+    const row = form.workerEntries[index];
+    setWorkerEntry({...row,siteId:row.siteId||form.siteId,siteName:row.siteName||form.siteName});
+    setEditingWorkerIndex(index);
+  };
   const addWorkerEntry = () => {
     if (!workerEntry.workerName) return;
     if (!workerEntry.siteId && !form.siteId) return window.alert("Please select the worker's site.");
     const normalize = (v) => String(v || "").trim().toLowerCase();
-    const duplicateInFormIndex = (form.workerEntries || []).findIndex(w =>
+    const duplicateInFormIndex = (form.workerEntries || []).findIndex((w,index) => index !== editingWorkerIndex &&
       normalize(w.workerName) === normalize(workerEntry.workerName) &&
       normalize(w.workCategory) === normalize(workerEntry.workCategory) &&
       normalize(w.siteId||form.siteId) === normalize(workerEntry.siteId||form.siteId)
@@ -2270,48 +2290,13 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     if (duplicateInFormIndex >= 0) {
       const editExisting = window.confirm("Worker work entry already exists for this date and site.\nDo you want to edit the existing entry?");
       if (editExisting) {
-        const existing = form.workerEntries[duplicateInFormIndex];
-        setWorkerEntry({
-          ...existing,
-          workArea: String(existing.workArea || ""),
-          rate: String(existing.rate || ""),
-          loadingCharge: String(existing.loadingCharge || ""),
-          unloadingCharge: String(existing.unloadingCharge || ""),
-          salary: String(existing.salary || existing.amountEarned || ""),
-          paymentGiven: String(existing.paymentGiven || ""),
-          pending: String(existing.pending || "")
-        });
-        setForm(f => ({ ...f, workerEntries: f.workerEntries.filter((_, i) => i !== duplicateInFormIndex) }));
+        editWorkerRow(duplicateInFormIndex);
       }
       return;
     }
-    const area = parseFloat(workerEntry.workArea) || 0;
-    const rate = parseFloat(workerEntry.rate) || 0;
-    const loadingCharge = parseFloat(workerEntry.loadingCharge) || 0;
-    const unloadingCharge = parseFloat(workerEntry.unloadingCharge) || 0;
-    const totalAmount = (area * rate) + loadingCharge + unloadingCharge;
-    const paid = parseFloat(workerEntry.paymentGiven) || 0;
-    const pending = Math.max(0, totalAmount - paid);
-
-    setForm(f=>({
-      ...f,
-      workerEntries:[
-        ...(f.workerEntries||[]),
-        {
-          ...workerEntry,
-          siteId: workerEntry.siteId || form.siteId,
-          siteName: workerEntry.siteName || form.siteName,
-          salary: totalAmount,
-          amountEarned: totalAmount,
-          paymentGiven: paid,
-          pending,
-          workArea: area,
-          rate,
-          loadingCharge,
-          unloadingCharge
-        }
-      ]
-    }));
+    const entry = currentWorkerRow();
+    setForm(f=>({...f,workerEntries:editingWorkerIndex===null?[...(f.workerEntries||[]),entry]:f.workerEntries.map((row,index)=>index===editingWorkerIndex?entry:row)}));
+    setEditingWorkerIndex(null);
 
     setWorkerEntry({
       workerName:"", attendance:"present", dutyArea:"", workDone:"",
@@ -2365,17 +2350,26 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
   };
 
   const save = async () => {
+    if (savingReport) return;
     if (!form.date) return;
     if (entrySection === "site" && !form.siteName) {
       window.alert("Please select or type site name.");
       return;
     }
-    if (entrySection === "workers" && !form.workerEntries.length) {
+    let source = form;
+    if (entrySection === "workers" && workerEntry.workerName) {
+      if (!workerEntry.siteId && !form.siteId) return window.alert("Please select the worker's site.");
+      const entry = currentWorkerRow();
+      const duplicate = form.workerEntries.some((row,index)=>index!==editingWorkerIndex&&sameText(row.workerName,entry.workerName)&&sameText(row.workCategory,entry.workCategory)&&sameText(row.siteId||form.siteId,entry.siteId));
+      if (duplicate) return window.alert("This worker/category already exists for this site. Use Edit Entry to correct that row.");
+      source = {...form,workerEntries:editingWorkerIndex===null?[...form.workerEntries,entry]:form.workerEntries.map((row,index)=>index===editingWorkerIndex?entry:row)};
+    }
+    if (entrySection === "workers" && !source.workerEntries.length) {
       window.alert("Add a worker entry before submitting the report.");
       return;
     }
 
-    const reportPayload = sectionReportPayload(form, entrySection);
+    const reportPayload = sectionReportPayload(source, entrySection);
     const cleanPayments = (reportPayload.payments||[]).filter(p=>p.type!=="Worker Payment");
     const workerPaidTotal = (reportPayload.workerEntries||[]).reduce((a,w)=>a+(+(w.paymentGiven)||0),0);
     const totalPayments = cleanPayments.filter(p=>!isSiteReceipt(p)&&!isOfficeCashReceived(p)).reduce((a,p)=>a+(+(p.amount)||0),0) + workerPaidTotal;
@@ -2390,20 +2384,27 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     if (reportPayload._id) {
       const audit = requestAuditReason("edit", "daily report", user);
       if (!audit) return;
+      setSavingReport(true);
       item = await api("PUT", `/dailyreport/${reportPayload._id}`, {...savePayload,addedBy:reportPayload.addedBy || user.name,...audit});
     } else {
+      setSavingReport(true);
       item = await api("POST","/dailyreport",{...savePayload,addedBy:user.name});
     }
+    setSavingReport(false);
     if(item._id){
       setReports(p=>reportPayload._id ? p.map(r=>r._id===item._id?item:r) : [item,...p]);
       if (form.siteId) api("GET","/sitework").then(sw=>setSiteWorks(Array.isArray(sw)?sw:[]));
       setSelectedDate(item.date || form.date || null);
+      setReportSection(entrySection);
+      setReportFilters({date:"",siteName:"",workerName:"",type:""});
+      setEditingWorkerIndex(null);
       setAddModal(false); setForm(emptyForm); setPayForm(emptyPayForm); setSiteSearch("");
     }
     else if (item.message) window.alert(item.message);
   };;
 
   const openAdd = (site = null, section = "site") => {
+    setEditingWorkerIndex(null);
     setForm(site ? {...emptyForm,siteName:site.customerName,siteId:site._id,interlockType:site.interlockType||"",siteStatus:site.status||"running"} : emptyForm);
     setSiteSearch(site?.customerName || "");
     setWorkerEntry({
@@ -2456,11 +2457,12 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     workerEntries: (report.workerEntries || []).map(row=>({...row}))
   });
 
-  const openDailyReportView = (report) => {
+  const openDailyReportView = (report, section = "") => {
     if (!report?._id) return;
     markReportsRead(report._id);
     setSelectedSite(null);
     setAddModal(false);
+    setViewSection(section);
     setViewModal(normalizeDailyReport(report));
   };
 
@@ -2470,21 +2472,21 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     setSelectedSite(null);
     setViewModal(null);
     setForm(normalizeDailyReport(report));
+    setEditingWorkerIndex(null);
     setSiteSearch(report.siteName || "");
     const editSection = forcedSection || report.entrySection || reportSectionsOf(report)[0] || "site";
     setPayForm(paymentFormForSection(editSection));
-    setWorkerEntry({
-      workerName:"", attendance:"present", dutyArea:"", workDone:"",
-      workCategory:"", workArea:"", unit:"Sqft", rate:"", loadingCharge:"", unloadingCharge:"", salary:"",
-      paymentGiven:"", pending:"", remarks:"", paymentMode:"Cash"
-    });
+    const firstWorker = editSection==="workers" ? report.workerEntries?.[0] : null;
+    setWorkerEntry(firstWorker?{...emptyWorkerEntry,...firstWorker,siteId:firstWorker.siteId||report.siteId||"",siteName:firstWorker.siteName||report.siteName||""}:emptyWorkerEntry);
+    setEditingWorkerIndex(firstWorker?0:null);
     setEntrySection(editSection);
     setAddModal(true);
   };
 
   useEffect(()=>{
     if (!initialEditReport?._id) return;
-    editDailyReport(initialEditReport, initialEditReport.entrySection || initialEditReport.entrySections?.[0] || "");
+    if (initialEditReport.openMode === "view") openDailyReportView(initialEditReport,initialEditReport.requestedSection||"");
+    else editDailyReport(initialEditReport, initialEditReport.requestedSection || initialEditReport.entrySection || initialEditReport.entrySections?.[0] || "");
     onInitialEditOpened?.();
   },[initialEditReport?._id]);
 
@@ -2502,7 +2504,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
 
   const reportActions = (report, section = "") => (
     <div className="grid grid-cols-3 gap-1 w-full sm:w-auto shrink-0">
-      <button type="button" onClick={()=>openDailyReportView(report)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap inline-flex items-center justify-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>View Report</button>
+      <button type="button" onClick={()=>openDailyReportView(report,section)} className="bg-white text-gray-700 px-2 py-2 rounded-lg font-bold border border-gray-200 whitespace-nowrap inline-flex items-center justify-center gap-1"><UnreadReportIcon unread={isUnread(report._id)}/>View Report</button>
       <button type="button" onClick={()=>editDailyReport(report,section)} className="bg-blue-100 text-blue-800 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Edit Report</button>
       <button type="button" onClick={()=>deleteDailyReport(report)} className="bg-red-100 text-red-700 px-2 py-2 rounded-lg font-bold whitespace-nowrap">Delete Report</button>
     </div>
@@ -2711,6 +2713,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
             </button>
           ))}
         </div>
+        {reportLoadError&&<div role="alert" className="text-sm text-red-700">{reportLoadError}<button type="button" className="ml-3 underline" onClick={async()=>{const rows=await api("GET","/dailyreport");if(Array.isArray(rows)){setReports(rows);setReportLoadError("");}}}>Retry</button></div>}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <Input label="Date" type="date" value={reportFilters.date} onChange={e=>setReportFilters(f=>({...f,date:e.target.value}))} />
           <Select label="Site Name" value={reportFilters.siteName} options={reportSiteOptions} onChange={e=>setReportFilters(f=>({...f,siteName:e.target.value}))} />
@@ -2863,8 +2866,9 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
                 <Select label="Site *" value={workerEntry.siteId||form.siteId||""} options={[{value:"",label:"Select site"},...mySites.map(site=>({value:site._id,label:site.customerName}))]} onChange={e=>{const site=mySites.find(item=>item._id===e.target.value);setWorkerEntry({...workerEntry,siteId:e.target.value,siteName:site?.customerName||"",workerName:""});}} />
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Worker Name</label>
-                  <select value={workerEntry.workerName} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
+                  <select value={workerEntry.workerName||""} onChange={e=>setWorkerEntry({...workerEntry,workerName:e.target.value})} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-gray-50">
                     <option value="">Select worker</option>
+                    {workerEntry.workerName&&!workersForCurrentEntry().some(w=>w.name===workerEntry.workerName)&&<option value={workerEntry.workerName}>{workerEntry.workerName}</option>}
                     {workersForCurrentEntry().map(w=><option key={w._id} value={w.name}>{w.name}</option>)}
                   </select>
                   {form.siteId&&workersForCurrentEntry().length===0&&<div className="text-xs text-red-500 mt-1">No site workers assigned to this site.</div>}
@@ -2927,7 +2931,7 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
                 )}
 
                 <Input label="Remarks" value={workerEntry.remarks} onChange={e=>setWorkerEntry({...workerEntry,remarks:e.target.value})} placeholder="Optional remarks..." />
-                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-teal-600">+ Add Worker Entry</button>
+                <button onClick={addWorkerEntry} className="w-full bg-teal-500 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-teal-600">{editingWorkerIndex===null?"+ Add Worker Entry":"Update Worker Entry"}</button>
               </div>
               {(form.workerEntries||[]).map((w,i)=>(
                 <div key={i} className="bg-white rounded-xl p-3 border border-teal-200 text-xs mt-2 space-y-1">
@@ -2935,7 +2939,8 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
                     <span className="font-black text-sm text-gray-800">{w.workerName}</span>
                     <div className="flex items-center gap-1">
                       <Badge color={w.attendance==="present"?"green":"red"}>{w.attendance}</Badge>
-                      <button onClick={()=>setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}))} className="text-red-500 font-bold text-base hover:text-red-700 ml-2">×</button>
+                      <button type="button" onClick={()=>editWorkerRow(i)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-bold">Edit Entry</button>
+                      <button aria-label="Remove worker entry" onClick={()=>{setForm(f=>({...f,workerEntries:f.workerEntries.filter((_,j)=>j!==i)}));setEditingWorkerIndex(null);setWorkerEntry(emptyWorkerEntry);}} className="text-red-500 font-bold text-base hover:text-red-700 ml-2">×</button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-gray-600">
@@ -3034,14 +3039,14 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
               {(form.payments||[]).filter(isOfficeCash).map((p,i)=><div key={i} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-blue-200 text-xs mt-1"><div><span className="font-bold">{p.type}</span><div className="text-gray-400">{p.receivedFrom||"Office"} - {p.mode}</div></div><div className="flex items-center gap-2"><span className={`font-black ${isOfficeCashReceived(p)?"text-green-700":"text-red-600"}`}>{CURRENCY}{fmt(p.amount)}</span><button onClick={()=>setForm(f=>({...f,payments:f.payments.filter(item=>item!==p)}))} className="text-red-400 font-black">x</button></div></div>)}
             </SectionBox>}
 
-            <button onClick={save} className="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{form._id?"Resubmit Daily Report":`Submit ${entrySection==="site"?"Site":entrySection==="workers"?"Workers":entrySection==="expenses"?"Expenses":"Office"} Entry`}</button>
+            <button disabled={savingReport} onClick={save} className="w-full bg-amber-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold hover:bg-amber-600">{savingReport?"Saving...":form._id?"Resubmit Daily Report":`Submit ${entrySection==="site"?"Site":entrySection==="workers"?"Workers":entrySection==="expenses"?"Expenses":"Office"} Entry`}</button>
           </div>
         </Modal>
       )}
       {viewModal&&(
         <Modal title={`${viewModal.siteName} — ${viewModal.date}`} onClose={()=>setViewModal(null)}>
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><div className="flex gap-2"><button onClick={()=>editDailyReport(viewModal)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button><button onClick={()=>deleteDailyReport(viewModal)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-red-100">Delete</button></div></div>
+            <div className="flex items-center justify-between gap-2"><div className="text-xs text-gray-400">By: {viewModal.addedBy}</div><div className="flex gap-2"><button onClick={()=>editDailyReport(viewModal,viewSection)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-blue-100">Edit & Resubmit</button><button onClick={()=>deleteDailyReport(viewModal)} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-red-100">Delete</button></div></div>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div className="bg-teal-50 rounded-xl p-2 text-center"><div className="font-black text-teal-700">{viewModal.completedToday||0} sqft</div><div className="text-gray-400">Done</div></div>
               <div className="bg-blue-50 rounded-xl p-2 text-center"><div className="font-black text-blue-700">{CURRENCY}{fmt(viewModal.totalReceived||0)}</div><div className="text-gray-400">Received</div></div>
@@ -6476,7 +6481,7 @@ function AdminSiteReport({ user, onEditReport }) {
 }
 
 // ─── WORKER REPORTS (Production / Site / Overall) ───────────────────────────
-function AdminWorkerReport({ user, initialTab }) {
+function AdminWorkerReport({ user, initialTab, onOpenReport }) {
   const [workers, setWorkers] = useState([]);
   const [siteWorks, setSiteWorks] = useState([]);
   const [dailyReports, setDailyReports] = useState([]);
@@ -6836,6 +6841,10 @@ function AdminWorkerReport({ user, initialTab }) {
                 <button key={sub.id} onClick={() => { setSiteSubTab(sub.id); setSelectedSite(null); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${siteSubTab === sub.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}>{sub.label}</button>
               ))}
             </div>
+            {onOpenReport&&<section className="space-y-2 border-t border-gray-200 py-3">
+              <h4 className="text-sm font-bold">Submitted Worker Reports</h4>
+              {dailyReports.filter(doc=>(!isSupervisorLedger||String(doc.addedBy||"").trim().toLowerCase()===String(user.name||"").trim().toLowerCase()||permittedSiteWorks.some(site=>doc.siteId===site._id||doc.siteName===site.customerName||(doc.workerEntries||[]).some(row=>row.siteId===site._id)))&&(doc.workerEntries||[]).some(row=>row.workerName===selectedWorker)).map(doc=><div key={doc._id} className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-xs"><span><b>{doc.date}</b> · {[...new Set((doc.workerEntries||[]).filter(row=>row.workerName===selectedWorker).map(row=>row.siteName||doc.siteName).filter(Boolean))].join(", ")||"No site"}</span><div className="flex gap-2"><button type="button" className="border rounded-lg px-3 py-2 font-bold" onClick={()=>onOpenReport({...doc,requestedSection:"workers",openMode:"view"})}>Open Report</button><button type="button" className="rounded-lg bg-blue-50 px-3 py-2 font-bold text-blue-700" onClick={()=>onOpenReport({...doc,requestedSection:"workers",openMode:"edit"})}>Edit & Resubmit</button></div></div>)}
+            </section>}
 
             {isAdminLike(user.role) && +(report.worker.totalPending || 0) > 0 && (
               <button
@@ -10114,7 +10123,7 @@ export default function App() {
     />;
   }
 
-  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers"];
+  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers", "purchases"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
   const officeNestedPages = ["sitework", "completedworks", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
@@ -10178,7 +10187,7 @@ export default function App() {
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "sitereport": return <AdminSiteReport user={currentUser} onEditReport={report=>{setPendingDailyReportEdit(report);navigateTo("dailyreport");}} />;
-      case "workerreport2": return <AdminWorkerReport user={currentUser} />;
+      case "workerreport2": return <AdminWorkerReport user={currentUser} onOpenReport={report=>{setPendingDailyReportEdit(report);navigateTo("dailyreport");}} />;
       case "stock": return <Stock stock={stock} setStock={setStock} user={currentUser} />;
       case "raw": return <RawMaterial raw={raw} setRaw={setRaw} user={currentUser} />;
       case "production": return <Production production={production} setProduction={setProduction} stock={stock} user={currentUser} />;
