@@ -2269,7 +2269,11 @@ function DailyReport({ user, initialEditReport, onInitialEditOpened }) {
     const rate = parseFloat(workerEntry.rate) || 0;
     const loadingCharge = parseFloat(workerEntry.loadingCharge) || 0;
     const unloadingCharge = parseFloat(workerEntry.unloadingCharge) || 0;
-    const total = area * rate + loadingCharge + unloadingCharge;
+    const calculated = area * rate + loadingCharge + unloadingCharge;
+    const original = editingWorkerIndex===null ? null : form.workerEntries[editingWorkerIndex];
+    const calculationChanged = original && ["workArea","rate","loadingCharge","unloadingCharge"].some(key=>(parseFloat(workerEntry[key])||0)!==(parseFloat(original[key])||0));
+    // Older entries can store earnings without an area/rate breakdown.
+    const total = original&&!calculationChanged ? +(original.amountEarned??original.salary??calculated)||0 : calculated;
     const paid = parseFloat(workerEntry.paymentGiven) || 0;
     return {...workerEntry,siteId:workerEntry.siteId||form.siteId,siteName:workerEntry.siteName||form.siteName,workArea:area,rate,loadingCharge,unloadingCharge,salary:total,amountEarned:total,paymentGiven:paid,pending:Math.max(0,total-paid)};
   };
