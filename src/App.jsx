@@ -4,7 +4,7 @@ import {
   HardHat, Landmark, Menu, Package, ReceiptIndianRupee, Settings, ShieldCheck,
   ShoppingCart, Smartphone, Store, Truck, UserRoundPlus, UsersRound,
   WalletCards, LogOut, Printer, Pencil, Trash2, BookOpen,
-  ArrowLeftRight
+  ArrowLeftRight, RefreshCw, FilterX
 } from "lucide-react";
 
 const API = "https://interlock-backend.onrender.com/api";
@@ -51,7 +51,7 @@ const NAV_ICON_MAP = {
   cashflowhub: Landmark, admincontrol: ShieldCheck, officehub: Building2,
   dashboard: BarChart3, reports: FileText, sitework: Building2,
   dailyreport: ClipboardList, mysitereports: FileSearch, sitereport: Building2,
-  workerreport: ClipboardList, workerreport2: HardHat, workplan: CalendarCheck,
+  workerreport: ClipboardList, workerreport2: HardHat, workplan: CalendarCheck, plans: CalendarCheck,
   quotations: FileText, driversubmit: Truck, driverreports: Truck,
 };
 const findMasterItem = (row, masters = []) => masters.find(m => (
@@ -4928,6 +4928,56 @@ function AttendanceReports({ user }) {
   </div>;
 }
 
+function SubmittedPlans({ user }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [filters, setFilters] = useState({type:"all",supervisor:"",from:"",to:"",search:""});
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    const [sites,current,archive] = await Promise.all([
+      api("GET","/sitework"),api("GET","/workplan"),
+      api("GET",`/workplan?archive=true&role=${encodeURIComponent(user.role)}`),
+    ]);
+    if (![sites,current,archive].every(Array.isArray)) {
+      setError("Unable to load all plans. Please retry.");
+      setLoading(false);
+      return;
+    }
+    const plans = [...new Map([...current,...archive].map(plan=>[plan._id,plan])).values()];
+    setRows([
+      ...sites.filter(site=>["pending","planned"].includes(String(site.status||"").toLowerCase())).map(site=>({key:`site-${site._id}`,kind:"site",name:site.customerName||"Unnamed site",date:String(site.startDate||"").slice(0,10),supervisor:site.addedBy||"",status:"Planned",record:site})),
+      ...plans.map(plan=>({key:`plan-${plan._id}`,kind:"work",name:plan.siteName||plan.site||"Unnamed site",date:String(plan.date||plan.fromDate||"").slice(0,10),supervisor:plan.supervisor||plan.addedBy||"",status:plan.status||"Planned",record:plan})),
+    ].sort((a,b)=>b.date.localeCompare(a.date)||String(b.record.createdAt||"").localeCompare(String(a.record.createdAt||""))));
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[user.role]);
+  const norm = value=>String(value||"").trim().toLowerCase();
+  const supervisors = [...new Set(rows.flatMap(row=>[row.supervisor,row.record.addedBy]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const invalidRange = filters.from&&filters.to&&filters.from>filters.to;
+  const filtered = rows.filter(row=>!invalidRange&&(filters.type==="all"||row.kind===filters.type)&&(!filters.supervisor||[row.supervisor,row.record.addedBy].some(name=>norm(name)===norm(filters.supervisor)))&&(!filters.from||row.date>=filters.from)&&(!filters.to||(row.date&&row.date<=filters.to))&&(!filters.search||norm(`${row.name} ${row.record.siteLocation||""} ${row.record.plannedWork||row.record.task||""}`).includes(norm(filters.search))));
+  return <div className="space-y-4">
+    <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-black">Plans</h2><button type="button" onClick={load} disabled={loading} title="Refresh plans" aria-label="Refresh plans" className="h-10 w-10 shrink-0 rounded-lg border bg-white inline-flex items-center justify-center disabled:opacity-50"><RefreshCw size={18}/></button></div>
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Plan type">{[{value:"all",label:"All Plans"},{value:"site",label:"Planned Sites"},{value:"work",label:"Work Plans"}].map(tab=><button key={tab.value} role="tab" aria-selected={filters.type===tab.value} type="button" onClick={()=>setFilters({...filters,type:tab.value})} className={`rounded-lg border px-3 py-2 text-sm font-bold ${filters.type===tab.value?"bg-blue-600 text-white border-blue-600":"bg-white text-gray-600"}`}>{tab.label}</button>)}</div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <Select label="Supervisor" value={filters.supervisor} options={[{value:"",label:"All Supervisors"},...supervisors.map(name=>({value:name,label:name}))]} onChange={e=>setFilters({...filters,supervisor:e.target.value})}/>
+      <Input label="From Date" type="date" value={filters.from} onChange={e=>setFilters({...filters,from:e.target.value})}/>
+      <Input label="To Date" type="date" value={filters.to} onChange={e=>setFilters({...filters,to:e.target.value})}/>
+      <Input label="Site / Work" value={filters.search} onChange={e=>setFilters({...filters,search:e.target.value})} placeholder="Search site or work"/>
+    </div>
+    <div className="flex items-center justify-between gap-2"><div className="text-xs font-bold text-gray-500">{filtered.length} plan(s)</div><button type="button" title="Clear filters" aria-label="Clear filters" onClick={()=>setFilters({type:"all",supervisor:"",from:"",to:"",search:""})} className="h-9 w-9 rounded-lg border bg-white inline-flex items-center justify-center"><FilterX size={17}/></button></div>
+    {invalidRange&&<div role="alert" className="text-sm text-red-600">From Date must be on or before To Date.</div>}
+    {error&&<div role="alert" className="text-sm text-red-600">{error}</div>}
+    {loading?<Loader/>:!error&&<div className="overflow-x-auto border rounded-lg bg-white"><table className="w-full text-xs"><thead><tr className="bg-gray-50 text-left"><th className="p-3 whitespace-nowrap">Plan Date</th><th className="p-3">Site</th><th className="p-3">Type</th><th className="p-3">Supervisor</th><th className="p-3">Status</th><th className="p-3">Submitted By</th><th className="p-3">Details</th></tr></thead><tbody>{filtered.map(row=><tr key={row.key} className="border-t"><td className="p-3 whitespace-nowrap">{row.date||"-"}</td><td className="p-3 font-bold min-w-[140px]">{row.name}</td><td className="p-3">{row.kind==="site"?"Planned Site":"Work Plan"}</td><td className="p-3">{row.supervisor||"-"}</td><td className="p-3">{row.status}{row.record.archived&&<span className="block text-gray-400">Archived</span>}</td><td className="p-3">{row.record.addedBy||"-"}</td><td className="p-3"><button type="button" onClick={()=>setSelected(row)} className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 font-bold text-blue-700"><FileSearch size={15}/>Open</button></td></tr>)}{!filtered.length&&<tr><td colSpan={7} className="p-8 text-center text-gray-500">No matching plans</td></tr>}</tbody></table></div>}
+    {selected&&<Modal title={`${selected.kind==="site"?"Planned Site":"Work Plan"} - ${selected.name}`} onClose={()=>setSelected(null)} wide>
+      <div className="space-y-3"><div className="text-xs text-gray-500">Submitted by {selected.record.addedBy||"-"}{selected.record.createdAt?` · ${new Date(selected.record.createdAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}`:""}</div>
+      {selected.kind==="site"?<SiteWorkDetailsPanel site={selected.record}/>:<dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">{[["Site",selected.name],["Plan Date",selected.date],["From Date",selected.record.fromDate],["To Date",selected.record.toDate],["Supervisor",selected.supervisor],["Status",selected.status],["Planned Work",selected.record.plannedWork||selected.record.task],["Workers",selected.record.workersAllocated||selected.record.workers],["Materials",selected.record.materialsNeeded||selected.record.materials],["Estimated Cost",`${CURRENCY}${fmt(selected.record.estimatedCost)}`],["Payment Plan",selected.record.paymentPlan],["Notes",selected.record.notes||selected.record.note]].map(([label,value])=><div key={label} className="min-w-0"><dt className="text-xs font-bold text-gray-500">{label}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{value||"-"}</dd></div>)}</dl>}</div>
+    </Modal>}
+  </div>;
+}
+
 function WorkPlanning({ siteWorks, user }) {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9184,6 +9234,7 @@ function CashFlowHub({ user, setPage }) {
 
 function AdminControlHub({ setPage, pendingApprovalCount = 0 }) {
   const tiles = [
+    { id:"plans", title:"Plans", sub:"Submitted planned sites and work plans", icon:CalendarCheck, tone:"blue" },
     { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, tone:"amber" },
     { id:"completedworks", title:"Completed Works", sub:"Review site completion requests awaiting Admin approval", icon:CalendarCheck, tone:"teal", badge:pendingApprovalCount },
     { id:"devices", title:"Devices", sub:"Review and manage registered devices", icon:Smartphone, tone:"blue" },
@@ -9655,6 +9706,7 @@ function OfficeHub({ setPage, pendingApprovalCount = 0 }) {
       { id:"masterdata", title:"Master Data", sub:"Manage products, materials, customers and suppliers", icon:Settings, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
     ]},
     { title:"Site Operations", heading:"bg-sky-100 text-sky-800 border-sky-200", items:[
+      { id:"plans", title:"Plans", sub:"Submitted planned sites and work plans", icon:CalendarCheck, accent:"text-blue-700 bg-white/70 border-blue-200", surface:"bg-blue-50/80 border-blue-200 hover:border-blue-300" },
       { id:"sitework", title:"Create New Site Work", sub:"Create sites, assign workers and enter initial details", icon:Building2, accent:"text-sky-700 bg-white/70 border-sky-200", surface:"bg-sky-50/80 border-sky-200 hover:border-sky-300" },
       { id:"completedworks", title:"Completed Works", sub:"Review completed sites and give staged approvals", icon:CalendarCheck, badge:pendingApprovalCount, accent:"text-emerald-700 bg-white/70 border-emerald-200", surface:"bg-emerald-50/80 border-emerald-200 hover:border-emerald-300" },
       { id:"loadingoperations", title:"Loading & Unloading", sub:"Dispatch sold stock and record worker charges", icon:Truck, accent:"text-violet-700 bg-white/70 border-violet-200", surface:"bg-violet-50/80 border-violet-200 hover:border-violet-300" },
@@ -9868,6 +9920,7 @@ const NAV = {
   admin: [
     { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
     { id:"admincontrol", label:"Admin Panel", icon:"🛡️" },
+    { id:"plans", label:"Plans", icon:CalendarCheck },
     { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
     { id:"companypurchase", label:"Company Purchase", icon:"CP" },
@@ -9908,6 +9961,7 @@ const NAV = {
     { id:"quotations", label:"Quotations", icon:"QT" },
   ],
   user: [
+    { id:"plans", label:"Plans", icon:CalendarCheck },
     { id:"cashflowhub", label:"Cash Flow Records", icon:"💵" },
     { id:"officehub", label:"Office", icon:"🏢" },
     { id:"companyexpense", label:"Company Expense", icon:"CE" },
@@ -10127,7 +10181,7 @@ export default function App() {
     />;
   }
 
-  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers", "purchases"];
+  const supervisorHiddenPages = ["companyexpense", "companypurchase", "workerreport", "workers", "suppliers", "purchases", "plans"];
   const nestedNavPages = ["companyexpense", "companypurchase", "supervisorreports", "masterdata", "devices", "users"];
   const reportNestedPages = ["sitereport", "workerreport2", "driverreports", "dailyreport"];
   const officeNestedPages = ["sitework", "completedworks", "cashflowhub", "workers", "attendance", "stock", "sales", "purchases", "suppliers", "raw", "quotations", "productionsite"];
@@ -10188,6 +10242,7 @@ export default function App() {
       case "workerreport": return <WorkerReport user={currentUser} />;
       case "dailyreport": return <DailyReport user={currentUser} initialEditReport={pendingDailyReportEdit} onInitialEditOpened={()=>setPendingDailyReportEdit(null)} />;
       case "workplan": return <WorkPlanning siteWorks={siteWorks} user={currentUser} />;
+      case "plans": return isAdminLike(currentUser.role)?<SubmittedPlans user={currentUser}/>:null;
       case "purchases": return <Purchases user={currentUser} />;
       case "supervisorreports": return <SupervisorReports allUsers={Array.isArray(allUsers)?allUsers:[]} />;
       case "sitereport": return <AdminSiteReport user={currentUser} onEditReport={report=>{setPendingDailyReportEdit(report);navigateTo("dailyreport");}} />;
